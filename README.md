@@ -1,8 +1,15 @@
 # super-badger
-highly opinionated server manager
 
-A Go server that sits in front of one or more `opencode serve` instances and
-gives a simplified API for managing local-LLM agent work: `Station`s.
+A highly opinionated server management tool for local LLM inference — **not
+a harness**. super-badger doesn't run an agent loop itself; it sits in front
+of one or more `opencode serve` instances (which do) and gives a simplified
+API for managing local-LLM agent work: `Station`s.
+
+It also includes a React Native app (bare RN + a Vite-powered
+react-native-web target, one codebase for both) for viewing and interacting
+with those Stations — a chat UI over a Station's session, live status, and
+Android background notifications — not a second harness either, just a
+client for the one above.
 
 A **Station** groups one opencode agent + one provider/model (a specific
 local LLM endpoint, e.g. a GPU-bound `home-nixllm-a`) + at most one live
@@ -23,6 +30,9 @@ have to think about it.
   - `station` — Station lifecycle + single-session enforcement.
   - `metrics` — pluggable optional GPU/perf metrics polling.
   - `api` — super-badger's own HTTP API.
+- `app/` — the React Native client (bare RN, not Expo). `npm run web` serves
+  a Vite dev build of the exact same UI in a browser; `npm run android`
+  builds the native target. See `app/README.md`.
 - `flake.nix` / `module.nix` — Nix dev shell and NixOS module. superbadger is
   built from source by an activation script rather than a `buildGoModule`
   derivation, to avoid hand-maintaining a `vendorHash`.
@@ -67,4 +77,4 @@ Config is via environment variables (all optional):
 - `GET /providers`, `GET /models` — passthrough to opencode's own
   provider/model config, for populating a create-Station form.
 
-No auth yet — planned for when the mobile client work starts.
+No auth yet.

@@ -1,6 +1,7 @@
 package database
 
 import (
+	"strconv"
 	"time"
 
 	"gorm.io/gorm"
@@ -205,4 +206,74 @@ func UpsertDataPointSetting(db *gorm.DB, s *DataPointSetting) error {
 // cleared) a threshold, so RunPoller only notifies once per crossing.
 func UpdateLastNotifiedValue(db *gorm.DB, settingID uint, value *float64) error {
 	return db.Model(&DataPointSetting{}).Where("id = ?", settingID).Update("last_notified_value", value).Error
+}
+
+// StationDataPointHistory is one append-only reading of a data point at a
+// point in time, backing graphs in the app (see server/api/history.go).
+// RecordedAt is a Unix timestamp (seconds) rather than a time.Time column so
+// bucket math in queryDataPointHistory is cheap integer division.
+type StationDataPointHistory struct {
+	ID         uint    `gorm:"primaryKey" json:"id"`
+	StationID  uint    `gorm:"not null" json:"station_id"`
+	Key        string  `gorm:"not null" json:"key"`
+	Value      float64 `gorm:"not null" json:"value"`
+	RecordedAt int64   `gorm:"not null" json:"recorded_at"`
+}
+
+// TableName overrides gorm's default pluralization ("station_data_point_histories")
+// to match the migration's singular table name.
+func (StationDataPointHistory) TableName() string { return "station_data_point_history" }
+
+func InsertDataPointHistory(db *gorm.DB, h *StationDataPointHistory) error {
+	return db.Create(h).Error
+}
+
+// HistoryBucket is one downsampled point: the average value of every reading
+// in [bucketStart, bucketStart+bucketSeconds).
+type HistoryBucket struct {
+	Ts    int64   `json:"ts"`
+	Value float64 `json:"value"`
+}
+
+// OldestDataPointHistory finds the earliest recorded_at for (station, key)
+// at or after sinceUnix (or overall, if sinceUnix is nil) — used to size the
+// bucket width to the data actually present rather than the nominal range
+// (see stealth-operation's handleGetFieldHistory for the same approach).
+func OldestDataPointHistory(db *gorm.DB, stationID uint, key string, sinceUnix *int64) (int64, bool, error) {
+	q := db.Model(&StationDataPointHistory{}).Where("station_id = ? AND key = ?", stationID, key)
+	if sinceUnix != nil {
+		q = q.Where("recorded_at >= ?", *sinceUnix)
+	}
+	var oldest int64
+	err := q.Order("recorded_at asc").Limit(1).Pluck("recorded_at", &oldest).Error
+	if err != nil {
+		return 0, false, err
+	}
+	return oldest, oldest != 0, nil
+}
+
+// QueryDataPointHistoryBuckets averages readings into fixed-width buckets —
+// `recorded_at / bucketSeconds` groups every raw row into its bucket without
+// SQLite needing a time_bucket()-style function. sinceUnix nil means no
+// lower bound ("max" range).
+func QueryDataPointHistoryBuckets(db *gorm.DB, stationID uint, key string, sinceUnix *int64, bucketSeconds int64) ([]HistoryBucket, error) {
+	if bucketSeconds < 1 {
+		bucketSeconds = 1
+	}
+	q := db.Model(&StationDataPointHistory{}).
+		Select("(recorded_at / ?) * ? AS ts, avg(value) AS value", bucketSeconds, bucketSeconds).
+		Where("station_id = ? AND key = ?", stationID, key)
+	if sinceUnix != nil {
+		q = q.Where("recorded_at >= ?", *sinceUnix)
+	}
+	var buckets []HistoryBucket
+	err := q.Group("recorded_at / " + strconv.FormatInt(bucketSeconds, 10)).Order("ts asc").Scan(&buckets).Error
+	return buckets, err
+}
+
+// PruneDataPointHistory deletes history rows older than cutoffUnix, keeping
+// the table from growing unbounded — the SQLite substitute for
+// TimescaleDB's drop_chunks() retention policy (see the migration's comment).
+func PruneDataPointHistory(db *gorm.DB, cutoffUnix int64) error {
+	return db.Where("recorded_at < ?", cutoffUnix).Delete(&StationDataPointHistory{}).Error
 }

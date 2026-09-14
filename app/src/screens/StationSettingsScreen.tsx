@@ -3,6 +3,7 @@ import {ActivityIndicator, Pressable, ScrollView, StyleSheet, Switch, Text, Text
 
 import type {HeaderInfo} from '../App';
 import {getStation, getStationDataPoints, Station, StationDataPoint, updateStationDataPointSettings} from '../api';
+import {DataPointChart} from '../components/DataPointChart';
 import {Theme, useTheme} from '../theme';
 
 // Per-station settings tab for the Super Badger Station Standard API: shows
@@ -24,6 +25,7 @@ export function StationSettingsScreen({
   const [points, setPoints] = useState<StationDataPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     Promise.all([getStation(stationId), getStationDataPoints(stationId)])
@@ -82,14 +84,19 @@ export function StationSettingsScreen({
       ) : (
         points.map(point => (
           <View key={point.key} style={styles.card}>
-            <View style={styles.rowBetween}>
+            <Pressable
+              style={styles.rowBetween}
+              onPress={() => setExpandedKey(k => (k === point.key ? null : point.key))}>
               <View style={styles.rowBetweenText}>
                 <Text style={styles.label}>{point.key}</Text>
                 <Text style={styles.hint}>
                   {point.value} · updated {formatRecency(point.updated_at)}
                 </Text>
               </View>
-            </View>
+              <Text style={styles.expandIcon}>{expandedKey === point.key ? '▾' : '▸'}</Text>
+            </Pressable>
+
+            {expandedKey === point.key && <DataPointChart stationId={stationId} dataKey={point.key} />}
 
             <View style={styles.rowBetween}>
               <Text style={styles.subLabel}>Show on top bar</Text>
@@ -199,6 +206,10 @@ function makeStyles(theme: Theme) {
     subLabel: {
       fontSize: 13,
       color: theme.text,
+    },
+    expandIcon: {
+      fontSize: 14,
+      color: theme.textMuted,
     },
     rowBetween: {
       flexDirection: 'row',

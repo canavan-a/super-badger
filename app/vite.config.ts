@@ -12,7 +12,20 @@ export default defineConfig(({mode}) => ({
   plugins: [react({include: /\.(jsx|js|tsx|ts)$/})],
   resolve: {
     alias: {
-      'react-native': 'react-native-web',
+      // More specific "react-native/..." aliases must precede the generic
+      // "react-native" -> "react-native-web" one below — Vite matches alias
+      // keys in order, and the generic prefix would otherwise win first.
+      //
+      // See codegenNativeComponentWebStub.ts — react-native-svg's Fabric-only
+      // native-component files pull this in even on the web build, but it
+      // has no react-native-web equivalent to alias to.
+      'react-native/Libraries/Utilities/codegenNativeComponent': path.resolve(__dirname, 'src/stubs/codegenNativeComponentWebStub.ts'),
+      // See reactNativeWebShim.ts — react-native-svg imports TurboModuleRegistry
+      // directly from "react-native" (a named export react-native-web doesn't
+      // have), via files that reach it through relative imports Vite's alias
+      // can't intercept on their own, so the shim patches it in at this level
+      // instead of aliasing straight to "react-native-web".
+      'react-native': path.resolve(__dirname, 'src/stubs/reactNativeWebShim.ts'),
       // @notifee/react-native is native-only (background notifications,
       // Android-only, always behind a dynamic import()). Its real package
       // requires a bare RN internal path that doesn't exist under
@@ -23,6 +36,9 @@ export default defineConfig(({mode}) => ({
       // to a stub sidesteps that scan entirely — see the stub's own comment
       // for the exact failure this fixes.
       '@notifee/react-native': path.resolve(__dirname, 'src/stubs/notifeeWebStub.ts'),
+      // See assetsRegistryWebStub.ts — react-native-svg's asset-URI resolver
+      // pulls in this Flow-syntax-only native package even on its web build.
+      '@react-native/assets-registry/registry': path.resolve(__dirname, 'src/stubs/assetsRegistryWebStub.ts'),
     },
     extensions: [
       '.web.tsx',

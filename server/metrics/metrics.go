@@ -113,9 +113,11 @@ func NewManager(db *gorm.DB, notifier Notifier) *Manager {
 	return &Manager{db: db, notifier: notifier, cancels: map[uint]context.CancelFunc{}}
 }
 
-// Start loads the current set of enabled sources and begins polling them.
+// Start loads the current set of enabled sources and begins polling them,
+// plus the shared history-pruning loop (independent of any one source).
 func (m *Manager) Start(ctx context.Context) {
 	m.Reload(ctx)
+	go pruneLoop(ctx, m.db)
 }
 
 // Reload re-reads metric_sources and reconciles running pollers against it —
@@ -222,7 +224,43 @@ func applySnapshot(db *gorm.DB, st database.Station, sourceID uint, snap Snapsho
 			RawJSON:   snap.RawJSON,
 			UpdatedAt: now,
 		})
+		// Append-only, alongside the latest-value upsert above — this is what
+		// backs the app's graphs (see server/api/history.go). Never fails the
+		// poll on an insert error; a dropped sample just leaves a gap.
+		_ = database.InsertDataPointHistory(db, &database.StationDataPointHistory{
+			StationID:  st.ID,
+			Key:        key,
+			Value:      value,
+			RecordedAt: now.Unix(),
+		})
 		checkThreshold(db, st, key, value, notifier)
+	}
+}
+
+// historyRetention bounds station_data_point_history's growth — SQLite has
+// no TimescaleDB-style drop_chunks() retention policy, so a fixed cutoff is
+// applied on a timer instead (see pruneLoop). 90 days keeps a "3 months"
+// graph range fully populated while capping worst-case table size at a
+// modest number of rows even for a data point polled every few seconds.
+const historyRetention = 90 * 24 * time.Hour
+
+// pruneLoop deletes history older than historyRetention once on start and
+// then every 6h — infrequent because the operation is a single indexed range
+// delete, not something that needs to track individual writes.
+func pruneLoop(ctx context.Context, db *gorm.DB) {
+	prune := func() {
+		_ = database.PruneDataPointHistory(db, time.Now().Add(-historyRetention).Unix())
+	}
+	prune()
+	ticker := time.NewTicker(6 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			prune()
+		}
 	}
 }
 

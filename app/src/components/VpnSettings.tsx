@@ -18,6 +18,7 @@ import {
   mullvadSetLocation,
   mullvadStatus,
 } from '../api';
+import {Theme, useTheme} from '../theme';
 
 // Mirrors the couple of states `mullvad status` output actually starts with;
 // anything else (errors, daemon not running, CLI missing) just falls back to
@@ -37,6 +38,9 @@ function summarize(output: string): string {
 }
 
 export function VpnSettings(): React.JSX.Element {
+  const theme = useTheme();
+  const styles = makeStyles(theme);
+
   const [statusText, setStatusText] = useState('');
   const [statusLoading, setStatusLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -117,7 +121,7 @@ export function VpnSettings(): React.JSX.Element {
 
       <View style={styles.statusRow}>
         {statusLoading ? (
-          <ActivityIndicator size="small" />
+          <ActivityIndicator size="small" color={theme.text} />
         ) : (
           <Text style={styles.statusText}>{summarize(statusText)}</Text>
         )}
@@ -209,110 +213,116 @@ export function VpnSettings(): React.JSX.Element {
   );
 }
 
-const styles = StyleSheet.create({
-  section: {
-    marginTop: 8,
-  },
-  title: {
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 12,
-  },
-  statusRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 4,
-  },
-  statusText: {
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  statusDetail: {
-    fontSize: 12,
-    color: '#57606a',
-    marginBottom: 16,
-  },
-  buttonRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 12,
-  },
-  button: {
-    backgroundColor: '#0969da',
-    borderRadius: 8,
-    paddingVertical: 12,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  buttonHalf: {
-    flex: 1,
-    marginTop: 0,
-  },
-  buttonSecondary: {
-    backgroundColor: '#eaeef2',
-  },
-  buttonText: {
-    color: '#fff',
-    fontWeight: '600',
-  },
-  buttonSecondaryText: {
-    color: '#24292f',
-  },
-  linkButton: {
-    paddingVertical: 6,
-  },
-  linkButtonText: {
-    color: '#0969da',
-    fontWeight: '600',
-    fontSize: 13,
-  },
-  field: {
-    marginBottom: 20,
-  },
-  label: {
-    fontSize: 13,
-    fontWeight: '600',
-    marginBottom: 6,
-    color: '#57606a',
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#d0d7de',
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    fontSize: 15,
-  },
-  inputHalf: {
-    flex: 1,
-  },
-  hint: {
-    fontSize: 12,
-    color: '#57606a',
-    marginTop: 4,
-  },
-  switchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  switchLabel: {
-    flex: 1,
-    marginRight: 12,
-  },
-  relaysText: {
-    marginTop: 10,
-    fontSize: 11,
-    fontFamily: 'monospace',
-    color: '#24292f',
-    backgroundColor: '#f6f8fa',
-    borderRadius: 6,
-    padding: 10,
-  },
-  error: {
-    color: '#cf222e',
-    fontSize: 13,
-    marginTop: 4,
-  },
-});
+function makeStyles(theme: Theme) {
+  return StyleSheet.create({
+    section: {
+      marginTop: 8,
+    },
+    title: {
+      fontSize: 16,
+      fontWeight: '700',
+      marginBottom: 12,
+      color: theme.text,
+    },
+    statusRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 4,
+    },
+    statusText: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: theme.text,
+    },
+    statusDetail: {
+      fontSize: 12,
+      color: theme.textMuted,
+      marginBottom: 16,
+    },
+    buttonRow: {
+      flexDirection: 'row',
+      gap: 10,
+      marginBottom: 12,
+    },
+    button: {
+      backgroundColor: theme.primary,
+      borderRadius: 8,
+      paddingVertical: 12,
+      alignItems: 'center',
+      marginTop: 8,
+    },
+    buttonHalf: {
+      flex: 1,
+      marginTop: 0,
+    },
+    buttonSecondary: {
+      backgroundColor: theme.surfaceAlt,
+    },
+    buttonText: {
+      color: theme.primaryText,
+      fontWeight: '600',
+    },
+    buttonSecondaryText: {
+      color: theme.text,
+    },
+    linkButton: {
+      paddingVertical: 6,
+    },
+    linkButtonText: {
+      color: theme.primary,
+      fontWeight: '600',
+      fontSize: 13,
+    },
+    field: {
+      marginBottom: 20,
+    },
+    label: {
+      fontSize: 13,
+      fontWeight: '600',
+      marginBottom: 6,
+      color: theme.textMuted,
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: theme.border,
+      borderRadius: 6,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      fontSize: 15,
+      color: theme.text,
+      backgroundColor: theme.surface,
+    },
+    inputHalf: {
+      flex: 1,
+    },
+    hint: {
+      fontSize: 12,
+      color: theme.textMuted,
+      marginTop: 4,
+    },
+    switchRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    switchLabel: {
+      flex: 1,
+      marginRight: 12,
+    },
+    relaysText: {
+      marginTop: 10,
+      fontSize: 11,
+      fontFamily: 'monospace',
+      color: theme.text,
+      backgroundColor: theme.surface,
+      borderRadius: 6,
+      padding: 10,
+    },
+    error: {
+      color: theme.danger,
+      fontSize: 13,
+      marginTop: 4,
+    },
+  });
+}

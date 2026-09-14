@@ -218,6 +218,23 @@ export function getStationDataPoints(id: number): Promise<StationDataPoint[]> {
   return request<StationDataPoint[]>(`/stations/${id}/datapoints`);
 }
 
+export type HistoryRange = '1h' | '3h' | '12h' | '1d' | '2d' | '1w' | '1m' | '3m' | '1y' | 'max';
+
+export interface HistoryBucket {
+  ts: number; // unix seconds, bucket start
+  value: number;
+}
+
+// Downsampled graph data for one data point — see server/api/history.go.
+// Bucket width is sized server-side to the data actually present, capped at
+// ~400 points regardless of range, so this is safe to render directly
+// without any further client-side thinning.
+export function getStationDataPointHistory(id: number, key: string, range: HistoryRange): Promise<HistoryBucket[]> {
+  return request<HistoryBucket[]>(
+    `/stations/${id}/datapoints/${encodeURIComponent(key)}/history?range=${range}`,
+  );
+}
+
 export function updateStationDataPointSettings(
   id: number,
   key: string,

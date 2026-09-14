@@ -50,6 +50,7 @@ func NewRouter(svc *station.Service, oc *opencode.Client, mv *mullvad.Client, br
 	r.GET("/stations/:id/history", stationHistory(svc))
 	r.GET("/stations/:id/datapoints", listStationDataPoints(db))
 	r.PUT("/stations/:id/datapoints/:key/settings", updateDataPointSettings(db))
+	r.GET("/stations/:id/datapoints/:key/history", stationDataPointHistory(db))
 	r.GET("/notifications/ws", notificationsWS(svc, broker, hub))
 
 	r.GET("/metric-sources", listMetricSources(db))
