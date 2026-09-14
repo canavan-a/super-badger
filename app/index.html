@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>super-badger</title>
+    <style>
+      /* react-native-web's flex:1 (SafeAreaView, our screens, FlatList,
+         absolutely-positioned things like the Drawer and the FAB) only
+         fills real space if the DOM ancestor chain down to #root actually
+         has a height — the browser default is "shrink to content", which
+         collapsed everything to near-zero height and made the drawer's
+         list look empty and the FAB overlap content instead of floating
+         over a full-height page. */
+      html, body, #root {
+        height: 100%;
+        margin: 0;
+      }
+      #root {
+        display: flex;
+        flex-direction: column;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/index.web.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,8 @@
+.data/
+server/tmp/
+*.db
+# opencode writes a per-directory config.json here if config.update is ever
+# called without a ?directory= param while opencode is launched from a repo
+# dir (see server/opencode/client.go's package doc) — not a project file.
+/config.json
+/server/config.json
