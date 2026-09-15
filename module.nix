@@ -13,7 +13,16 @@
 let
   cfg = config.services.superbadger;
   serverBin = "/var/lib/superbadger/bin/superbadger";
+  badgerBin = "/var/lib/superbadger/bin/badger";
   goCache = "/var/cache/superbadger-go";
+
+  # System-wide `badger` command (e.g. `badger token generate`) — a thin
+  # wrapper so an admin doesn't have to know/export SUPERBADGER_DB_PATH by
+  # hand to point it at the same database the running service uses.
+  badgerWrapper = pkgs.writeShellScriptBin "badger" ''
+    export SUPERBADGER_DB_PATH="${cfg.dbPath}"
+    exec ${badgerBin} "$@"
+  '';
 in
 {
   options.services.superbadger = {
@@ -128,9 +137,13 @@ in
         cd ${self}/server
         ${pkgs.go}/bin/go build -o ${serverBin}.new ./cmd/superbadger
         mv -f ${serverBin}.new ${serverBin}
+        ${pkgs.go}/bin/go build -o ${badgerBin}.new ./cmd/badger
+        mv -f ${badgerBin}.new ${badgerBin}
         ${pkgs.systemd}/bin/systemctl try-restart superbadger.service || true
       '';
     };
+
+    environment.systemPackages = [ badgerWrapper ];
 
     systemd.services.opencode-serve = {
       description = "opencode headless server (managed by superbadger)";

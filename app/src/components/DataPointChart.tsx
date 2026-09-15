@@ -2,7 +2,7 @@ import React, {useEffect, useMemo, useState} from 'react';
 import {ActivityIndicator, GestureResponderEvent, LayoutChangeEvent, Pressable, StyleSheet, Text, View} from 'react-native';
 import Svg, {Circle, Line, Path} from 'react-native-svg';
 
-import {getStationDataPointHistory, HistoryBucket, HistoryRange} from '../api';
+import {formatDataPointValue, getStationDataPointHistory, HistoryBucket, HistoryRange} from '../api';
 import {Theme, useTheme} from '../theme';
 
 const RANGES: {label: string; value: HistoryRange}[] = [
@@ -22,7 +22,15 @@ const CHART_HEIGHT = 160;
 // touch drag is used for the scrub readout instead), no library beyond
 // react-native-svg so it renders the same on phone and the Vite web build.
 // Range switching is a row of tap targets sized for a thumb, not a dropdown.
-export function DataPointChart({stationId, dataKey}: {stationId: number; dataKey: string}): React.JSX.Element {
+export function DataPointChart({
+  stationId,
+  dataKey,
+  decimals = 1,
+}: {
+  stationId: number;
+  dataKey: string;
+  decimals?: number;
+}): React.JSX.Element {
   const theme = useTheme();
   const styles = makeStyles(theme);
 
@@ -124,7 +132,9 @@ export function DataPointChart({stationId, dataKey}: {stationId: number; dataKey
             {scrubbed ? formatTs(scrubbed.ts) : `${buckets.length} points`}
           </Text>
           <Text style={styles.footerValue}>
-            {scrubbed ? scrubbed.value.toFixed(2) : `min ${minValue.toFixed(1)} · max ${maxValue.toFixed(1)}`}
+            {scrubbed
+              ? formatDataPointValue(scrubbed.value, decimals)
+              : `min ${formatDataPointValue(minValue, decimals)} · max ${formatDataPointValue(maxValue, decimals)}`}
           </Text>
         </View>
       )}

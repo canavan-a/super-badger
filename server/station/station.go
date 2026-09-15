@@ -307,6 +307,21 @@ func (s *Service) Compact(ctx context.Context, id uint) error {
 	return s.oc.Compact(ctx, st.OpencodeSessionID, st.ProviderID, st.ModelID)
 }
 
+// Abort cancels st's session's in-flight turn (see opencode.Client.AbortSession)
+// — the same thing the CLI's Escape/Ctrl-C does mid-response, exposed here so
+// a long-running or stuck reply can be stopped from the app instead of the
+// only options being waiting it out or Reset (which also wipes history).
+func (s *Service) Abort(ctx context.Context, id uint) error {
+	st, err := database.GetStation(s.db, id)
+	if err != nil {
+		return err
+	}
+	if st.OpencodeSessionID == "" {
+		return errors.New("station has no active session")
+	}
+	return s.oc.AbortSession(ctx, st.OpencodeSessionID)
+}
+
 // TokenUsage reports st's session's current token/cost accounting (see
 // opencode.Client.GetSessionUsage) — the same figures the CLI's status line
 // shows, refreshed by opencode after every completed turn.

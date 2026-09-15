@@ -109,6 +109,13 @@ export function compactStation(id: number): Promise<void> {
   return request<void>(`/stations/${id}/compact`, {method: 'POST'});
 }
 
+// Cancels a station's session's in-flight turn — the same thing the CLI's
+// Escape/Ctrl-C does mid-response, for stopping a long-running or stuck
+// reply without losing history the way Reset does.
+export function abortStation(id: number): Promise<void> {
+  return request<void>(`/stations/${id}/abort`, {method: 'POST'});
+}
+
 export interface TokenUsage {
   input: number;
   output: number;
@@ -206,7 +213,13 @@ export function mullvadSetLan(allow: boolean): Promise<MullvadOutput> {
 // by whatever MetricSource(s) the server is configured to poll.
 export interface StationDataPoint {
   key: string;
+  // Owner-supplied display name (e.g. "GPU Temp" for "gpu_temp_c") — empty
+  // until set, in which case callers should fall back to `key`.
+  label: string;
   value: number;
+  // Decimal places to show when rendering `value` — a display preference
+  // only, doesn't affect the value's stored precision.
+  decimals: number;
   updated_at: string;
   show_on_top_bar: boolean;
   threshold_enabled: boolean;
@@ -216,6 +229,13 @@ export interface StationDataPoint {
 
 export function getStationDataPoints(id: number): Promise<StationDataPoint[]> {
   return request<StationDataPoint[]>(`/stations/${id}/datapoints`);
+}
+
+// Renders a data point value at its owner-configured decimal precision (see
+// StationDataPoint.decimals) — the one place this formatting happens, so the
+// top-bar badges, the settings list, and the history chart all agree.
+export function formatDataPointValue(value: number, decimals: number): string {
+  return value.toFixed(Math.max(0, Math.min(6, decimals)));
 }
 
 export type HistoryRange = '1h' | '3h' | '12h' | '1d' | '2d' | '1w' | '1m' | '3m' | '1y' | 'max';
@@ -239,6 +259,8 @@ export function updateStationDataPointSettings(
   id: number,
   key: string,
   settings: {
+    label: string;
+    decimals: number;
     show_on_top_bar: boolean;
     threshold_enabled: boolean;
     threshold_value: number;

@@ -13,8 +13,12 @@ import {CH_SERVICE, ensureChannels, NID_FGS} from '../notifications/channels';
 import {settingsStore} from '../settings';
 
 function notificationsWsURL(): string {
-  const {serverUrl} = settingsStore.get();
-  return serverUrl.replace(/^http/, 'ws') + '/notifications/ws';
+  const {serverUrl, authToken} = settingsStore.get();
+  const base = serverUrl.replace(/^http/, 'ws') + '/notifications/ws';
+  // See useStationChat's wsURL — a WebSocket handshake can't carry a custom
+  // Authorization header, so the token travels as a query param instead once
+  // the server has auth enabled (server/api/auth.go's RequireAuth).
+  return authToken ? `${base}?token=${encodeURIComponent(authToken)}` : base;
 }
 
 let socket: WebSocket | null = null;

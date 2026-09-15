@@ -79,6 +79,10 @@ type DataPointSetting struct {
 	ID                 uint               `gorm:"primaryKey" json:"id"`
 	StationID          uint               `gorm:"uniqueIndex:idx_data_point_settings_station_key;not null" json:"station_id"`
 	Key                string             `gorm:"uniqueIndex:idx_data_point_settings_station_key;not null" json:"key"`
+	Label              string             `gorm:"not null;default:''" json:"label"`
+	// Decimal places to show when rendering Value — a display preference
+	// only, doesn't affect stored precision.
+	Decimals           int                `gorm:"not null;default:1" json:"decimals"`
 	ShowOnTopBar       bool               `gorm:"not null;default:false" json:"show_on_top_bar"`
 	ThresholdEnabled   bool               `gorm:"not null;default:false" json:"threshold_enabled"`
 	ThresholdValue     float64            `gorm:"not null;default:0" json:"threshold_value"`

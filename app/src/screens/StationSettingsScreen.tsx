@@ -2,7 +2,14 @@ import React, {useCallback, useEffect, useState} from 'react';
 import {ActivityIndicator, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View} from 'react-native';
 
 import type {HeaderInfo} from '../App';
-import {getStation, getStationDataPoints, Station, StationDataPoint, updateStationDataPointSettings} from '../api';
+import {
+  formatDataPointValue,
+  getStation,
+  getStationDataPoints,
+  Station,
+  StationDataPoint,
+  updateStationDataPointSettings,
+} from '../api';
 import {DataPointChart} from '../components/DataPointChart';
 import {Theme, useTheme} from '../theme';
 
@@ -55,6 +62,8 @@ export function StationSettingsScreen({
   const save = async (point: StationDataPoint) => {
     try {
       await updateStationDataPointSettings(stationId, point.key, {
+        label: point.label,
+        decimals: point.decimals,
         show_on_top_bar: point.show_on_top_bar,
         threshold_enabled: point.threshold_enabled,
         threshold_value: point.threshold_value,
@@ -88,15 +97,60 @@ export function StationSettingsScreen({
               style={styles.rowBetween}
               onPress={() => setExpandedKey(k => (k === point.key ? null : point.key))}>
               <View style={styles.rowBetweenText}>
-                <Text style={styles.label}>{point.key}</Text>
+                <Text style={styles.label}>{point.label || point.key}</Text>
+                {point.label ? <Text style={styles.hint}>{point.key}</Text> : null}
                 <Text style={styles.hint}>
-                  {point.value} · updated {formatRecency(point.updated_at)}
+                  {formatDataPointValue(point.value, point.decimals)} · updated {formatRecency(point.updated_at)}
                 </Text>
               </View>
               <Text style={styles.expandIcon}>{expandedKey === point.key ? '▾' : '▸'}</Text>
             </Pressable>
 
-            {expandedKey === point.key && <DataPointChart stationId={stationId} dataKey={point.key} />}
+            {expandedKey === point.key && (
+              <DataPointChart stationId={stationId} dataKey={point.key} decimals={point.decimals} />
+            )}
+
+            <View style={styles.rowBetween}>
+              <Text style={styles.subLabel}>Label</Text>
+              <TextInput
+                style={styles.labelInput}
+                value={point.label}
+                onChangeText={text => patch(point.key, {label: text})}
+                onBlur={() => {
+                  const p = points.find(pp => pp.key === point.key);
+                  if (p) save(p);
+                }}
+                placeholder={point.key}
+                placeholderTextColor={theme.textMuted}
+              />
+            </View>
+
+            <View style={styles.rowBetween}>
+              <Text style={styles.subLabel}>Decimals</Text>
+              <View style={styles.decimalsStepper}>
+                <Pressable
+                  style={[styles.decimalsButton, point.decimals <= 0 && styles.decimalsButtonDisabled]}
+                  onPress={() => {
+                    const next = {...point, decimals: Math.max(0, point.decimals - 1)};
+                    patch(point.key, {decimals: next.decimals});
+                    save(next);
+                  }}
+                  disabled={point.decimals <= 0}>
+                  <Text style={styles.decimalsButtonText}>−</Text>
+                </Pressable>
+                <Text style={styles.decimalsValue}>{point.decimals}</Text>
+                <Pressable
+                  style={[styles.decimalsButton, point.decimals >= 6 && styles.decimalsButtonDisabled]}
+                  onPress={() => {
+                    const next = {...point, decimals: Math.min(6, point.decimals + 1)};
+                    patch(point.key, {decimals: next.decimals});
+                    save(next);
+                  }}
+                  disabled={point.decimals >= 6}>
+                  <Text style={styles.decimalsButtonText}>+</Text>
+                </Pressable>
+              </View>
+            </View>
 
             <View style={styles.rowBetween}>
               <Text style={styles.subLabel}>Show on top bar</Text>
@@ -237,6 +291,47 @@ function makeStyles(theme: Theme) {
       fontSize: 12,
       fontWeight: '600',
       color: theme.text,
+    },
+    labelInput: {
+      flex: 1,
+      maxWidth: 180,
+      borderWidth: 1,
+      borderColor: theme.border,
+      borderRadius: 6,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      fontSize: 13,
+      color: theme.text,
+      backgroundColor: theme.surface,
+      textAlign: 'right',
+    },
+    decimalsStepper: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
+    decimalsButton: {
+      width: 28,
+      height: 28,
+      borderRadius: 6,
+      backgroundColor: theme.surfaceAlt,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    decimalsButtonDisabled: {
+      opacity: 0.4,
+    },
+    decimalsButtonText: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: theme.text,
+    },
+    decimalsValue: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: theme.text,
+      minWidth: 14,
+      textAlign: 'center',
     },
     thresholdInput: {
       flex: 1,

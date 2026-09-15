@@ -13,8 +13,10 @@ import {
 
 import type {HeaderInfo} from '../App';
 import {
+  abortStation,
   compactStation,
   deleteStation,
+  formatDataPointValue,
   getStation,
   getStationDataPoints,
   getStationUsage,
@@ -109,6 +111,23 @@ export function StationDetailScreen({
     }
   };
 
+  // Stops a long-running or stuck in-flight turn — previously there was no
+  // way to do this short of Reset, which also wipes history. Only makes
+  // sense while chat.busy (there's nothing in-flight otherwise); opencode's
+  // own turn-finished event flips chat.busy back off once the abort lands,
+  // same as a normal reply completing.
+  const [aborting, setAborting] = useState(false);
+  const doAbort = async () => {
+    setAborting(true);
+    try {
+      await abortStation(stationId);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setAborting(false);
+    }
+  };
+
   // Sending a prompt blurs the composer (the platform hides the on-screen
   // keyboard / moves focus away while chat.busy disables it) — jump focus
   // back the moment the reply finishes so the user can immediately keep
@@ -168,6 +187,10 @@ export function StationDetailScreen({
     platformConfirm(`Delete station "${station?.name}"?`, doDelete);
   };
 
+  const confirmReset = () => {
+    platformConfirm(`Reset station "${station?.name}"? This clears its chat history.`, doReset);
+  };
+
   // Reports title/subtitle/actions up to App's single top bar instead of
   // rendering a second header block here — one screen, one header.
   useEffect(() => {
@@ -175,7 +198,13 @@ export function StationDetailScreen({
       onHeaderChange(null);
       return;
     }
-    const statusText = station.reachable ? station.status : 'unreachable';
+    const indicator = station.reachable
+      ? station.status === 'active'
+        ? {color: theme.success, label: 'active'}
+        : station.status === 'error'
+        ? {color: theme.danger, label: 'error'}
+        : {color: theme.textMuted, label: 'idle'}
+      : {color: theme.danger, label: 'unreachable'};
     // "ctx" (not "tok"/"total") since this is current context occupancy —
     // drops after a compaction — not a cumulative total-spent figure.
     // Must include cache_read: on a locally-cached model, most of a
@@ -185,21 +214,25 @@ export function StationDetailScreen({
     // "a tiny per-message number" instead of the real total context size
     // (what's actually resident/active for the model right now).
     const activeContext = usage ? usage.input + usage.output + usage.cache_read + usage.cache_write : 0;
-    const usageText = activeContext > 0 ? ` · ${formatTokens(activeContext)} ctx` : '';
-    const pointsText = topBarPoints.length > 0 ? ` · ${topBarPoints.map(p => `${p.key}: ${p.value}`).join(' · ')}` : '';
+    const compactLabel = compacting
+      ? 'Compacting…'
+      : activeContext > 0
+      ? `Compact (${formatTokens(activeContext)} ctx)`
+      : 'Compact';
     onHeaderChange({
       title: station.name,
-      subtitle: `${station.provider_id} / ${station.model_id} · ${statusText}${usageText}${pointsText}`,
+      indicator,
+      badges: topBarPoints.map(p => ({label: p.label || p.key, value: formatDataPointValue(p.value, p.decimals)})),
       actions: [
-        {label: compacting ? 'Compacting…' : 'Compact', onPress: doCompact},
-        {label: 'Reset', onPress: doReset},
+        {label: compactLabel, onPress: doCompact},
+        {label: 'Reset', onPress: confirmReset},
         {label: 'Data', onPress: () => onNavigate({name: 'stationSettings', id: stationId})},
         {label: 'Delete', onPress: confirmDelete, destructive: true},
       ],
     });
     return () => onHeaderChange(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [station, usage, compacting, topBarPoints]);
+  }, [station, usage, compacting, topBarPoints, theme]);
 
   if (loading) {
     return (
@@ -264,6 +297,15 @@ export function StationDetailScreen({
           placeholderTextColor={theme.textMuted}
           onSubmitEditing={send}
         />
+        {chat.busy && (
+          <Pressable style={styles.stopButton} onPress={doAbort} disabled={aborting}>
+            {aborting ? (
+              <ActivityIndicator color={theme.primaryText} />
+            ) : (
+              <Text style={styles.stopButtonText}>Stop</Text>
+            )}
+          </Pressable>
+        )}
         {
           // Sending while busy no longer blocks — it queues (see
           // useStationChat's outbox/pump) instead of racing the in-flight
@@ -1092,6 +1134,16 @@ function makeStyles(theme: Theme) {
       justifyContent: 'center',
     },
     sendButtonText: {
+      color: theme.primaryText,
+      fontWeight: '600',
+    },
+    stopButton: {
+      backgroundColor: theme.danger,
+      borderRadius: 6,
+      paddingHorizontal: 16,
+      justifyContent: 'center',
+    },
+    stopButtonText: {
       color: theme.primaryText,
       fontWeight: '600',
     },

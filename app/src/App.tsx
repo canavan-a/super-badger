@@ -28,7 +28,16 @@ const TITLES: Record<Route['name'], string> = {
 // needs one header.
 export interface HeaderInfo {
   title: string;
+  // Small colored dot rendered right next to the title (e.g. a station's
+  // live active/idle/unreachable state) — a glance-able signal that doesn't
+  // need reading, unlike the old "· active" text buried in the subtitle.
+  indicator?: {color: string; label: string};
   subtitle?: string;
+  // Small labeled pills rendered below the subtitle — one per owner-surfaced
+  // data point (see StationSettingsScreen's "Show on top bar" toggle),
+  // reading "Label: value" instead of being folded into the subtitle string
+  // as plain text.
+  badges?: {label: string; value: string}[];
   actions?: {label: string; onPress: () => void; destructive?: boolean}[];
 }
 
@@ -198,13 +207,31 @@ function AppInner(): React.JSX.Element {
         </Pressable>
 
         <View style={styles.headerTextArea}>
-          <Text style={styles.headerTitle} numberOfLines={1}>
-            {showingDetailHeader ? headerInfo!.title : TITLES[route.name]}
-          </Text>
+          <View style={styles.headerTitleRow}>
+            <Text style={styles.headerTitle} numberOfLines={1}>
+              {showingDetailHeader ? headerInfo!.title : TITLES[route.name]}
+            </Text>
+            {showingDetailHeader && headerInfo!.indicator ? (
+              <View
+                style={[styles.headerIndicatorDot, {backgroundColor: headerInfo!.indicator!.color}]}
+                accessibilityLabel={headerInfo!.indicator!.label}
+              />
+            ) : null}
+          </View>
           {showingDetailHeader && headerInfo!.subtitle ? (
             <Text style={styles.headerSubtitle} numberOfLines={1}>
               {headerInfo!.subtitle}
             </Text>
+          ) : null}
+          {showingDetailHeader && headerInfo!.badges && headerInfo!.badges!.length > 0 ? (
+            <View style={styles.headerBadgeRow}>
+              {headerInfo!.badges!.map(b => (
+                <View key={b.label} style={styles.headerBadge}>
+                  <Text style={styles.headerBadgeLabel}>{b.label}</Text>
+                  <Text style={styles.headerBadgeValue}>{b.value}</Text>
+                </View>
+              ))}
+            </View>
           ) : null}
         </View>
 
@@ -295,15 +322,53 @@ function makeStyles(theme: Theme) {
       flex: 1,
       minWidth: 0,
     },
+    headerTitleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
     headerTitle: {
       fontSize: 16,
       fontWeight: '700',
       color: theme.text,
+      flexShrink: 1,
+    },
+    headerIndicatorDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
     },
     headerSubtitle: {
       fontSize: 11,
       color: theme.textMuted,
       marginTop: 1,
+    },
+    headerBadgeRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      justifyContent: 'flex-start',
+      alignSelf: 'flex-start',
+      gap: 4,
+      marginTop: 4,
+    },
+    headerBadge: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      gap: 3,
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: 8,
+      backgroundColor: theme.surfaceAlt,
+    },
+    headerBadgeLabel: {
+      fontSize: 10,
+      fontWeight: '600',
+      color: theme.textMuted,
+    },
+    headerBadgeValue: {
+      fontSize: 10,
+      fontWeight: '700',
+      color: theme.text,
     },
     headerActions: {
       flexDirection: 'row',

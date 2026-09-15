@@ -20,7 +20,9 @@ import (
 // render the whole per-station settings tab from one list.
 type dataPointOut struct {
 	Key                string                      `json:"key"`
+	Label              string                      `json:"label"`
 	Value              float64                     `json:"value"`
+	Decimals           int                         `json:"decimals"`
 	UpdatedAt          string                      `json:"updated_at"`
 	ShowOnTopBar       bool                        `json:"show_on_top_bar"`
 	ThresholdEnabled   bool                        `json:"threshold_enabled"`
@@ -51,13 +53,18 @@ func listStationDataPoints(db *gorm.DB) gin.HandlerFunc {
 
 		out := make([]dataPointOut, len(points))
 		for i, p := range points {
-			s := byKey[p.Key]
+			s, hasSetting := byKey[p.Key]
 			if s.ThresholdDirection == "" {
 				s.ThresholdDirection = database.ThresholdAbove
 			}
+			if !hasSetting {
+				s.Decimals = 1
+			}
 			out[i] = dataPointOut{
 				Key:                p.Key,
+				Label:              s.Label,
 				Value:              p.Value,
+				Decimals:           s.Decimals,
 				UpdatedAt:          p.UpdatedAt.Format("2006-01-02T15:04:05Z07:00"),
 				ShowOnTopBar:       s.ShowOnTopBar,
 				ThresholdEnabled:   s.ThresholdEnabled,
@@ -82,6 +89,8 @@ func updateDataPointSettings(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		var body struct {
+			Label              string                      `json:"label"`
+			Decimals           int                         `json:"decimals"`
 			ShowOnTopBar       bool                        `json:"show_on_top_bar"`
 			ThresholdEnabled   bool                        `json:"threshold_enabled"`
 			ThresholdValue     float64                     `json:"threshold_value"`
@@ -98,10 +107,16 @@ func updateDataPointSettings(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "threshold_direction must be 'above' or 'below'"})
 			return
 		}
+		if body.Decimals < 0 || body.Decimals > 6 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "decimals must be between 0 and 6"})
+			return
+		}
 
 		err := database.UpsertDataPointSetting(db, &database.DataPointSetting{
 			StationID:          id,
 			Key:                key,
+			Label:              body.Label,
+			Decimals:           body.Decimals,
 			ShowOnTopBar:       body.ShowOnTopBar,
 			ThresholdEnabled:   body.ThresholdEnabled,
 			ThresholdValue:     body.ThresholdValue,

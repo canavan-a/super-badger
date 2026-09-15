@@ -34,14 +34,14 @@ type Snapshot struct {
 // callers (notify.Hub, wired in from main) can push it to clients without
 // this package depending on the API/WS layer.
 type Notifier interface {
-	NotifyThreshold(station database.Station, key string, value float64, direction database.ThresholdDirection)
+	NotifyThreshold(station database.Station, key, label string, decimals int, value float64, direction database.ThresholdDirection)
 }
 
 // NotifierFunc adapts a plain function to Notifier.
-type NotifierFunc func(station database.Station, key string, value float64, direction database.ThresholdDirection)
+type NotifierFunc func(station database.Station, key, label string, decimals int, value float64, direction database.ThresholdDirection)
 
-func (f NotifierFunc) NotifyThreshold(station database.Station, key string, value float64, direction database.ThresholdDirection) {
-	f(station, key, value, direction)
+func (f NotifierFunc) NotifyThreshold(station database.Station, key, label string, decimals int, value float64, direction database.ThresholdDirection) {
+	f(station, key, label, decimals, value, direction)
 }
 
 // HTTPSource polls one Super Badger Station Standard API endpoint.
@@ -290,7 +290,7 @@ func checkThreshold(db *gorm.DB, st database.Station, key string, value float64,
 		v := value
 		_ = database.UpdateLastNotifiedValue(db, setting.ID, &v)
 		if notifier != nil {
-			notifier.NotifyThreshold(st, key, value, setting.ThresholdDirection)
+			notifier.NotifyThreshold(st, key, setting.Label, setting.Decimals, value, setting.ThresholdDirection)
 		}
 	} else {
 		_ = database.UpdateLastNotifiedValue(db, setting.ID, nil)

@@ -5,8 +5,13 @@ import {applyEvent, ChatState, emptyChatState, seedFromHistory} from './chat';
 import {settingsStore} from './settings';
 
 function wsURL(stationId: number): string {
-  const {serverUrl} = settingsStore.get();
-  return serverUrl.replace(/^http/, 'ws') + `/stations/${stationId}/ws`;
+  const {serverUrl, authToken} = settingsStore.get();
+  const base = serverUrl.replace(/^http/, 'ws') + `/stations/${stationId}/ws`;
+  // A WebSocket handshake can't carry a custom Authorization header (unlike
+  // the app's regular fetch calls — see src/api.ts's request()), so once the
+  // server has auth enabled (see server/api/auth.go's RequireAuth) the token
+  // has to travel as a query param instead.
+  return authToken ? `${base}?token=${encodeURIComponent(authToken)}` : base;
 }
 
 export type ConnectionStatus = 'connecting' | 'open' | 'closed';

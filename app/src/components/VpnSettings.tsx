@@ -2,6 +2,7 @@ import React, {useCallback, useEffect, useState} from 'react';
 import {
   ActivityIndicator,
   Pressable,
+  ScrollView,
   StyleSheet,
   Switch,
   Text,
@@ -37,6 +38,50 @@ function summarize(output: string): string {
   return first || 'Unknown';
 }
 
+interface RelayCity {
+  code: string;
+  name: string;
+}
+
+interface RelayCountry {
+  code: string;
+  name: string;
+  cities: RelayCity[];
+}
+
+// Parses `mullvad relay list`'s plaintext tree into country/city options for
+// the dropdowns below — three indent levels (country, city, individual
+// relay hostnames), only the first two of which this needs:
+//   Albania (al)
+//       Tirana (tia) @ 41.32795°N, 19.81902°W
+//           al-tia-wg-001 (...) - hosted by ...
+// A country/city line is "Name (code)", optionally followed by " @ ..."
+// for cities — matched by indentation (country: none, city: exactly one
+// level) rather than by content, since names themselves can contain
+// parentheses-free text freely.
+function parseRelayList(output: string): RelayCountry[] {
+  const countries: RelayCountry[] = [];
+  let current: RelayCountry | null = null;
+  for (const rawLine of output.split('\n')) {
+    if (!rawLine.trim()) continue;
+    const indent = rawLine.length - rawLine.trimStart().length;
+    const line = rawLine.trim();
+    const match = line.match(/^(.+?)\s+\(([a-z0-9-]+)\)(\s+@.*)?$/i);
+    if (!match) continue;
+    const [, name, code, atSuffix] = match;
+    if (indent === 0) {
+      current = {code, name, cities: []};
+      countries.push(current);
+    } else if (indent > 0 && atSuffix && current) {
+      // Only a city line carries " @ lat,lon"; deeper relay-hostname lines
+      // don't match the "Name (code)" shape at all (hostnames have no
+      // spaces before their parenthesized IPs) and so are skipped above.
+      current.cities.push({code, name});
+    }
+  }
+  return countries;
+}
+
 export function VpnSettings(): React.JSX.Element {
   const theme = useTheme();
   const styles = makeStyles(theme);
@@ -50,8 +95,13 @@ export function VpnSettings(): React.JSX.Element {
   const [country, setCountry] = useState('');
   const [city, setCity] = useState('');
   const [lanAllowed, setLanAllowed] = useState(true);
-  const [relaysText, setRelaysText] = useState('');
-  const [showRelays, setShowRelays] = useState(false);
+  const [countries, setCountries] = useState<RelayCountry[]>([]);
+  const [relaysLoading, setRelaysLoading] = useState(true);
+  const [countryOpen, setCountryOpen] = useState(false);
+  const [cityOpen, setCityOpen] = useState(false);
+
+  const selectedCountry = countries.find(c => c.code === country);
+  const selectedCity = selectedCountry?.cities.find(c => c.code === city);
 
   const refreshStatus = useCallback(() => {
     setStatusLoading(true);
@@ -61,9 +111,21 @@ export function VpnSettings(): React.JSX.Element {
       .finally(() => setStatusLoading(false));
   }, []);
 
+  const refreshRelays = useCallback(() => {
+    setRelaysLoading(true);
+    mullvadListRelays()
+      .then(res => setCountries(parseRelayList(res.output)))
+      .catch(err => setError(`Load relays failed: ${err.message}`))
+      .finally(() => setRelaysLoading(false));
+  }, []);
+
   useEffect(() => {
     refreshStatus();
   }, [refreshStatus]);
+
+  useEffect(() => {
+    refreshRelays();
+  }, [refreshRelays]);
 
   const runAction = async (label: string, fn: () => Promise<{output: string}>) => {
     setBusy(true);
@@ -87,13 +149,11 @@ export function VpnSettings(): React.JSX.Element {
   };
 
   const onSetLocation = () => {
-    if (!country.trim()) {
-      setError('Enter a country code first (e.g. us, se)');
+    if (!country) {
+      setError('Pick a country first');
       return;
     }
-    runAction('Set location', () =>
-      mullvadSetLocation({country: country.trim(), city: city.trim() || undefined}),
-    );
+    runAction('Set location', () => mullvadSetLocation({country, city: city || undefined}));
   };
 
   const onToggleLan = (value: boolean) => {
@@ -101,18 +161,15 @@ export function VpnSettings(): React.JSX.Element {
     runAction('LAN setting', () => mullvadSetLan(value));
   };
 
-  const onLoadRelays = async () => {
-    setBusy(true);
-    setError('');
-    try {
-      const res = await mullvadListRelays();
-      setRelaysText(res.output);
-      setShowRelays(true);
-    } catch (err) {
-      setError(`Load relays failed: ${(err as Error).message}`);
-    } finally {
-      setBusy(false);
-    }
+  const selectCountry = (code: string) => {
+    setCountry(code);
+    setCity('');
+    setCountryOpen(false);
+  };
+
+  const selectCity = (code: string) => {
+    setCity(code);
+    setCityOpen(false);
   };
 
   return (
@@ -165,36 +222,71 @@ export function VpnSettings(): React.JSX.Element {
       <View style={styles.field}>
         <Text style={styles.label}>Relay location</Text>
         <View style={styles.buttonRow}>
-          <TextInput
-            style={[styles.input, styles.inputHalf]}
-            value={country}
-            onChangeText={setCountry}
-            placeholder="Country (e.g. us)"
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          <TextInput
-            style={[styles.input, styles.inputHalf]}
-            value={city}
-            onChangeText={setCity}
-            placeholder="City (optional, e.g. nyc)"
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
+          <View style={styles.dropdownHalf}>
+            <Pressable
+              style={styles.dropdownButton}
+              onPress={() => {
+                setCountryOpen(o => !o);
+                setCityOpen(false);
+              }}
+              disabled={relaysLoading || countries.length === 0}>
+              <Text style={styles.dropdownButtonText} numberOfLines={1}>
+                {relaysLoading
+                  ? 'Loading…'
+                  : selectedCountry
+                  ? `${selectedCountry.name} (${selectedCountry.code})`
+                  : 'Country'}
+              </Text>
+              <Text style={styles.dropdownCaret}>{countryOpen ? '▴' : '▾'}</Text>
+            </Pressable>
+            {countryOpen && (
+              <ScrollView style={styles.dropdownList} nestedScrollEnabled>
+                {countries.map(c => (
+                  <Pressable key={c.code} style={styles.dropdownOption} onPress={() => selectCountry(c.code)}>
+                    <Text style={styles.dropdownOptionText}>
+                      {c.name} ({c.code})
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            )}
+          </View>
+
+          <View style={styles.dropdownHalf}>
+            <Pressable
+              style={styles.dropdownButton}
+              onPress={() => {
+                setCityOpen(o => !o);
+                setCountryOpen(false);
+              }}
+              disabled={!selectedCountry || selectedCountry.cities.length === 0}>
+              <Text style={styles.dropdownButtonText} numberOfLines={1}>
+                {selectedCity ? `${selectedCity.name} (${selectedCity.code})` : 'Any city'}
+              </Text>
+              <Text style={styles.dropdownCaret}>{cityOpen ? '▴' : '▾'}</Text>
+            </Pressable>
+            {cityOpen && selectedCountry && (
+              <ScrollView style={styles.dropdownList} nestedScrollEnabled>
+                <Pressable style={styles.dropdownOption} onPress={() => selectCity('')}>
+                  <Text style={styles.dropdownOptionText}>Any city</Text>
+                </Pressable>
+                {selectedCountry.cities.map(c => (
+                  <Pressable key={c.code} style={styles.dropdownOption} onPress={() => selectCity(c.code)}>
+                    <Text style={styles.dropdownOptionText}>
+                      {c.name} ({c.code})
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            )}
+          </View>
         </View>
         <Pressable style={styles.button} onPress={onSetLocation} disabled={busy}>
           <Text style={styles.buttonText}>Set location</Text>
         </Pressable>
-        <Pressable style={styles.linkButton} onPress={onLoadRelays} disabled={busy}>
-          <Text style={styles.linkButtonText}>
-            {showRelays ? 'Reload available locations' : 'Show available locations'}
-          </Text>
+        <Pressable style={styles.linkButton} onPress={refreshRelays} disabled={relaysLoading}>
+          <Text style={styles.linkButtonText}>{relaysLoading ? 'Loading…' : 'Reload available locations'}</Text>
         </Pressable>
-        {showRelays && (
-          <Text style={styles.relaysText} selectable>
-            {relaysText || '(no output)'}
-          </Text>
-        )}
       </View>
 
       <View style={[styles.field, styles.switchRow]}>
@@ -293,8 +385,47 @@ function makeStyles(theme: Theme) {
       color: theme.text,
       backgroundColor: theme.surface,
     },
-    inputHalf: {
+    dropdownHalf: {
       flex: 1,
+    },
+    dropdownButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      borderWidth: 1,
+      borderColor: theme.border,
+      borderRadius: 6,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      backgroundColor: theme.surface,
+    },
+    dropdownButtonText: {
+      flex: 1,
+      fontSize: 14,
+      color: theme.text,
+    },
+    dropdownCaret: {
+      fontSize: 12,
+      color: theme.textMuted,
+      marginLeft: 6,
+    },
+    dropdownList: {
+      maxHeight: 220,
+      marginTop: 4,
+      borderWidth: 1,
+      borderColor: theme.border,
+      borderRadius: 6,
+      backgroundColor: theme.surface,
+    },
+    dropdownOption: {
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.border,
+    },
+    dropdownOptionText: {
+      fontSize: 13,
+      color: theme.text,
     },
     hint: {
       fontSize: 12,
@@ -309,15 +440,6 @@ function makeStyles(theme: Theme) {
     switchLabel: {
       flex: 1,
       marginRight: 12,
-    },
-    relaysText: {
-      marginTop: 10,
-      fontSize: 11,
-      fontFamily: 'monospace',
-      color: theme.text,
-      backgroundColor: theme.surface,
-      borderRadius: 6,
-      padding: 10,
     },
     error: {
       color: theme.danger,

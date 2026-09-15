@@ -85,6 +85,20 @@
             echo "run 'dev-down' to stop everything"
           '';
 
+          # e.g. `badger token generate aidan` — same DB the dev superbadger
+          # instance above uses (SUPERBADGER_DB_PATH), so a token minted here
+          # is immediately valid against it, no restart needed. Named to
+          # match cmd/badger exactly (same name prod's systemPackages wrapper
+          # uses — see module.nix) so the command is identical in both
+          # places.
+          badger = pkgs.writeShellScriptBin "badger" ''
+            set -e
+            mkdir -p "${dataDir}"
+            cd "${repoRoot}/server"
+            export SUPERBADGER_DB_PATH="${dbPath}"
+            exec ${pkgs.go}/bin/go run ./cmd/badger "$@"
+          '';
+
           dev-down = pkgs.writeShellScriptBin "dev-down" ''
             set -e
             pkill -f "opencode serve --port ${opencodePort}" 2>/dev/null || true
@@ -101,6 +115,7 @@
             echo "  dev-up           # start opencode + superbadger together (headless, logs to file)"
             echo "  dev-down         # stop everything started by dev-up"
             echo "  db-reset         # delete the local sqlite db (fresh one created on next start)"
+            echo "  badger           # manage API auth tokens, e.g. 'badger token generate <label>'"
             echo "  run-app-web      # foreground: mobile app web target via Vite (hot reload) on :5173"
             echo "  run-app-android  # foreground: mobile app on a connected Android device/emulator (needs system Android SDK)"
             echo "  dev-help         # re-print this list"
@@ -136,6 +151,7 @@
               pkgs.nodejs_22
               pkgs.watchman
               db-reset
+              badger
               run-opencode
               run-superbadger
               run-app-web

@@ -22,14 +22,15 @@ import (
 func NewRouter(svc *station.Service, oc *opencode.Client, mv *mullvad.Client, broker *opencode.EventBroker, db *gorm.DB, mm *metrics.Manager, hub *notify.Hub) *gin.Engine {
 	r := gin.Default()
 
-	// No auth yet (see README), so any origin is fine for now — the mobile
-	// app's web target runs on a different origin/port (e.g. Vite on :5173)
-	// than this API (:8080), and without CORS the browser's preflight
+	// Auth is opt-in (see RequireAuth) so any origin is fine here too — the
+	// mobile app's web target runs on a different origin/port (e.g. Vite on
+	// :5173) than this API (:8080), and without CORS the browser's preflight
 	// OPTIONS request 404s before the real request ever goes out.
 	corsConfig := cors.DefaultConfig()
 	corsConfig.AllowOrigins = []string{"*"}
-	corsConfig.AllowHeaders = []string{"Content-Type"}
+	corsConfig.AllowHeaders = []string{"Content-Type", "Authorization"}
 	r.Use(cors.New(corsConfig))
+	r.Use(RequireAuth(db))
 
 	// Liveness of superbadger itself — deliberately not touching opencode or
 	// the DB, so the app can tell "superbadger is down" apart from "opencode
@@ -45,6 +46,7 @@ func NewRouter(svc *station.Service, oc *opencode.Client, mv *mullvad.Client, br
 	r.POST("/stations/:id/prompt", promptStation(svc))
 	r.POST("/stations/:id/reset", resetStation(svc))
 	r.POST("/stations/:id/compact", compactStation(svc))
+	r.POST("/stations/:id/abort", abortStation(svc))
 	r.GET("/stations/:id/usage", stationUsage(svc))
 	r.GET("/stations/:id/ws", stationWS(svc, broker))
 	r.GET("/stations/:id/history", stationHistory(svc))
@@ -214,6 +216,22 @@ func compactStation(svc *station.Service) gin.HandlerFunc {
 			return
 		}
 		if err := svc.Compact(c.Request.Context(), id); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.Status(http.StatusNoContent)
+	}
+}
+
+// abortStation cancels a Station's session's in-flight turn — the same thing
+// the CLI's Escape/Ctrl-C does mid-response (see station.Service.Abort).
+func abortStation(svc *station.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, ok := parseID(c)
+		if !ok {
+			return
+		}
+		if err := svc.Abort(c.Request.Context(), id); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}

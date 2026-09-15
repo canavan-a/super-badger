@@ -7,6 +7,7 @@
 // alerts, which do need edge-detection).
 import notifee from '@notifee/react-native';
 
+import {formatDataPointValue} from '../api';
 import {CH_ALERTS} from './channels';
 
 export interface NotificationMsg {
@@ -14,6 +15,10 @@ export interface NotificationMsg {
   station_id: number;
   station_name: string;
   key?: string;
+  // Owner-supplied display name for `key` (see StationSettingsScreen) —
+  // empty when never set, in which case the raw key is used instead.
+  label?: string;
+  decimals?: number;
   value?: number;
   direction?: 'above' | 'below';
 }
@@ -50,11 +55,13 @@ export async function handleNotificationMsg(msg: NotificationMsg): Promise<void>
         },
       });
       return;
-    case 'datapoint_threshold':
+    case 'datapoint_threshold': {
+      const display = msg.label || msg.key;
+      const value = msg.value !== undefined ? formatDataPointValue(msg.value, msg.decimals ?? 1) : msg.value;
       await notifee.displayNotification({
         id: `datapoint-${msg.station_id}-${msg.key}`,
-        title: `${msg.station_name}: ${msg.key} ${msg.direction} threshold`,
-        body: `${msg.key} is now ${msg.value}`,
+        title: `${msg.station_name}: ${display} ${msg.direction} threshold`,
+        body: `${display} is now ${value}`,
         data: {stationId: String(msg.station_id)},
         android: {
           channelId: CH_ALERTS,
@@ -65,6 +72,7 @@ export async function handleNotificationMsg(msg: NotificationMsg): Promise<void>
         },
       });
       return;
+    }
     default:
     // Unknown message type — ignore rather than throw, this socket is
     // meant to tolerate the server adding new message types over time.

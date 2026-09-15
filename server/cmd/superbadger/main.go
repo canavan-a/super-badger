@@ -39,12 +39,14 @@ func main() {
 	go broker.Run(ctx)
 
 	hub := notify.NewHub()
-	notifier := metrics.NotifierFunc(func(st database.Station, key string, value float64, direction database.ThresholdDirection) {
+	notifier := metrics.NotifierFunc(func(st database.Station, key, label string, decimals int, value float64, direction database.ThresholdDirection) {
 		hub.Broadcast(notify.Msg{
 			"type":         "datapoint_threshold",
 			"station_id":   st.ID,
 			"station_name": st.Name,
 			"key":          key,
+			"label":        label,
+			"decimals":     decimals,
 			"value":        value,
 			"direction":    direction,
 		})

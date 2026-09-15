@@ -1,11 +1,14 @@
 package database
 
 import (
+	"log"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 
 	"main/database/migrations"
 )
@@ -25,7 +28,20 @@ func Connect(path string) (*gorm.DB, error) {
 	// which gin's concurrent request handling can otherwise trigger even
 	// with a single well-behaved process.
 	dsn := path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
-	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	// GetDataPointSetting/UpsertStationDataPoint etc. probe for a row that
+	// often doesn't exist yet (e.g. a key with no per-station override) and
+	// handle gorm.ErrRecordNotFound as a normal "no override" result — but
+	// gorm's default logger still logs every such miss regardless, which
+	// floods the logs under normal operation. Silence just that case.
+	gormLogger := logger.New(
+		log.New(os.Stdout, "\r\n", log.LstdFlags),
+		logger.Config{
+			SlowThreshold:             200 * time.Millisecond,
+			LogLevel:                  logger.Warn,
+			IgnoreRecordNotFoundError: true,
+		},
+	)
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: gormLogger})
 	if err != nil {
 		return nil, err
 	}
