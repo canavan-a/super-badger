@@ -7,7 +7,7 @@
     "start": "react-native start",
     "web": "vite",
     "build:web": "vite build",
-    "release": "./scripts/release.sh",
+    "release": "../release/release.sh",
     "lint": "eslint .",
     "test": "jest"
   },

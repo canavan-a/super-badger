@@ -6,3 +6,12 @@ server/tmp/
 # dir (see server/opencode/client.go's package doc) — not a project file.
 /config.json
 /server/config.json
+
+# Android release signing (see release/README.md) — release.sh and this repo's
+# README are the release tooling and stay tracked; the keystore + its
+# passwords never do. Mirrors ../horus-33/.gitignore's pattern 1:1.
+/release/*
+!/release/.gitignore
+!/release/release.sh
+!/release/gen-keystore.sh
+!/release/README.md
