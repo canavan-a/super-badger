@@ -172,7 +172,7 @@
       # would justify carrying it (same tradeoff as horus-33's horus-server).
       # The NixOS module below builds superbadger from source in an
       # activation script instead.
-      nixosModules.default = import ./module.nix self;
+      nixosModules.default = import ./module.nix { inherit self; };
     in
     perSystem // { inherit nixosModules; };
 }
