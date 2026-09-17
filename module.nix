@@ -133,6 +133,9 @@ in
         export HOME=${goCache}
         export GOCACHE=${goCache}/build
         export GOPATH=${goCache}/path
+        # glebarez/sqlite (modernc.org/sqlite under it) is pure Go; force
+        # CGO off so the build doesn't need a C toolchain on PATH.
+        export CGO_ENABLED=0
         mkdir -p /var/lib/superbadger/bin ${goCache}
         cd ${self}/server
         ${pkgs.go}/bin/go build -o ${serverBin}.new ./cmd/superbadger
