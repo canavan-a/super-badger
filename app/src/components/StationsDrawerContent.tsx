@@ -29,7 +29,7 @@ export function StationsDrawerContent({
         keyExtractor={s => String(s.id)}
         renderItem={({item}) => (
           <Pressable
-            style={styles.row}
+            style={[styles.row, {borderLeftColor: item.color}]}
             onPress={() => onNavigate({name: 'stationDetail', id: item.id})}>
             <Text style={styles.rowTitle}>{item.name}</Text>
             <View style={styles.rowStatusRow}>
@@ -93,6 +93,9 @@ function makeStyles(theme: Theme) {
       paddingVertical: 12,
       borderBottomWidth: 1,
       borderBottomColor: theme.border,
+      // Station color accent — same left-border treatment as StationCard on
+      // the main list, so a station reads as "the same one" across surfaces.
+      borderLeftWidth: 4,
     },
     rowTitle: {
       fontSize: 15,

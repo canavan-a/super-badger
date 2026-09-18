@@ -33,6 +33,12 @@ export interface HeaderInfo {
   // live active/idle/unreachable state) — a glance-able signal that doesn't
   // need reading, unlike the old "· active" text buried in the subtitle.
   indicator?: {color: string; label: string};
+  // The station's own chosen color (see StationSettingsScreen's color
+  // picker) — distinct from `indicator`, which is reachability/status, not
+  // identity. Rendered as a left-edge accent stripe on the header bar,
+  // matching the same station color shown as a left-border accent on
+  // StationCard (station list) and the drawer's station rows.
+  accentColor?: string;
   subtitle?: string;
   // Small labeled pills rendered below the subtitle — one per owner-surfaced
   // data point (see StationSettingsScreen's "Show on top bar" toggle),
@@ -208,7 +214,14 @@ function AppInner(): React.JSX.Element {
         </View>
       )}
 
-      <View style={[styles.header, showingDetailHeader && styles.headerDetail]}>
+      <View
+        style={[
+          styles.header,
+          showingDetailHeader && styles.headerDetail,
+          showingDetailHeader && headerInfo!.accentColor
+            ? {borderLeftWidth: 4, borderLeftColor: headerInfo!.accentColor}
+            : null,
+        ]}>
         <Pressable
           style={styles.hamburger}
           onPress={() => {

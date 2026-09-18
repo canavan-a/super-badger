@@ -50,7 +50,17 @@ export function StationCard({station, onPress}: {station: Station; onPress: () =
   const showTokenCount = station.top_bar_actions.includes('tokens') && activeContext > 0;
 
   return (
-    <Pressable style={[styles.card, {borderLeftColor: station.color}]} onPress={onPress}>
+    <Pressable style={styles.card} onPress={onPress}>
+      {
+        // A real View, not borderLeftColor on this rounded card — Android's
+        // border renderer doesn't reliably draw a differently-colored side
+        // once borderRadius is set (it was silently falling back to the
+        // plain theme.border color on every station regardless of
+        // station.color, confirmed via logcat: the value was always
+        // correct, it just never reached the screen). overflow:hidden on
+        // .card clips this to the card's rounded left corners.
+      }
+      <View style={[styles.accentBar, {backgroundColor: station.color}]} />
       <View style={styles.cardHeader}>
         <View style={styles.titleRow}>
           <Text style={styles.cardTitle}>{station.name}</Text>
@@ -80,11 +90,20 @@ function makeStyles(theme: Theme) {
     card: {
       borderWidth: 1,
       borderColor: theme.border,
-      borderLeftWidth: 4,
       borderRadius: 10,
       padding: 14,
+      paddingLeft: 17,
       backgroundColor: theme.surface,
       gap: 8,
+      overflow: 'hidden',
+      position: 'relative',
+    },
+    accentBar: {
+      position: 'absolute',
+      left: 0,
+      top: 0,
+      bottom: 0,
+      width: 4,
     },
     cardHeader: {
       flexDirection: 'row',

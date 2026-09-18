@@ -252,6 +252,7 @@ export function StationDetailScreen({
     onHeaderChange({
       title: station.name,
       indicator,
+      accentColor: station.color,
       badges,
       tokenCount: showTokenCount ? formatTokens(activeContext) : undefined,
       actions: [

@@ -54,6 +54,45 @@ export function SettingsScreen(): React.JSX.Element {
   // with the Vite web build, which must never statically import either.
   const [bgNotifications, setBgNotifications] = useState(false);
   const [bgNotifBusy, setBgNotifBusy] = useState(false);
+  // Surfaces what requestPermission() actually returned — the toggle above
+  // used to fire-and-forget this (see audit: it kept the foreground service
+  // running and bgNotifications=true even after a denial, so alerts silently
+  // never showed with no indication anything was wrong). This gives a
+  // manual way to re-prompt (useful after the user flips the OS-level
+  // notification permission back on, since Android won't re-show its own
+  // prompt once denied) and to see the actual current status.
+  const [permStatus, setPermStatus] = useState<string>();
+  const [permBusy, setPermBusy] = useState(false);
+
+  const recheckPermission = async () => {
+    setPermBusy(true);
+    try {
+      const notifee = (await import('@notifee/react-native')).default;
+      const {AuthorizationStatus} = await import('@notifee/react-native');
+      const settings = await notifee.requestPermission();
+      const label =
+        settings.authorizationStatus === AuthorizationStatus.AUTHORIZED
+          ? 'Allowed'
+          : settings.authorizationStatus === AuthorizationStatus.DENIED
+          ? 'Denied'
+          : 'Not determined';
+      setPermStatus(label);
+      if (settings.authorizationStatus === AuthorizationStatus.DENIED) {
+        Alert.alert(
+          'Notifications denied',
+          'Android is blocking notifications for this app, so background alerts won\'t show even though monitoring is on. Enable them in system Settings → Apps → Super Badger → Notifications.',
+          [
+            {text: 'Open settings', onPress: () => Linking.openSettings()},
+            {text: 'OK', style: 'cancel'},
+          ],
+        );
+      }
+    } catch (err) {
+      Alert.alert('Notification permission', String(err));
+    } finally {
+      setPermBusy(false);
+    }
+  };
 
   useEffect(() => {
     settingsStore.load().then(s => {
@@ -286,6 +325,18 @@ export function SettingsScreen(): React.JSX.Element {
               </Text>
             </View>
             <Switch value={bgNotifications} onValueChange={toggleBgNotifications} disabled={bgNotifBusy} />
+          </View>
+
+          <View style={styles.testRow}>
+            <Pressable style={styles.testButton} onPress={recheckPermission} disabled={permBusy}>
+              {permBusy ? (
+                <ActivityIndicator size="small" color={theme.text} />
+              ) : (
+                <Text style={styles.testButtonText}>Re-check notification permission</Text>
+              )}
+            </Pressable>
+            {permStatus === 'Allowed' && <Text style={styles.testOk}>✓ {permStatus}</Text>}
+            {permStatus && permStatus !== 'Allowed' && <Text style={styles.testError}>✗ {permStatus}</Text>}
           </View>
 
           <Pressable style={styles.testButton} onPress={() => Linking.openSettings()}>
