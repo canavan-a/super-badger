@@ -22,7 +22,15 @@ export type ConnectionStatus = 'connecting' | 'open' | 'closed';
 // buffered here and the reducer runs a whole batch per flush — one render
 // per tick instead of one per token, independent of how fast the model
 // streams.
-const FLUSH_INTERVAL_MS = 50;
+//
+// 50ms used to be tried here, but each flush re-renders the streaming turn,
+// which re-runs parseMarkdown (see markdown.ts) over the *entire*
+// accumulated reply text, not just the new delta — cost that grows with the
+// reply's length. On a long reply that added up to enough JS-thread work,
+// 20x/sec, to visibly block navigation/touch handling and show up as
+// flashing in the chat list. 150ms keeps streaming looking smooth while
+// cutting that work by ~3x.
+const FLUSH_INTERVAL_MS = 150;
 
 // One outgoing message the app is holding onto rather than handing straight
 // to opencode — either because a reply is still in flight (this station only

@@ -463,6 +463,18 @@ function ChatList({
   // enough to visibly freeze the UI on a long history.
   const loadingMoreRef = useRef(false);
 
+  // While a reply is streaming, content height grows (onContentSizeChange)
+  // slightly before followBottom's scrollToOffset actually lands, so a raw
+  // onScroll tick can catch a transient large distanceFromBottom for a
+  // frame even though the view is (about to be) pinned to the bottom.
+  // Committing pinnedNearBottom/showJumpToBottom straight from every tick
+  // meant that blip flipped maintainVisibleContentPosition and the jump
+  // button on and back off within milliseconds — that flicker was the
+  // flashing. Debouncing the *state* updates (not isNearBottom.current,
+  // which followBottom needs live) lets a one-tick blip get superseded by
+  // the next tick's corrected value before it ever renders.
+  const scrollSettleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const handleScroll = (e: any) => {
     const {contentOffset, contentSize, layoutMeasurement} = e.nativeEvent;
     const distanceFromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
@@ -472,9 +484,13 @@ function ChatList({
     // decent amount, not the instant you nudge up a little.
     const nearBottom = distanceFromBottom < 150;
     isNearBottom.current = nearBottom;
-    setPinnedNearBottom(prev => (prev === nearBottom ? prev : nearBottom));
     const scrolledUpAlot = distanceFromBottom > layoutMeasurement.height * 2;
-    setShowJumpToBottom(prev => (prev === scrolledUpAlot ? prev : scrolledUpAlot));
+
+    if (scrollSettleTimer.current) clearTimeout(scrollSettleTimer.current);
+    scrollSettleTimer.current = setTimeout(() => {
+      setPinnedNearBottom(prev => (prev === nearBottom ? prev : nearBottom));
+      setShowJumpToBottom(prev => (prev === scrolledUpAlot ? prev : scrolledUpAlot));
+    }, 120);
 
     if (contentOffset.y >= 400) {
       loadingMoreRef.current = false;
@@ -561,7 +577,13 @@ function ChatList({
         maxToRenderPerBatch={8}
         windowSize={7}
         updateCellsBatchingPeriod={50}
-        removeClippedSubviews
+        // removeClippedSubviews fights the frequent onContentSizeChange
+        // updates during token streaming (every ~50ms) — its clip/unclip
+        // recalculation races the layout update and cells flash in/out for
+        // a frame, right at the bottom where the growing reply and
+        // auto-scroll are both active. The mounted window is already small
+        // (initialNumToRender/windowSize above), so the memory savings
+        // aren't worth the flicker.
       />
       {showJumpToBottom && (
         <Pressable style={styles.jumpToBottomButton} onPress={jumpToBottom}>

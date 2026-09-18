@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -94,34 +95,29 @@ func stationWS(svc *station.Service, broker *opencode.EventBroker) gin.HandlerFu
 				if err := conn.ReadJSON(&msg); err != nil {
 					return
 				}
+				sendErr := func(source string, err error) {
+					log.Printf("[station %d] %s error: %v", id, source, err)
+					select {
+					case writes <- gin.H{"type": "error", "error": err.Error()}:
+					case <-done:
+					}
+				}
 				switch {
 				case msg.Type == "prompt" && msg.Text != "":
 					if err := promptWithRecovery(c.Request.Context(), svc, id, msg.Text, sessionChanged, writes); err != nil {
-						select {
-						case writes <- gin.H{"type": "error", "error": err.Error()}:
-						case <-done:
-						}
+						sendErr("prompt", err)
 					}
 				case msg.Type == "permission_reply" && msg.RequestID != "" && msg.Reply != "":
 					if err := svc.ReplyPermission(c.Request.Context(), msg.RequestID, msg.Reply); err != nil {
-						select {
-						case writes <- gin.H{"type": "error", "error": err.Error()}:
-						case <-done:
-						}
+						sendErr("permission_reply", err)
 					}
 				case msg.Type == "question_reply" && msg.RequestID != "":
 					if err := svc.ReplyQuestion(c.Request.Context(), msg.RequestID, msg.Answers); err != nil {
-						select {
-						case writes <- gin.H{"type": "error", "error": err.Error()}:
-						case <-done:
-						}
+						sendErr("question_reply", err)
 					}
 				case msg.Type == "question_reject" && msg.RequestID != "":
 					if err := svc.RejectQuestion(c.Request.Context(), msg.RequestID); err != nil {
-						select {
-						case writes <- gin.H{"type": "error", "error": err.Error()}:
-						case <-done:
-						}
+						sendErr("question_reject", err)
 					}
 				}
 			}
