@@ -62,26 +62,11 @@ func listStationDataPoints(db *gorm.DB) gin.HandlerFunc {
 			if !hasSetting {
 				s.Decimals = 1
 			}
+			// "Temp deleted" points stay excluded until a fresh value clears
+			// the flag at ingestion time (see server/metrics.applySnapshot's
+			// UnhideDataPointIfHidden) - this handler is read-only.
 			if hasSetting && s.Hidden {
-				if s.HiddenSinceUpdatedAt == nil || p.UpdatedAt.After(*s.HiddenSinceUpdatedAt) {
-					// Fresh data has landed since this point was "temp
-					// deleted" - un-hide it rather than keep it suppressed.
-					_ = database.UpsertDataPointSetting(db, &database.DataPointSetting{
-						ID:                 s.ID,
-						StationID:          s.StationID,
-						Key:                s.Key,
-						Label:              s.Label,
-						Decimals:           s.Decimals,
-						ShowOnTopBar:       s.ShowOnTopBar,
-						ThresholdEnabled:   s.ThresholdEnabled,
-						ThresholdValue:     s.ThresholdValue,
-						ThresholdDirection: s.ThresholdDirection,
-						Order:              s.Order,
-						Hidden:             false,
-					})
-				} else {
-					continue
-				}
+				continue
 			}
 			out = append(out, dataPointOut{
 				Key:                p.Key,

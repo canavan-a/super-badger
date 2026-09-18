@@ -231,6 +231,12 @@ func applySnapshot(db *gorm.DB, st database.Station, sourceID uint, snap Snapsho
 			RawJSON:   snap.RawJSON,
 			UpdatedAt: now,
 		})
+		// A fresh value arriving is exactly what "un-hide a temp-deleted data
+		// point" means (see database.HideDataPoint) — done here, at ingestion,
+		// as a single no-op-if-not-hidden UPDATE, rather than on every read in
+		// listStationDataPoints (which used to read-then-write per hidden
+		// point on every single GET request).
+		_ = database.UnhideDataPointIfHidden(db, st.ID, key)
 		// Append-only, alongside the latest-value upsert above — this is what
 		// backs the app's graphs (see server/api/history.go). Never fails the
 		// poll on an insert error; a dropped sample just leaves a gap.

@@ -291,6 +291,18 @@ func HideDataPoint(db *gorm.DB, stationID uint, key string) error {
 	}).Error
 }
 
+// UnhideDataPointIfHidden clears a "temp deleted" data point's Hidden flag —
+// called from the ingestion path (server/metrics.applySnapshot) whenever a
+// fresh value for (station, key) actually lands, which is exactly what
+// "un-hide until new data arrives" means. A single conditional UPDATE
+// (no-op if the point isn't hidden), not a read-then-write, and safe to call
+// on every poll tick for every key.
+func UnhideDataPointIfHidden(db *gorm.DB, stationID uint, key string) error {
+	return db.Model(&DataPointSetting{}).
+		Where("station_id = ? AND key = ? AND hidden = ?", stationID, key, true).
+		Updates(map[string]any{"hidden": false, "hidden_since_updated_at": nil}).Error
+}
+
 // GetStationDataPoint fetches the current (station, key) reading, if any.
 func GetStationDataPoint(db *gorm.DB, stationID uint, key string) (*StationDataPoint, error) {
 	var p StationDataPoint
