@@ -3,9 +3,25 @@ import {settingsStore} from './settings';
 
 export type StationStatus = 'idle' | 'active' | 'error';
 
+// The fixed header buttons/badges that can be opted into the top bar (see
+// StationSettingsScreen) — "data" isn't included since that's always shown,
+// it's the only way to reach this config. "tokens" is a badge (a
+// label:value pill, like a data point) rather than a button.
+export type TopBarActionKey = 'compact' | 'reset' | 'delete' | 'tokens';
+
 export interface Station {
   id: number;
   name: string;
+  // Owner-settable tag metric sources can target instead of id/name (see
+  // server/metrics's poller) — null until set.
+  alias: string | null;
+  // Hex string from STATION_COLORS (see stationColors.ts), carried into push
+  // notifications as the accent color.
+  color: string;
+  // Owner opt-in list of which fixed header action buttons show on the top
+  // bar — empty by default, matching every other top-bar element's "nothing
+  // unless you opt in" rule.
+  top_bar_actions: TopBarActionKey[];
   provider_id: string;
   model_id: string;
   directory: string;
@@ -95,6 +111,16 @@ export function createStation(params: {
 
 export function deleteStation(id: number): Promise<void> {
   return request<void>(`/stations/${id}`, {method: 'DELETE'});
+}
+
+export function updateStation(
+  id: number,
+  updates: {name?: string; alias?: string | null; color?: string; top_bar_actions?: TopBarActionKey[]},
+): Promise<Station> {
+  return request<Station>(`/stations/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(updates),
+  });
 }
 
 export function resetStation(id: number): Promise<Station> {
@@ -225,10 +251,29 @@ export interface StationDataPoint {
   threshold_enabled: boolean;
   threshold_value: number;
   threshold_direction: 'above' | 'below';
+  // Owner-controlled top-bar/list position (lower first) — see the "..."
+  // config drawer's drag-to-reorder.
+  order: number;
 }
 
 export function getStationDataPoints(id: number): Promise<StationDataPoint[]> {
   return request<StationDataPoint[]>(`/stations/${id}/datapoints`);
+}
+
+// "Temp deletes" a data point: hidden from the top bar and settings list
+// until a fresh value arrives for it.
+export function hideStationDataPoint(id: number, key: string): Promise<void> {
+  return request<void>(`/stations/${id}/datapoints/${encodeURIComponent(key)}/hide`, {
+    method: 'POST',
+  });
+}
+
+// Persists the owner's drag-to-reorder result from the config drawer.
+export function reorderStationDataPoints(id: number, order: string[]): Promise<void> {
+  return request<void>(`/stations/${id}/datapoints/reorder`, {
+    method: 'PUT',
+    body: JSON.stringify({order}),
+  });
 }
 
 // Renders a data point value at its owner-configured decimal precision (see

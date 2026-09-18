@@ -7,6 +7,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"sort"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -28,6 +29,7 @@ type dataPointOut struct {
 	ThresholdEnabled   bool                        `json:"threshold_enabled"`
 	ThresholdValue     float64                     `json:"threshold_value"`
 	ThresholdDirection database.ThresholdDirection `json:"threshold_direction"`
+	Order              int                         `json:"order"`
 }
 
 func listStationDataPoints(db *gorm.DB) gin.HandlerFunc {
@@ -51,8 +53,8 @@ func listStationDataPoints(db *gorm.DB) gin.HandlerFunc {
 			byKey[s.Key] = s
 		}
 
-		out := make([]dataPointOut, len(points))
-		for i, p := range points {
+		out := make([]dataPointOut, 0, len(points))
+		for _, p := range points {
 			s, hasSetting := byKey[p.Key]
 			if s.ThresholdDirection == "" {
 				s.ThresholdDirection = database.ThresholdAbove
@@ -60,7 +62,28 @@ func listStationDataPoints(db *gorm.DB) gin.HandlerFunc {
 			if !hasSetting {
 				s.Decimals = 1
 			}
-			out[i] = dataPointOut{
+			if hasSetting && s.Hidden {
+				if s.HiddenSinceUpdatedAt == nil || p.UpdatedAt.After(*s.HiddenSinceUpdatedAt) {
+					// Fresh data has landed since this point was "temp
+					// deleted" - un-hide it rather than keep it suppressed.
+					_ = database.UpsertDataPointSetting(db, &database.DataPointSetting{
+						ID:                 s.ID,
+						StationID:          s.StationID,
+						Key:                s.Key,
+						Label:              s.Label,
+						Decimals:           s.Decimals,
+						ShowOnTopBar:       s.ShowOnTopBar,
+						ThresholdEnabled:   s.ThresholdEnabled,
+						ThresholdValue:     s.ThresholdValue,
+						ThresholdDirection: s.ThresholdDirection,
+						Order:              s.Order,
+						Hidden:             false,
+					})
+				} else {
+					continue
+				}
+			}
+			out = append(out, dataPointOut{
 				Key:                p.Key,
 				Label:              s.Label,
 				Value:              p.Value,
@@ -70,8 +93,15 @@ func listStationDataPoints(db *gorm.DB) gin.HandlerFunc {
 				ThresholdEnabled:   s.ThresholdEnabled,
 				ThresholdValue:     s.ThresholdValue,
 				ThresholdDirection: s.ThresholdDirection,
-			}
+				Order:              s.Order,
+			})
 		}
+		sort.SliceStable(out, func(i, j int) bool {
+			if out[i].Order != out[j].Order {
+				return out[i].Order < out[j].Order
+			}
+			return out[i].Key < out[j].Key
+		})
 		c.JSON(http.StatusOK, out)
 	}
 }
@@ -123,6 +153,49 @@ func updateDataPointSettings(db *gorm.DB) gin.HandlerFunc {
 			ThresholdDirection: body.ThresholdDirection,
 		})
 		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.Status(http.StatusNoContent)
+	}
+}
+
+// hideDataPoint "temp deletes" a data point from the top bar / settings list
+// until a fresh value arrives for it (see database.HideDataPoint).
+func hideDataPoint(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, ok := parseID(c)
+		if !ok {
+			return
+		}
+		key := c.Param("key")
+		if key == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "missing data point key"})
+			return
+		}
+		if err := database.HideDataPoint(db, id, key); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.Status(http.StatusNoContent)
+	}
+}
+
+// reorderDataPoints persists the owner's drag-to-reorder result.
+func reorderDataPoints(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, ok := parseID(c)
+		if !ok {
+			return
+		}
+		var body struct {
+			Order []string `json:"order"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := database.UpdateDataPointOrder(db, id, body.Order); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}

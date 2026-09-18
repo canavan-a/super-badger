@@ -4,8 +4,10 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -42,6 +44,7 @@ func NewRouter(svc *station.Service, oc *opencode.Client, mv *mullvad.Client, br
 	r.POST("/stations", createStation(svc))
 	r.GET("/stations", listStations(svc))
 	r.GET("/stations/:id", getStation(svc))
+	r.PATCH("/stations/:id", updateStation(svc))
 	r.DELETE("/stations/:id", deleteStation(svc))
 	r.POST("/stations/:id/prompt", promptStation(svc))
 	r.POST("/stations/:id/reset", resetStation(svc))
@@ -52,6 +55,8 @@ func NewRouter(svc *station.Service, oc *opencode.Client, mv *mullvad.Client, br
 	r.GET("/stations/:id/history", stationHistory(svc))
 	r.GET("/stations/:id/datapoints", listStationDataPoints(db))
 	r.PUT("/stations/:id/datapoints/:key/settings", updateDataPointSettings(db))
+	r.POST("/stations/:id/datapoints/:key/hide", hideDataPoint(db))
+	r.PUT("/stations/:id/datapoints/reorder", reorderDataPoints(db))
 	r.GET("/stations/:id/datapoints/:key/history", stationDataPointHistory(db))
 	r.GET("/notifications/ws", notificationsWS(svc, broker, hub))
 
@@ -97,17 +102,27 @@ func createStation(svc *station.Service) gin.HandlerFunc {
 			return
 		}
 		reachable := svc.Reachable(c.Request.Context(), st.ProviderID)
-		c.JSON(http.StatusCreated, stationOut{Station: st, Reachable: reachable})
+		c.JSON(http.StatusCreated, toStationOut(st, reachable))
 	}
 }
 
 // stationOut adds a live-computed `reachable` field to a Station response —
 // see station.Service.Reachable for why this can't just be st.Status
 // (status only reflects whether a session was created, never whether the
-// model behind it is still up right now).
+// model behind it is still up right now) — and decodes TopBarActions'
+// JSON-text column into a plain array for the app.
 type stationOut struct {
 	database.Station
-	Reachable bool `json:"reachable"`
+	Reachable     bool     `json:"reachable"`
+	TopBarActions []string `json:"top_bar_actions"`
+}
+
+func toStationOut(st database.Station, reachable bool) stationOut {
+	actions := []string{}
+	if st.TopBarActions != nil && *st.TopBarActions != "" {
+		_ = json.Unmarshal([]byte(*st.TopBarActions), &actions)
+	}
+	return stationOut{Station: st, Reachable: reachable, TopBarActions: actions}
 }
 
 func listStations(svc *station.Service) gin.HandlerFunc {
@@ -126,7 +141,7 @@ func listStations(svc *station.Service) gin.HandlerFunc {
 
 		out := make([]stationOut, len(stations))
 		for i, st := range stations {
-			out[i] = stationOut{Station: st, Reachable: reachable[st.ProviderID]}
+			out[i] = toStationOut(st, reachable[st.ProviderID])
 		}
 		c.JSON(http.StatusOK, out)
 	}
@@ -144,8 +159,98 @@ func getStation(svc *station.Service) gin.HandlerFunc {
 			return
 		}
 		reachable := svc.Reachable(c.Request.Context(), st.ProviderID)
-		c.JSON(http.StatusOK, stationOut{Station: st, Reachable: reachable})
+		c.JSON(http.StatusOK, toStationOut(st, reachable))
 	}
+}
+
+// stationColors is the fixed preset the app offers in its color picker;
+// enforced here too so a bad/arbitrary value can't be persisted.
+var stationColors = map[string]bool{
+	"#4C8BF5": true,
+	"#34C759": true,
+	"#FF9500": true,
+	"#FF3B30": true,
+	"#AF52DE": true,
+	"#8E8E93": true,
+}
+
+// topBarActionKeys are the fixed header buttons/badges that can be opted
+// into the top bar (see stationOut.TopBarActions) - "data" isn't included
+// since that's always shown (it's the only way to reach this config).
+// "tokens" is a badge (a label:value pill, like a data point) rather than a
+// button — it shares this same opt-in list/column since both are just
+// "things the owner chose to show on the top bar".
+var topBarActionKeys = map[string]bool{
+	"compact": true,
+	"reset":   true,
+	"delete":  true,
+	"tokens":  true,
+}
+
+func updateStation(svc *station.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, ok := parseID(c)
+		if !ok {
+			return
+		}
+		var body struct {
+			Name          *string  `json:"name"`
+			Alias         *string  `json:"alias"`
+			Color         *string  `json:"color"`
+			TopBarActions []string `json:"top_bar_actions"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if body.Color != nil && !stationColors[*body.Color] {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "color must be one of the preset options"})
+			return
+		}
+		for _, a := range body.TopBarActions {
+			if !topBarActionKeys[a] {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "unknown top bar action: " + a})
+				return
+			}
+		}
+		updates := map[string]any{}
+		if body.Name != nil {
+			updates["name"] = *body.Name
+		}
+		if body.Alias != nil {
+			alias := *body.Alias
+			if alias == "" {
+				updates["alias"] = nil
+			} else {
+				updates["alias"] = alias
+			}
+		}
+		if body.Color != nil {
+			updates["color"] = *body.Color
+		}
+		if body.TopBarActions != nil {
+			encoded, _ := json.Marshal(body.TopBarActions)
+			updates["top_bar_actions"] = string(encoded)
+		}
+		st, err := svc.Update(id, updates)
+		if err != nil {
+			if isUniqueConstraintErr(err) {
+				c.JSON(http.StatusConflict, gin.H{"error": "name or alias already in use"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		reachable := svc.Reachable(c.Request.Context(), st.ProviderID)
+		c.JSON(http.StatusOK, toStationOut(st, reachable))
+	}
+}
+
+// isUniqueConstraintErr reports whether err came from a UNIQUE index
+// violation - checked by message rather than a driver-specific error type so
+// this doesn't need to import the sqlite driver package directly.
+func isUniqueConstraintErr(err error) bool {
+	return err != nil && strings.Contains(strings.ToUpper(err.Error()), "UNIQUE CONSTRAINT")
 }
 
 func deleteStation(svc *station.Service) gin.HandlerFunc {
@@ -202,7 +307,7 @@ func resetStation(svc *station.Service) gin.HandlerFunc {
 		// endpoint forgot to compute the field getStation/listStations
 		// already do.
 		reachable := svc.Reachable(c.Request.Context(), st.ProviderID)
-		c.JSON(http.StatusOK, stationOut{Station: st, Reachable: reachable})
+		c.JSON(http.StatusOK, toStationOut(st, reachable))
 	}
 }
 

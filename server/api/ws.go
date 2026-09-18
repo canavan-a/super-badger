@@ -250,6 +250,7 @@ func notificationsWS(svc *station.Service, broker *opencode.EventBroker, hub *no
 				}
 				msg["station_id"] = st.ID
 				msg["station_name"] = st.Name
+				msg["station_color"] = st.Color
 				if err := conn.WriteJSON(msg); err != nil {
 					return
 				}

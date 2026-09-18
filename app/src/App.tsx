@@ -3,6 +3,7 @@ import {Platform, Pressable, SafeAreaView, StatusBar, StyleSheet, Text, View} fr
 
 import {checkServerHealth, listStations, Station} from './api';
 import {Drawer} from './components/Drawer';
+import {Icon, IconName} from './components/Icon';
 import {StationsDrawerContent} from './components/StationsDrawerContent';
 import {pendingNav} from './notifications/pendingNav';
 import {Route} from './routes';
@@ -38,7 +39,15 @@ export interface HeaderInfo {
   // reading "Label: value" instead of being folded into the subtitle string
   // as plain text.
   badges?: {label: string; value: string}[];
-  actions?: {label: string; onPress: () => void; destructive?: boolean}[];
+  // Plain muted number shown inline right after the title, in a larger font
+  // (e.g. the opted-in token count) — unlike `badges`, this has no label or
+  // pill styling, just the bare value.
+  tokenCount?: string;
+  // `icon`, when set, renders as a compact icon-only button using `label`
+  // only for its accessibility label — saves header space for actions that
+  // don't need to read as text (see StationDetailScreen's "Data" action,
+  // which opens the top-bar/data config).
+  actions?: {label: string; onPress: () => void; destructive?: boolean; icon?: IconName}[];
 }
 
 function AppInner(): React.JSX.Element {
@@ -203,7 +212,7 @@ function AppInner(): React.JSX.Element {
             refreshStations();
             setDrawerOpen(true);
           }}>
-          <Text style={styles.hamburgerIcon}>☰</Text>
+          <Icon name="menu" size={20} color={theme.text} />
         </Pressable>
 
         <View style={styles.headerTextArea}>
@@ -216,6 +225,9 @@ function AppInner(): React.JSX.Element {
                 style={[styles.headerIndicatorDot, {backgroundColor: headerInfo!.indicator!.color}]}
                 accessibilityLabel={headerInfo!.indicator!.label}
               />
+            ) : null}
+            {showingDetailHeader && headerInfo!.tokenCount ? (
+              <Text style={styles.headerTokenCount}>{headerInfo!.tokenCount}</Text>
             ) : null}
           </View>
           {showingDetailHeader && headerInfo!.subtitle ? (
@@ -237,17 +249,27 @@ function AppInner(): React.JSX.Element {
 
         {showingDetailHeader && headerInfo!.actions ? (
           <View style={styles.headerActions}>
-            {headerInfo!.actions.map(action => (
-              <Pressable key={action.label} style={styles.headerActionButton} onPress={action.onPress}>
-                <Text
-                  style={[
-                    styles.headerActionText,
-                    action.destructive && styles.headerActionDestructive,
-                  ]}>
-                  {action.label}
-                </Text>
-              </Pressable>
-            ))}
+            {headerInfo!.actions.map(action =>
+              action.icon ? (
+                <Pressable
+                  key={action.label}
+                  style={styles.headerIconButton}
+                  onPress={action.onPress}
+                  accessibilityLabel={action.label}>
+                  <Icon name={action.icon} size={19} color={theme.text} />
+                </Pressable>
+              ) : (
+                <Pressable key={action.label} style={styles.headerActionButton} onPress={action.onPress}>
+                  <Text
+                    style={[
+                      styles.headerActionText,
+                      action.destructive && styles.headerActionDestructive,
+                    ]}>
+                    {action.label}
+                  </Text>
+                </Pressable>
+              ),
+            )}
           </View>
         ) : null}
       </View>
@@ -270,7 +292,12 @@ function AppInner(): React.JSX.Element {
           />
         )}
         {route.name === 'stationSettings' && (
-          <StationSettingsScreen key={route.id} stationId={route.id} onHeaderChange={setHeaderInfo} />
+          <StationSettingsScreen
+            key={route.id}
+            stationId={route.id}
+            onHeaderChange={setHeaderInfo}
+            onNavigate={navigate}
+          />
         )}
         {route.name === 'addStation' && <AddStationScreen onNavigate={navigate} />}
         {route.name === 'settings' && <SettingsScreen />}
@@ -304,19 +331,25 @@ function makeStyles(theme: Theme) {
     },
     header: {
       flexDirection: 'row',
-      alignItems: 'center',
+      // flex-start (not center): centering against a cross-axis height set
+      // by whichever column is tallest (the title/badges column, once
+      // badges wrap to a second line) left the hamburger and action buttons
+      // vertically centered in that taller row - i.e. visibly padded below
+      // them relative to the title's top edge. Top-aligning keeps every
+      // column starting at the same line regardless of how tall the badge
+      // row grows.
+      alignItems: 'flex-start',
       paddingHorizontal: 12,
       paddingVertical: 12,
       borderBottomWidth: 1,
       borderBottomColor: theme.border,
     },
     hamburger: {
-      padding: 8,
-      marginRight: 8,
-    },
-    hamburgerIcon: {
-      fontSize: 20,
-      color: theme.text,
+      width: 36,
+      height: 36,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: 4,
     },
     headerTextArea: {
       flex: 1,
@@ -337,6 +370,11 @@ function makeStyles(theme: Theme) {
       width: 8,
       height: 8,
       borderRadius: 4,
+    },
+    headerTokenCount: {
+      fontSize: 20,
+      fontWeight: '700',
+      color: theme.textMuted,
     },
     headerSubtitle: {
       fontSize: 11,
@@ -387,6 +425,12 @@ function makeStyles(theme: Theme) {
     },
     headerActionDestructive: {
       color: theme.danger,
+    },
+    headerIconButton: {
+      width: 32,
+      height: 32,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     body: {
       flex: 1,

@@ -1,8 +1,8 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -26,7 +26,8 @@ import {
   TokenUsage,
 } from '../api';
 import {allTurns, ChatState, Part, PendingPermission, PendingQuestion, Turn} from '../chat';
-import {parseMarkdown} from '../markdown';
+import {CodeBlockSegment, parseMarkdown} from '../markdown';
+import {platformConfirm} from '../platformConfirm';
 import {Route} from '../routes';
 import {Theme, useTheme} from '../theme';
 import {QueuedMessage, useStationChat} from '../useStationChat';
@@ -184,12 +185,41 @@ export function StationDetailScreen({
   };
 
   const confirmDelete = () => {
-    platformConfirm(`Delete station "${station?.name}"?`, doDelete);
+    platformConfirm('Delete station', `Delete station "${station?.name}"?`, 'Delete', doDelete);
   };
 
   const confirmReset = () => {
-    platformConfirm(`Reset station "${station?.name}"? This clears its chat history.`, doReset);
+    platformConfirm(
+      'Reset station',
+      `Reset station "${station?.name}"? This clears its chat history.`,
+      'Reset',
+      doReset,
+    );
   };
+
+  // The "•••" header button opens this instead of running an action
+  // directly — Compact/Reset/Delete are all at least somewhat consequential
+  // (Reset/Delete already confirm on top of this), so they live behind one
+  // deliberate tap-to-open-menu step rather than being one accidental mis-tap
+  // away on the header itself.
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // "ctx" (not "tok"/"total") since this is current context occupancy —
+  // drops after a compaction — not a cumulative total-spent figure. Must
+  // include cache_read: on a locally-cached model, most of a multi-turn
+  // session's active context is tokens already sitting in the KV cache and
+  // reused rather than reprocessed each turn — input+output alone is only
+  // the small *new* slice for that one turn, which read as "a tiny
+  // per-message number" instead of the real total context size (what's
+  // actually resident/active for the model right now). Computed at
+  // component scope (not just inside the header effect below) so the •••
+  // menu's Compact row can show the same label.
+  const activeContext = usage ? usage.input + usage.output + usage.cache_read + usage.cache_write : 0;
+  const compactLabel = compacting
+    ? 'Compacting…'
+    : activeContext > 0
+    ? `Compact (${formatTokens(activeContext)} ctx)`
+    : 'Compact';
 
   // Reports title/subtitle/actions up to App's single top bar instead of
   // rendering a second header block here — one screen, one header.
@@ -205,29 +235,25 @@ export function StationDetailScreen({
         ? {color: theme.danger, label: 'error'}
         : {color: theme.textMuted, label: 'idle'}
       : {color: theme.danger, label: 'unreachable'};
-    // "ctx" (not "tok"/"total") since this is current context occupancy —
-    // drops after a compaction — not a cumulative total-spent figure.
-    // Must include cache_read: on a locally-cached model, most of a
-    // multi-turn session's active context is tokens already sitting in the
-    // KV cache and reused rather than reprocessed each turn — input+output
-    // alone is only the small *new* slice for that one turn, which read as
-    // "a tiny per-message number" instead of the real total context size
-    // (what's actually resident/active for the model right now).
-    const activeContext = usage ? usage.input + usage.output + usage.cache_read + usage.cache_write : 0;
-    const compactLabel = compacting
-      ? 'Compacting…'
-      : activeContext > 0
-      ? `Compact (${formatTokens(activeContext)} ctx)`
-      : 'Compact';
+    // "Data" always shows (it's the only way to reach the top-bar config);
+    // compact/reset/delete are opt-in like everything else on the top bar
+    // (see StationSettingsScreen's Top bar section).
+    const optionalActions = [
+      {key: 'compact' as const, label: compactLabel, onPress: doCompact},
+      {key: 'reset' as const, label: 'Reset', onPress: confirmReset},
+      {key: 'delete' as const, label: 'Delete', onPress: confirmDelete, destructive: true},
+    ].filter(a => station.top_bar_actions.includes(a.key));
+    const badges = topBarPoints.map(p => ({label: p.label || p.key, value: formatDataPointValue(p.value, p.decimals)}));
+    const showTokenCount = station.top_bar_actions.includes('tokens') && activeContext > 0;
     onHeaderChange({
       title: station.name,
       indicator,
-      badges: topBarPoints.map(p => ({label: p.label || p.key, value: formatDataPointValue(p.value, p.decimals)})),
+      badges,
+      tokenCount: showTokenCount ? formatTokens(activeContext) : undefined,
       actions: [
-        {label: compactLabel, onPress: doCompact},
-        {label: 'Reset', onPress: confirmReset},
-        {label: 'Data', onPress: () => onNavigate({name: 'stationSettings', id: stationId})},
-        {label: 'Delete', onPress: confirmDelete, destructive: true},
+        ...optionalActions,
+        {label: 'Actions', icon: 'kebab', onPress: () => setMenuOpen(true)},
+        {label: 'Data', icon: 'gear', onPress: () => onNavigate({name: 'stationSettings', id: stationId})},
       ],
     });
     return () => onHeaderChange(null);
@@ -319,6 +345,42 @@ export function StationDetailScreen({
           )}
         </Pressable>
       </View>
+
+      <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
+        <Pressable style={styles.menuBackdrop} onPress={() => setMenuOpen(false)}>
+          {/* Swallow taps on the card itself so they don't fall through to
+              the backdrop's dismiss handler. */}
+          <Pressable style={styles.menuCard} onPress={() => {}}>
+            <Pressable
+              style={styles.menuRow}
+              disabled={compacting}
+              onPress={() => {
+                setMenuOpen(false);
+                doCompact();
+              }}>
+              <Text style={[styles.menuRowText, compacting && styles.menuRowTextDisabled]}>{compactLabel}</Text>
+            </Pressable>
+            <View style={styles.menuDivider} />
+            <Pressable
+              style={styles.menuRow}
+              onPress={() => {
+                setMenuOpen(false);
+                confirmReset();
+              }}>
+              <Text style={styles.menuRowText}>Reset</Text>
+            </Pressable>
+            <View style={styles.menuDivider} />
+            <Pressable
+              style={styles.menuRow}
+              onPress={() => {
+                setMenuOpen(false);
+                confirmDelete();
+              }}>
+              <Text style={[styles.menuRowText, styles.menuRowTextDestructive]}>Delete</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -355,12 +417,32 @@ function ChatList({
   // Tracking the actual measured height here and scrolling straight to that
   // offset (not "end") avoids depending on that internal state at all.
   const contentHeight = useRef(0);
-  const turns = allTurns(chat);
+  // Mirrors isNearBottom into render state (only on actual crossings, not
+  // every onScroll tick) so the floating "Jump to bottom" button can appear.
+  const [showJumpToBottom, setShowJumpToBottom] = useState(false);
+
+  const allChatTurns = allTurns(chat);
+  // A freshly-opened long chat laying out its entire history at once is what
+  // produced the "scrolls all the way down" effect — most of that history
+  // isn't visible yet anyway. Instead only the most recent page is mounted
+  // (so there's barely anything to lay out and it's already at the bottom),
+  // with older turns paged in from `chat` — already fully in memory from the
+  // one-shot history fetch, no refetching — as the user scrolls up.
+  const CHAT_PAGE_SIZE = 25;
+  const [visibleCount, setVisibleCount] = useState(CHAT_PAGE_SIZE);
+  const turns = allChatTurns.slice(-visibleCount);
+  const hasMoreAbove = allChatTurns.length > visibleCount;
 
   const handleScroll = (e: any) => {
     const {contentOffset, contentSize, layoutMeasurement} = e.nativeEvent;
     const distanceFromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
-    isNearBottom.current = distanceFromBottom < 150;
+    const nearBottom = distanceFromBottom < 150;
+    isNearBottom.current = nearBottom;
+    setShowJumpToBottom(prev => (prev === nearBottom ? prev : !nearBottom));
+
+    if (hasMoreAbove && contentOffset.y < 400) {
+      setVisibleCount(v => v + CHAT_PAGE_SIZE);
+    }
   };
 
   const followBottom = () => {
@@ -372,46 +454,63 @@ function ChatList({
     }
   };
 
+  const jumpToBottom = () => {
+    isNearBottom.current = true;
+    setShowJumpToBottom(false);
+    listRef.current?.scrollToOffset({offset: contentHeight.current, animated: true});
+  };
+
   return (
-    <FlatList
-      ref={listRef}
-      style={styles.chat}
-      data={turns}
-      keyExtractor={turn => turn.messageID}
-      renderItem={({item}) => <TurnView turn={item} styles={styles} theme={theme} />}
-      contentContainerStyle={styles.chatContent}
-      onScroll={handleScroll}
-      scrollEventThrottle={16}
-      onContentSizeChange={(_w, h) => {
-        contentHeight.current = h;
-        followBottom();
-      }}
-      onLayout={() => followBottom()}
-      ListFooterComponent={
-        outbox.length > 0 ? (
-          <View style={styles.queueList}>
-            {outbox.map(m => (
-              <View key={m.id} style={styles.queuedItem}>
-                <View style={styles.queuedBadge}>
-                  <Text style={styles.queuedBadgeText}>⏳ Queued</Text>
+    <View style={styles.chatContainer}>
+      <FlatList
+        ref={listRef}
+        style={styles.chat}
+        data={turns}
+        keyExtractor={turn => turn.messageID}
+        renderItem={({item}) => <TurnView turn={item} styles={styles} theme={theme} />}
+        contentContainerStyle={styles.chatContent}
+        onScroll={handleScroll}
+        scrollEventThrottle={16}
+        // Keeps the viewport's visible content stable when older turns are
+        // prepended by the pagination above, instead of the scroll position
+        // jumping as the list grows above the fold.
+        maintainVisibleContentPosition={{minIndexForVisible: 0}}
+        onContentSizeChange={(_w, h) => {
+          contentHeight.current = h;
+          followBottom();
+        }}
+        onLayout={() => followBottom()}
+        ListFooterComponent={
+          outbox.length > 0 ? (
+            <View style={styles.queueList}>
+              {outbox.map(m => (
+                <View key={m.id} style={styles.queuedItem}>
+                  <View style={styles.queuedBadge}>
+                    <Text style={styles.queuedBadgeText}>⏳ Queued</Text>
+                  </View>
+                  <View style={[styles.bubble, styles.bubbleYou, styles.bubbleQueued]}>
+                    <Text style={styles.youText}>{m.text}</Text>
+                  </View>
                 </View>
-                <View style={[styles.bubble, styles.bubbleYou, styles.bubbleQueued]}>
-                  <Text style={styles.youText}>{m.text}</Text>
-                </View>
-              </View>
-            ))}
-          </View>
-        ) : null
-      }
-      // Only a handful of turns need to be mounted at once; keeping these
-      // small is what makes virtualization actually pay off on a long
-      // history instead of just being FlatList's defaults.
-      initialNumToRender={12}
-      maxToRenderPerBatch={8}
-      windowSize={7}
-      updateCellsBatchingPeriod={50}
-      removeClippedSubviews
-    />
+              ))}
+            </View>
+          ) : null
+        }
+        // Only a handful of turns need to be mounted at once; keeping these
+        // small is what makes virtualization actually pay off on a long
+        // history instead of just being FlatList's defaults.
+        initialNumToRender={12}
+        maxToRenderPerBatch={8}
+        windowSize={7}
+        updateCellsBatchingPeriod={50}
+        removeClippedSubviews
+      />
+      {showJumpToBottom && (
+        <Pressable style={styles.jumpToBottomButton} onPress={jumpToBottom}>
+          <Text style={styles.jumpToBottomText}>↓ Jump to bottom</Text>
+        </Pressable>
+      )}
+    </View>
   );
 }
 
@@ -641,20 +740,7 @@ function MarkdownText({text, styles, theme}: {text: string; styles: Styles; them
       {segments.map((seg, i) => {
         switch (seg.kind) {
           case 'code-block':
-            return (
-              <View key={i} style={styles.codeBlock}>
-                {seg.lang ? <Text style={styles.codeLang}>{seg.lang}</Text> : null}
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                  <Text style={styles.codeText}>
-                    {seg.tokens.map((tok, j) => (
-                      <Text key={j} style={codeTokenStyles[tok.type]}>
-                        {tok.text}
-                      </Text>
-                    ))}
-                  </Text>
-                </ScrollView>
-              </View>
-            );
+            return <CodeBlockView key={i} seg={seg} styles={styles} codeTokenStyles={codeTokenStyles} />;
           case 'heading':
             return (
               <Text key={i} style={[styles.assistantText, styles.heading, HEADING_STYLES[seg.level] ?? null]}>
@@ -680,6 +766,46 @@ function MarkdownText({text, styles, theme}: {text: string; styles: Styles; them
         }
       })}
     </>
+  );
+}
+
+// Collapsed line cap for a code block before "Show more" appears — without
+// this a single long ```bash output rendered with no height limit could grow
+// to dominate the whole chat FlatList row (see ToolPartView's numberOfLines
+// truncation above, which this mirrors).
+const CODE_BLOCK_COLLAPSED_LINES = 12;
+
+function CodeBlockView({
+  seg,
+  styles,
+  codeTokenStyles,
+}: {
+  seg: CodeBlockSegment;
+  styles: Styles;
+  codeTokenStyles: Record<string, object>;
+}): React.JSX.Element {
+  const [expanded, setExpanded] = useState(false);
+  const lineCount = seg.code.split('\n').length;
+  const showToggle = lineCount > CODE_BLOCK_COLLAPSED_LINES;
+
+  return (
+    <View style={styles.codeBlock}>
+      {seg.lang ? <Text style={styles.codeLang}>{seg.lang}</Text> : null}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        <Text style={styles.codeText} numberOfLines={expanded ? undefined : CODE_BLOCK_COLLAPSED_LINES}>
+          {seg.tokens.map((tok, j) => (
+            <Text key={j} style={codeTokenStyles[tok.type]}>
+              {tok.text}
+            </Text>
+          ))}
+        </Text>
+      </ScrollView>
+      {showToggle && (
+        <Text style={styles.toolToggle} onPress={() => setExpanded(e => !e)}>
+          {expanded ? 'Show less' : 'Show more'}
+        </Text>
+      )}
+    </View>
   );
 }
 
@@ -748,28 +874,10 @@ function ToolPartView({part, styles}: {part: Extract<Part, {kind: 'tool'}>; styl
   );
 }
 
-// window.confirm is synchronous (fine to return a boolean directly); native
-// Alert.alert is callback-based, so onConfirm only fires once the user
-// actually taps "Delete" — this used to call Alert.alert and immediately
-// return true regardless, which meant Delete ran instantly on Android/iOS no
-// matter what the user tapped, with the alert just appearing as an inert
-// notice afterward. Fixed to actually gate on the user's choice there too.
 function formatTokens(n: number): string {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
 }
 
-function platformConfirm(message: string, onConfirm: () => void): void {
-  if (typeof window !== 'undefined' && typeof window.confirm === 'function') {
-    if (window.confirm(message)) {
-      onConfirm();
-    }
-    return;
-  }
-  Alert.alert('Delete station', message, [
-    {text: 'Cancel', style: 'cancel'},
-    {text: 'Delete', style: 'destructive', onPress: onConfirm},
-  ]);
-}
 
 function makeStyles(theme: Theme) {
   return StyleSheet.create({
@@ -785,6 +893,39 @@ function makeStyles(theme: Theme) {
     },
     error: {
       color: theme.danger,
+    },
+    menuBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.3)',
+      alignItems: 'flex-end',
+      padding: 12,
+    },
+    menuCard: {
+      minWidth: 180,
+      borderRadius: 10,
+      backgroundColor: theme.surface,
+      borderWidth: 1,
+      borderColor: theme.border,
+      overflow: 'hidden',
+    },
+    menuRow: {
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+    },
+    menuRowText: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: theme.text,
+    },
+    menuRowTextDisabled: {
+      opacity: 0.5,
+    },
+    menuRowTextDestructive: {
+      color: theme.danger,
+    },
+    menuDivider: {
+      height: 1,
+      backgroundColor: theme.border,
     },
     directory: {
       fontSize: 11,
@@ -891,9 +1032,33 @@ function makeStyles(theme: Theme) {
     permissionButtonDisabled: {
       opacity: 0.5,
     },
+    chatContainer: {
+      flex: 1,
+    },
     chat: {
       flex: 1,
       backgroundColor: theme.bg,
+    },
+    jumpToBottomButton: {
+      position: 'absolute',
+      bottom: 12,
+      alignSelf: 'center',
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      borderRadius: 999,
+      backgroundColor: theme.primary,
+      shadowColor: '#000',
+      shadowOpacity: 0.2,
+      shadowRadius: 4,
+      shadowOffset: {width: 0, height: 2},
+      elevation: 4,
+    },
+    jumpToBottomText: {
+      color: theme.primaryText,
+      fontSize: 13,
+      fontWeight: '700',
     },
     chatContent: {
       padding: 16,

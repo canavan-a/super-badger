@@ -22,8 +22,19 @@ const (
 // / migration 00003) + at most one live opencode session. Directory is the
 // cwd opencode runs the session's agent in.
 type Station struct {
-	ID                uint          `gorm:"primaryKey" json:"id"`
-	Name              string        `gorm:"uniqueIndex;not null" json:"name"`
+	ID   uint   `gorm:"primaryKey" json:"id"`
+	Name string `gorm:"uniqueIndex;not null" json:"name"`
+	// Alias is an optional owner-settable tag metric sources can target
+	// instead of ID/Name (see server/metrics/metrics.go's poll()).
+	Alias *string `gorm:"uniqueIndex" json:"alias,omitempty"`
+	// Color is a hex string from a fixed client-side preset list, carried
+	// into push notifications as the accent color.
+	Color string `gorm:"not null;default:'#4C8BF5'" json:"color"`
+	// TopBarActions is a JSON-encoded array of the fixed header action keys
+	// ("compact", "reset", "delete") the owner opted into showing on the top
+	// bar - decoded/encoded in server/api (see stationOut). NULL/empty means
+	// none, matching every other top-bar element's opt-in default.
+	TopBarActions     *string       `json:"-"`
 	ProviderID        string        `gorm:"not null" json:"provider_id"`
 	ModelID           string        `gorm:"not null" json:"model_id"`
 	Directory         string        `json:"directory"`
@@ -76,10 +87,10 @@ const (
 // avoids re-notifying on every poll while a threshold stays tripped — see
 // server/metrics.RunPoller).
 type DataPointSetting struct {
-	ID                 uint               `gorm:"primaryKey" json:"id"`
-	StationID          uint               `gorm:"uniqueIndex:idx_data_point_settings_station_key;not null" json:"station_id"`
-	Key                string             `gorm:"uniqueIndex:idx_data_point_settings_station_key;not null" json:"key"`
-	Label              string             `gorm:"not null;default:''" json:"label"`
+	ID        uint   `gorm:"primaryKey" json:"id"`
+	StationID uint   `gorm:"uniqueIndex:idx_data_point_settings_station_key;not null" json:"station_id"`
+	Key       string `gorm:"uniqueIndex:idx_data_point_settings_station_key;not null" json:"key"`
+	Label     string `gorm:"not null;default:''" json:"label"`
 	// Decimal places to show when rendering Value — a display preference
 	// only, doesn't affect stored precision.
 	Decimals           int                `gorm:"not null;default:1" json:"decimals"`
@@ -88,6 +99,15 @@ type DataPointSetting struct {
 	ThresholdValue     float64            `gorm:"not null;default:0" json:"threshold_value"`
 	ThresholdDirection ThresholdDirection `gorm:"not null;default:above" json:"threshold_direction"`
 	LastNotifiedValue  *float64           `json:"-"`
+	// Order controls top-bar/list display order (lower first); ties break by
+	// Key. Owner-set via the app's drag-to-reorder config menu.
+	Order int `gorm:"column:order_index;not null;default:0" json:"order"`
+	// Hidden is a "temp delete": the point is excluded from
+	// ListStationDataPoints results until a fresh value lands (a
+	// StationDataPoint.UpdatedAt after HiddenSinceUpdatedAt), at which point
+	// it's automatically un-hidden.
+	Hidden               bool       `gorm:"not null;default:false" json:"-"`
+	HiddenSinceUpdatedAt *time.Time `json:"-"`
 }
 
 func CreateStation(db *gorm.DB, s *Station) error {
@@ -132,6 +152,13 @@ func UpdateStationSession(db *gorm.DB, id uint, sessionID string, status Station
 
 func DeleteStation(db *gorm.DB, id uint) error {
 	return db.Delete(&Station{}, id).Error
+}
+
+// UpdateStation applies a partial set of field updates (e.g. name, alias,
+// color) to a Station, following the UpdateStationSession/UpdateMetricSource
+// pattern below.
+func UpdateStation(db *gorm.DB, id uint, updates map[string]any) error {
+	return db.Model(&Station{}).Where("id = ?", id).Updates(updates).Error
 }
 
 func ListMetricSources(db *gorm.DB) ([]MetricSource, error) {
@@ -204,6 +231,77 @@ func UpsertDataPointSetting(db *gorm.DB, s *DataPointSetting) error {
 		return db.Create(s).Error
 	}
 	return err
+}
+
+// UpdateDataPointOrder bulk-sets order_index for a station's data points to
+// match orderedKeys' position (0-based), creating a setting row for any key
+// that doesn't have one yet — mirrors UpsertDataPointSetting's create-or-save
+// behavior but for the reorder-only case so it doesn't clobber other fields.
+func UpdateDataPointOrder(db *gorm.DB, stationID uint, orderedKeys []string) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		for i, key := range orderedKeys {
+			var existing DataPointSetting
+			err := tx.Where("station_id = ? AND key = ?", stationID, key).First(&existing).Error
+			if err == gorm.ErrRecordNotFound {
+				if err := tx.Create(&DataPointSetting{StationID: stationID, Key: key, Order: i}).Error; err != nil {
+					return err
+				}
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			if err := tx.Model(&existing).Update("order_index", i).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// HideDataPoint "temp deletes" a data point: it's excluded from
+// ListStationDataPoints until a fresh value arrives after this moment.
+func HideDataPoint(db *gorm.DB, stationID uint, key string) error {
+	point, err := GetStationDataPoint(db, stationID, key)
+	if err != nil {
+		return err
+	}
+	var since time.Time
+	if point != nil {
+		since = point.UpdatedAt
+	} else {
+		since = time.Now()
+	}
+	var existing DataPointSetting
+	err = db.Where("station_id = ? AND key = ?", stationID, key).First(&existing).Error
+	if err == gorm.ErrRecordNotFound {
+		return db.Create(&DataPointSetting{
+			StationID:            stationID,
+			Key:                  key,
+			Hidden:               true,
+			HiddenSinceUpdatedAt: &since,
+		}).Error
+	}
+	if err != nil {
+		return err
+	}
+	return db.Model(&existing).Updates(map[string]any{
+		"hidden":                  true,
+		"hidden_since_updated_at": since,
+	}).Error
+}
+
+// GetStationDataPoint fetches the current (station, key) reading, if any.
+func GetStationDataPoint(db *gorm.DB, stationID uint, key string) (*StationDataPoint, error) {
+	var p StationDataPoint
+	err := db.Where("station_id = ? AND key = ?", stationID, key).First(&p).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
 }
 
 // UpdateLastNotifiedValue records the value that most recently tripped (or

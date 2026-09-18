@@ -14,6 +14,7 @@ export interface NotificationMsg {
   type: 'agent_idle' | 'permission_requested' | 'datapoint_threshold';
   station_id: number;
   station_name: string;
+  station_color?: string;
   key?: string;
   // Owner-supplied display name for `key` (see StationSettingsScreen) —
   // empty when never set, in which case the raw key is used instead.
@@ -23,20 +24,49 @@ export interface NotificationMsg {
   direction?: 'above' | 'below';
 }
 
+// Every notification is one of two kinds, tagged via `data.kind` so a later
+// notification's clearing pass can tell them apart (see below):
+//  - "chat": agent_idle / permission_requested — transient "come look at the
+//    conversation" pings, fine to replace with whatever's newest.
+//  - "data": datapoint_threshold — a temperature/usage/etc. threshold that
+//    tripped. These must never be silently cleared by a chat notification:
+//    the owner needs to still see it went above/below threshold even if the
+//    agent also went idle a moment later, so nothing but a fresh reading for
+//    that same key (which reuses its id and replaces itself) touches it.
+type NotificationKind = 'chat' | 'data';
+
+async function clearChatNotifications(stationId: number): Promise<void> {
+  const stationTag = String(stationId);
+  const displayed = await notifee.getDisplayedNotifications();
+  await Promise.all(
+    displayed
+      .filter(d => d.notification.data?.stationId === stationTag && d.notification.data?.kind === 'chat')
+      .map(d => notifee.cancelNotification(d.notification.id!)),
+  );
+}
+
 export async function handleNotificationMsg(msg: NotificationMsg): Promise<void> {
+  // Both kinds clear prior *chat* notifications for the station ("a data
+  // notification overrides chat, but chat never clears data" — see above);
+  // neither kind ever cancels an existing data notification.
+  await clearChatNotifications(msg.station_id);
+
+  const data = (kind: NotificationKind) => ({stationId: String(msg.station_id), kind});
+
   switch (msg.type) {
     case 'agent_idle':
       await notifee.displayNotification({
         id: `agent-idle-${msg.station_id}`,
         title: 'Agent idle',
         body: `${msg.station_name} is waiting for your input`,
-        data: {stationId: String(msg.station_id)},
+        data: data('chat'),
         android: {
           channelId: CH_ALERTS,
           smallIcon: 'ic_notification',
           pressAction: {id: 'default'},
           timestamp: Date.now(),
           showTimestamp: true,
+          color: msg.station_color,
         },
       });
       return;
@@ -45,13 +75,14 @@ export async function handleNotificationMsg(msg: NotificationMsg): Promise<void>
         id: `permission-${msg.station_id}`,
         title: 'Permission requested',
         body: `${msg.station_name} needs a permission decision`,
-        data: {stationId: String(msg.station_id)},
+        data: data('chat'),
         android: {
           channelId: CH_ALERTS,
           smallIcon: 'ic_notification',
           pressAction: {id: 'default'},
           timestamp: Date.now(),
           showTimestamp: true,
+          color: msg.station_color,
         },
       });
       return;
@@ -62,13 +93,14 @@ export async function handleNotificationMsg(msg: NotificationMsg): Promise<void>
         id: `datapoint-${msg.station_id}-${msg.key}`,
         title: `${msg.station_name}: ${display} ${msg.direction} threshold`,
         body: `${display} is now ${value}`,
-        data: {stationId: String(msg.station_id)},
+        data: data('data'),
         android: {
           channelId: CH_ALERTS,
           smallIcon: 'ic_notification',
           pressAction: {id: 'default'},
           timestamp: Date.now(),
           showTimestamp: true,
+          color: msg.station_color,
         },
       });
       return;

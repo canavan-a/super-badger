@@ -150,6 +150,15 @@ func (s *Service) Get(id uint) (database.Station, error) {
 	return database.GetStation(s.db, id)
 }
 
+// Update applies a partial set of field updates (name, alias, color) and
+// returns the resulting Station.
+func (s *Service) Update(id uint, updates map[string]any) (database.Station, error) {
+	if err := database.UpdateStation(s.db, id, updates); err != nil {
+		return database.Station{}, err
+	}
+	return database.GetStation(s.db, id)
+}
+
 func (s *Service) Prompt(ctx context.Context, id uint, text string) (json.RawMessage, error) {
 	st, err := database.GetStation(s.db, id)
 	if err != nil {

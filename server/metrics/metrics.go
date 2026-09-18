@@ -194,15 +194,22 @@ func poll(ctx context.Context, db *gorm.DB, sourceID uint, src *HTTPSource, noti
 		return
 	}
 	byID := make(map[string]database.Station, len(stations))
+	byAlias := make(map[string]database.Station, len(stations))
 	byName := make(map[string]database.Station, len(stations))
 	for _, st := range stations {
 		byID[strconv.FormatUint(uint64(st.ID), 10)] = st
+		if st.Alias != nil && *st.Alias != "" {
+			byAlias[*st.Alias] = st
+		}
 		byName[st.Name] = st
 	}
 
 	id := sourceID
 	for key, snap := range snapshots {
 		st, ok := byID[key]
+		if !ok {
+			st, ok = byAlias[key]
+		}
 		if !ok {
 			st, ok = byName[key]
 		}

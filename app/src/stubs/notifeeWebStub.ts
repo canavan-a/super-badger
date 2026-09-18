@@ -18,6 +18,8 @@ const noop = async () => undefined;
 const notifee = {
   createChannel: noop,
   displayNotification: noop,
+  getDisplayedNotifications: async () => [],
+  cancelNotification: noop,
   stopForegroundService: noop,
   registerForegroundService: () => {},
   requestPermission: noop,

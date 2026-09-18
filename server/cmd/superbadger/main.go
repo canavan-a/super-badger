@@ -41,14 +41,15 @@ func main() {
 	hub := notify.NewHub()
 	notifier := metrics.NotifierFunc(func(st database.Station, key, label string, decimals int, value float64, direction database.ThresholdDirection) {
 		hub.Broadcast(notify.Msg{
-			"type":         "datapoint_threshold",
-			"station_id":   st.ID,
-			"station_name": st.Name,
-			"key":          key,
-			"label":        label,
-			"decimals":     decimals,
-			"value":        value,
-			"direction":    direction,
+			"type":          "datapoint_threshold",
+			"station_id":    st.ID,
+			"station_name":  st.Name,
+			"station_color": st.Color,
+			"key":           key,
+			"label":         label,
+			"decimals":      decimals,
+			"value":         value,
+			"direction":     direction,
 		})
 	})
 	mm := metrics.NewManager(db, notifier)
