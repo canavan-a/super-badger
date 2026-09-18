@@ -4,6 +4,10 @@
 // lists/links) — just enough that a typical LLM reply renders as an actual
 // document instead of raw markdown source or an undifferentiated wall of
 // text.
+//
+// Table detection (see table.ts, git history) was tried and pulled back out
+// — between the rendering bugs it caused and the extra per-line scanning
+// cost on every streaming re-parse, it wasn't worth what it added.
 
 export interface CodeToken {
   type: 'plain' | 'keyword' | 'string' | 'comment' | 'number';

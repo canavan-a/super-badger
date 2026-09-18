@@ -246,11 +246,16 @@ export function applyEvent(state: ChatState, evt: EventMsg): ChatState {
 
     case 'session.error': {
       const message = p.error?.message ?? p.message ?? 'session error';
+      // Logged (not just surfaced in the UI) so the raw event is visible in
+      // `adb logcat`/Metro without having to reproduce it against the
+      // server directly — this is opencode's own error payload verbatim.
+      console.log('[chat] session.error', JSON.stringify(evt));
       return {...state, busy: false, error: message};
     }
 
     // Server-synthesized (see server/api/ws.go), not an opencode event.
     case 'error':
+      console.log('[chat] error', JSON.stringify(evt));
       return {...state, busy: false, error: evt.error ?? 'unknown error'};
 
     // Server-synthesized: e.g. "Session expired — starting a new one…"

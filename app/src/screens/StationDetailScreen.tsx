@@ -64,6 +64,7 @@ export function StationDetailScreen({
     replyPermission,
     replyQuestion,
     rejectQuestion,
+    dismissError,
   } = useStationChat(stationId);
 
   // Token/cost usage — same figures the opencode CLI's status line shows.
@@ -289,7 +290,14 @@ export function StationDetailScreen({
       {station.directory ? <Text style={styles.directory}>{station.directory}</Text> : null}
 
       {chat.notice && <Text style={styles.chatNotice}>{chat.notice}</Text>}
-      {chat.error && <Text style={styles.chatError}>{chat.error}</Text>}
+      {chat.error && (
+        <View style={styles.chatErrorRow}>
+          <Text style={styles.chatError}>{chat.error}</Text>
+          <Pressable onPress={dismissError} accessibilityLabel="Dismiss error" hitSlop={8}>
+            <Icon name="close" size={14} color={theme.danger} />
+          </Pressable>
+        </View>
+      )}
       {chat.pendingPermission && (
         <PermissionPrompt
           styles={styles}
@@ -487,16 +495,25 @@ function ChatList({
 
   const jumpToBottom = () => {
     isNearBottom.current = true;
-    setPinnedNearBottom(true);
     setShowJumpToBottom(false);
-    // scrollToEnd (not the cached contentHeight offset followBottom uses)
-    // for a one-off tap: it measures the list's actual current end rather
-    // than relying on a height snapshot that can be a frame stale by the
-    // time you tap, which is what made this land short/inconsistent. The
-    // follow-up call after a beat corrects for any layout that was still
-    // settling (e.g. a just-mounted paged-in row) when the first one fired.
-    listRef.current?.scrollToEnd({animated: true});
-    setTimeout(() => listRef.current?.scrollToEnd({animated: false}), 100);
+    // setPinnedNearBottom(true) below disables maintainVisibleContentPosition
+    // (see its own comment), but that only takes effect on the *next*
+    // render — calling scrollToEnd() synchronously in this same tick raced
+    // that state update, so maintainVisibleContentPosition was sometimes
+    // still active and fighting the scroll, making the tap appear to do
+    // nothing. Deferring to the next frame lets the render (and the prop
+    // change) land first.
+    setPinnedNearBottom(true);
+    requestAnimationFrame(() => {
+      // scrollToEnd (not the cached contentHeight offset followBottom uses)
+      // for a one-off tap: it measures the list's actual current end rather
+      // than relying on a height snapshot that can be a frame stale by the
+      // time you tap, which is what made this land short/inconsistent. The
+      // follow-up call after a beat corrects for any layout that was still
+      // settling (e.g. a just-mounted paged-in row) when the first one fired.
+      listRef.current?.scrollToEnd({animated: true});
+      setTimeout(() => listRef.current?.scrollToEnd({animated: false}), 100);
+    });
   };
 
   return (
@@ -774,8 +791,14 @@ function InlineRuns({
 // long lines don't force-wrap or blow out the bubble width) — replaces what
 // used to be a literal wall of backticks and markdown source characters.
 function MarkdownText({text, styles, theme}: {text: string; styles: Styles; theme: Theme}): React.JSX.Element {
-  const segments = parseMarkdown(text);
-  const codeTokenStyles = codeTokenStyleMap(theme);
+  // Memoized on `text`: during active streaming this still reparses on
+  // every flush tick (the text itself changes), but it skips redoing the
+  // full heading/list/code-block/table scan for every *other*, already-
+  // finished message in the chat that re-renders for unrelated reasons
+  // (parent state changes, theme, etc.) — those don't need reparsing at all
+  // since their text hasn't changed.
+  const segments = useMemo(() => parseMarkdown(text), [text]);
+  const codeTokenStyles = useMemo(() => codeTokenStyleMap(theme), [theme]);
   return (
     <>
       {segments.map((seg, i) => {
@@ -850,17 +873,24 @@ function CodeBlockView({
           )}
         </Pressable>
       </View>
-      <View style={!expanded && styles.codeScrollClamped}>
+      <View style={expanded ? styles.codeScrollExpanded : styles.codeScrollClamped}>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           // Nested inside the chat's vertical FlatList - without this,
           // Android's gesture arbitration can give the outer list the touch
           // stream entirely, so a horizontal swipe on a code block never
-          // actually scrolls it.
+          // actually scrolls it. A *vertical* ScrollView here too (to make
+          // the expanded height interactively scrollable) was tried and
+          // reverted — nesting a vertical scroller inside a FlatList row
+          // fought the outer list for scroll/gesture control, breaking
+          // auto-follow-to-bottom during streaming and causing visible
+          // jumping. maxHeight + overflow:hidden below still caps the
+          // height either way; content past that cap just isn't reachable
+          // by scrolling — use the copy button for the rest.
           nestedScrollEnabled
           directionalLockEnabled>
-          <Text style={styles.codeText} numberOfLines={expanded ? undefined : CODE_BLOCK_COLLAPSED_LINES}>
+          <Text style={styles.codeText}>
             {seg.tokens.map((tok, j) => (
               <Text key={j} style={codeTokenStyles[tok.type]}>
                 {tok.text}
@@ -877,6 +907,7 @@ function CodeBlockView({
     </View>
   );
 }
+
 
 function codeTokenStyleMap(theme: Theme): Record<string, object> {
   return {
@@ -1009,10 +1040,18 @@ function makeStyles(theme: Theme) {
       paddingHorizontal: 16,
       paddingTop: 8,
     },
-    chatError: {
-      color: theme.danger,
+    chatErrorRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      justifyContent: 'space-between',
+      gap: 8,
       paddingHorizontal: 16,
       paddingTop: 8,
+    },
+    chatError: {
+      flex: 1,
+      minWidth: 0,
+      color: theme.danger,
       fontSize: 13,
     },
     chatNotice: {
@@ -1265,13 +1304,20 @@ function makeStyles(theme: Theme) {
       lineHeight: 16,
       color: theme.codeText,
     },
-    // numberOfLines alone doesn't reliably clip a Text inside a horizontal
-    // ScrollView (the ScrollView gives it unconstrained width, and Android in
-    // particular can then ignore the line clamp) — this hard height cap,
-    // matching codeText's lineHeight * CODE_BLOCK_COLLAPSED_LINES, is what
-    // actually guarantees a long code block can't grow unbounded.
+    // A hard height cap via maxHeight on the wrapping View (not
+    // numberOfLines on the Text) — numberOfLines doesn't reliably clip a
+    // Text inside a horizontal ScrollView (the ScrollView gives it
+    // unconstrained width, and Android in particular can then ignore the
+    // line clamp). "Show more" switches to codeScrollExpanded, a *larger*
+    // fixed cap with its own vertical scroll — never fully unbounded, so an
+    // enormous block (a huge table, a long log dump) can't grow to dominate
+    // the whole chat even when expanded; you scroll within the block itself.
     codeScrollClamped: {
       maxHeight: 16 * CODE_BLOCK_COLLAPSED_LINES,
+      overflow: 'hidden',
+    },
+    codeScrollExpanded: {
+      maxHeight: 16 * 40,
       overflow: 'hidden',
     },
     reasoningBox: {

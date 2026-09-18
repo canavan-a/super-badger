@@ -186,6 +186,13 @@ export function useStationChat(stationId: number) {
     wsRef.current?.send(JSON.stringify({type: 'question_reject', request_id: requestID}));
   }, []);
 
+  // Lets the owner dismiss a session error banner rather than it sitting
+  // there until the next prompt happens to clear it (pump() only resets
+  // `error` right before sending a new one — see above).
+  const dismissError = useCallback(() => {
+    setState(prev => (prev.error ? {...prev, error: null} : prev));
+  }, []);
+
   const reset = useCallback(() => {
     pending.current = [];
     outboxRef.current = [];
@@ -205,5 +212,16 @@ export function useStationChat(stationId: number) {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- outboxRef.current is intentionally read fresh each render, not tracked as a dependency
   const outbox = outboxRef.current;
 
-  return {state, status, outbox, send, reset, reconnect, replyPermission, replyQuestion, rejectQuestion};
+  return {
+    state,
+    status,
+    outbox,
+    send,
+    reset,
+    reconnect,
+    replyPermission,
+    replyQuestion,
+    rejectQuestion,
+    dismissError,
+  };
 }
