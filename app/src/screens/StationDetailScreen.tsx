@@ -433,6 +433,15 @@ function ChatList({
   const turns = allChatTurns.slice(-visibleCount);
   const hasMoreAbove = allChatTurns.length > visibleCount;
 
+  // Guards the pagination trigger below so it fires once per "reached near
+  // the top" event instead of on every one of onScroll's ~60-times-a-second
+  // ticks while the user lingers up there — `maintainVisibleContentPosition`
+  // re-anchors the scroll offset after each prepend, which without this
+  // guard kept re-crossing the same threshold and could spiral into dozens
+  // of state updates a second, each growing the render window further:
+  // enough to visibly freeze the UI on a long history.
+  const loadingMoreRef = useRef(false);
+
   const handleScroll = (e: any) => {
     const {contentOffset, contentSize, layoutMeasurement} = e.nativeEvent;
     const distanceFromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
@@ -440,7 +449,10 @@ function ChatList({
     isNearBottom.current = nearBottom;
     setShowJumpToBottom(prev => (prev === nearBottom ? prev : !nearBottom));
 
-    if (hasMoreAbove && contentOffset.y < 400) {
+    if (contentOffset.y >= 400) {
+      loadingMoreRef.current = false;
+    } else if (hasMoreAbove && !loadingMoreRef.current) {
+      loadingMoreRef.current = true;
       setVisibleCount(v => v + CHAT_PAGE_SIZE);
     }
   };
