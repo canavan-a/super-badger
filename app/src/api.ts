@@ -283,6 +283,12 @@ export function formatDataPointValue(value: number, decimals: number): string {
   return value.toFixed(Math.max(0, Math.min(6, decimals)));
 }
 
+// Shared with the station list's live token count badge (see StationCard) so
+// both read the same "482k" style formatting.
+export function formatTokens(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+}
+
 export type HistoryRange = '1h' | '3h' | '12h' | '1d' | '2d' | '1w' | '1m' | '3m' | '1y' | 'max';
 
 export interface HistoryBucket {

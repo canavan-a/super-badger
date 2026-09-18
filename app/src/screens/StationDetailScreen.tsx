@@ -1,6 +1,7 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   ActivityIndicator,
+  Clipboard,
   FlatList,
   Modal,
   Pressable,
@@ -17,6 +18,7 @@ import {
   compactStation,
   deleteStation,
   formatDataPointValue,
+  formatTokens,
   getStation,
   getStationDataPoints,
   getStationUsage,
@@ -26,6 +28,7 @@ import {
   TokenUsage,
 } from '../api';
 import {allTurns, ChatState, Part, PendingPermission, PendingQuestion, Turn} from '../chat';
+import {Icon} from '../components/Icon';
 import {CodeBlockSegment, parseMarkdown} from '../markdown';
 import {platformConfirm} from '../platformConfirm';
 import {Route} from '../routes';
@@ -328,7 +331,7 @@ export function StationDetailScreen({
             {aborting ? (
               <ActivityIndicator color={theme.primaryText} />
             ) : (
-              <Text style={styles.stopButtonText}>Stop</Text>
+              <Icon name="stop" size={16} color={theme.primaryText} />
             )}
           </Pressable>
         )}
@@ -340,8 +343,10 @@ export function StationDetailScreen({
         <Pressable style={styles.sendButton} onPress={send}>
           {chat.busy && outbox.length === 0 ? (
             <ActivityIndicator color={theme.primaryText} />
+          ) : chat.busy ? (
+            <Text style={styles.sendButtonText}>Queue</Text>
           ) : (
-            <Text style={styles.sendButtonText}>{chat.busy ? 'Queue' : 'Send'}</Text>
+            <Icon name="send" size={18} color={theme.primaryText} />
           )}
         </Pressable>
       </View>
@@ -420,6 +425,14 @@ function ChatList({
   // Mirrors isNearBottom into render state (only on actual crossings, not
   // every onScroll tick) so the floating "Jump to bottom" button can appear.
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
+  // maintainVisibleContentPosition exists for the scroll-up pagination case
+  // (keeping the viewport anchored when older turns are prepended above the
+  // fold) — while near the bottom during a streaming reply, it was instead
+  // fighting followBottom's own scrollToOffset calls over who controls the
+  // scroll position, which is what produced the flashing/jumping. Only
+  // enabling it once actually scrolled away from the bottom keeps the two
+  // mechanisms from ever being active at the same time.
+  const [pinnedNearBottom, setPinnedNearBottom] = useState(true);
 
   const allChatTurns = allTurns(chat);
   // A freshly-opened long chat laying out its entire history at once is what
@@ -445,9 +458,15 @@ function ChatList({
   const handleScroll = (e: any) => {
     const {contentOffset, contentSize, layoutMeasurement} = e.nativeEvent;
     const distanceFromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
+    // Keeps auto-follow (streaming replies pinning to the bottom) responsive
+    // at a tight threshold — separate from the "Jump to bottom" button below,
+    // which should only appear once you've actually scrolled away by a
+    // decent amount, not the instant you nudge up a little.
     const nearBottom = distanceFromBottom < 150;
     isNearBottom.current = nearBottom;
-    setShowJumpToBottom(prev => (prev === nearBottom ? prev : !nearBottom));
+    setPinnedNearBottom(prev => (prev === nearBottom ? prev : nearBottom));
+    const scrolledUpAlot = distanceFromBottom > layoutMeasurement.height * 2;
+    setShowJumpToBottom(prev => (prev === scrolledUpAlot ? prev : scrolledUpAlot));
 
     if (contentOffset.y >= 400) {
       loadingMoreRef.current = false;
@@ -468,8 +487,16 @@ function ChatList({
 
   const jumpToBottom = () => {
     isNearBottom.current = true;
+    setPinnedNearBottom(true);
     setShowJumpToBottom(false);
-    listRef.current?.scrollToOffset({offset: contentHeight.current, animated: true});
+    // scrollToEnd (not the cached contentHeight offset followBottom uses)
+    // for a one-off tap: it measures the list's actual current end rather
+    // than relying on a height snapshot that can be a frame stale by the
+    // time you tap, which is what made this land short/inconsistent. The
+    // follow-up call after a beat corrects for any layout that was still
+    // settling (e.g. a just-mounted paged-in row) when the first one fired.
+    listRef.current?.scrollToEnd({animated: true});
+    setTimeout(() => listRef.current?.scrollToEnd({animated: false}), 100);
   };
 
   return (
@@ -485,8 +512,10 @@ function ChatList({
         scrollEventThrottle={16}
         // Keeps the viewport's visible content stable when older turns are
         // prepended by the pagination above, instead of the scroll position
-        // jumping as the list grows above the fold.
-        maintainVisibleContentPosition={{minIndexForVisible: 0}}
+        // jumping as the list grows above the fold — only while actually
+        // scrolled away from the bottom (see pinnedNearBottom's comment for
+        // why this can't also be active during bottom-follow).
+        maintainVisibleContentPosition={pinnedNearBottom ? undefined : {minIndexForVisible: 0}}
         onContentSizeChange={(_w, h) => {
           contentHeight.current = h;
           followBottom();
@@ -752,7 +781,7 @@ function MarkdownText({text, styles, theme}: {text: string; styles: Styles; them
       {segments.map((seg, i) => {
         switch (seg.kind) {
           case 'code-block':
-            return <CodeBlockView key={i} seg={seg} styles={styles} codeTokenStyles={codeTokenStyles} />;
+            return <CodeBlockView key={i} seg={seg} styles={styles} theme={theme} codeTokenStyles={codeTokenStyles} />;
           case 'heading':
             return (
               <Text key={i} style={[styles.assistantText, styles.heading, HEADING_STYLES[seg.level] ?? null]}>
@@ -790,28 +819,56 @@ const CODE_BLOCK_COLLAPSED_LINES = 12;
 function CodeBlockView({
   seg,
   styles,
+  theme,
   codeTokenStyles,
 }: {
   seg: CodeBlockSegment;
   styles: Styles;
+  theme: Theme;
   codeTokenStyles: Record<string, object>;
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
   const lineCount = seg.code.split('\n').length;
   const showToggle = lineCount > CODE_BLOCK_COLLAPSED_LINES;
 
+  const copy = () => {
+    Clipboard.setString(seg.code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
   return (
     <View style={styles.codeBlock}>
-      {seg.lang ? <Text style={styles.codeLang}>{seg.lang}</Text> : null}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-        <Text style={styles.codeText} numberOfLines={expanded ? undefined : CODE_BLOCK_COLLAPSED_LINES}>
-          {seg.tokens.map((tok, j) => (
-            <Text key={j} style={codeTokenStyles[tok.type]}>
-              {tok.text}
-            </Text>
-          ))}
-        </Text>
-      </ScrollView>
+      <View style={styles.codeBlockHeader}>
+        {seg.lang ? <Text style={styles.codeLang}>{seg.lang}</Text> : <View style={styles.codeLangSpacer} />}
+        <Pressable style={styles.codeCopyButton} onPress={copy} accessibilityLabel="Copy code">
+          {copied ? (
+            <Text style={styles.codeCopiedText}>Copied</Text>
+          ) : (
+            <Icon name="copy" size={14} color={theme.textMuted} />
+          )}
+        </Pressable>
+      </View>
+      <View style={!expanded && styles.codeScrollClamped}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          // Nested inside the chat's vertical FlatList - without this,
+          // Android's gesture arbitration can give the outer list the touch
+          // stream entirely, so a horizontal swipe on a code block never
+          // actually scrolls it.
+          nestedScrollEnabled
+          directionalLockEnabled>
+          <Text style={styles.codeText} numberOfLines={expanded ? undefined : CODE_BLOCK_COLLAPSED_LINES}>
+            {seg.tokens.map((tok, j) => (
+              <Text key={j} style={codeTokenStyles[tok.type]}>
+                {tok.text}
+              </Text>
+            ))}
+          </Text>
+        </ScrollView>
+      </View>
       {showToggle && (
         <Text style={styles.toolToggle} onPress={() => setExpanded(e => !e)}>
           {expanded ? 'Show less' : 'Show more'}
@@ -855,14 +912,17 @@ function ToolPartView({part, styles}: {part: Extract<Part, {kind: 'tool'}>; styl
   // numberOfLines can't tell us whether it actually truncated anything, so
   // this is a rough proxy for "is there plausibly more than the clip shows"
   // — good enough to decide whether the toggle is worth showing at all.
-  const showToggle = (part.error?.length ?? 0) > 200 || (part.output?.length ?? 0) > 200;
+  const showToggle =
+    (part.error?.length ?? 0) > 200 || (part.output?.length ?? 0) > 200 || (part.title?.length ?? 0) > 40;
 
   return (
     <View style={styles.toolBox}>
-      <View style={styles.toolHeader}>
+      <Pressable style={styles.toolHeader} onPress={() => setExpanded(e => !e)}>
         <Text style={[styles.toolBadge, badgeStyle]}>{part.status}</Text>
-        <Text style={styles.toolName}>{part.title || part.tool}</Text>
-      </View>
+        <Text style={styles.toolName} numberOfLines={expanded ? undefined : 1}>
+          {part.title || part.tool}
+        </Text>
+      </Pressable>
       {part.status === 'error' && part.error ? (
         <Pressable onPress={() => setExpanded(e => !e)}>
           <Text style={styles.toolError} numberOfLines={expanded ? undefined : 4}>
@@ -886,9 +946,6 @@ function ToolPartView({part, styles}: {part: Extract<Part, {kind: 'tool'}>; styl
   );
 }
 
-function formatTokens(n: number): string {
-  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
-}
 
 
 function makeStyles(theme: Theme) {
@@ -1132,6 +1189,11 @@ function makeStyles(theme: Theme) {
     },
     bubbleAssistant: {
       alignSelf: 'flex-start',
+      // Wider than the shared 85% cap (still shy of 100% so it doesn't
+      // touch the screen edge) — the assistant's replies are the content
+      // being read, so they benefit from the extra width more than the
+      // user's own short prompts do.
+      maxWidth: '95%',
       backgroundColor: theme.bubbleAssistant,
       gap: 6,
     },
@@ -1174,17 +1236,43 @@ function makeStyles(theme: Theme) {
       borderRadius: 6,
       padding: 8,
     },
+    codeBlockHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 4,
+    },
     codeLang: {
       fontSize: 10,
       fontWeight: '700',
       color: theme.textMuted,
       textTransform: 'uppercase',
-      marginBottom: 4,
+    },
+    codeLangSpacer: {
+      flex: 1,
+    },
+    codeCopyButton: {
+      padding: 4,
+    },
+    codeCopiedText: {
+      fontSize: 10,
+      fontWeight: '600',
+      color: theme.textMuted,
     },
     codeText: {
       fontFamily: 'monospace',
       fontSize: 12,
+      lineHeight: 16,
       color: theme.codeText,
+    },
+    // numberOfLines alone doesn't reliably clip a Text inside a horizontal
+    // ScrollView (the ScrollView gives it unconstrained width, and Android in
+    // particular can then ignore the line clamp) — this hard height cap,
+    // matching codeText's lineHeight * CODE_BLOCK_COLLAPSED_LINES, is what
+    // actually guarantees a long code block can't grow unbounded.
+    codeScrollClamped: {
+      maxHeight: 16 * CODE_BLOCK_COLLAPSED_LINES,
+      overflow: 'hidden',
     },
     reasoningBox: {
       borderLeftWidth: 2,
@@ -1230,6 +1318,7 @@ function makeStyles(theme: Theme) {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 6,
+      minWidth: 0,
     },
     toolBadge: {
       fontSize: 10,
@@ -1253,6 +1342,8 @@ function makeStyles(theme: Theme) {
       color: theme.danger,
     },
     toolName: {
+      flex: 1,
+      minWidth: 0,
       fontSize: 12,
       fontWeight: '600',
       fontFamily: 'monospace',
@@ -1318,11 +1409,8 @@ function makeStyles(theme: Theme) {
       backgroundColor: theme.danger,
       borderRadius: 6,
       paddingHorizontal: 16,
+      alignItems: 'center',
       justifyContent: 'center',
-    },
-    stopButtonText: {
-      color: theme.primaryText,
-      fontWeight: '600',
     },
   });
 }

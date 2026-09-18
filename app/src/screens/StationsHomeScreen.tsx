@@ -2,6 +2,7 @@ import React from 'react';
 import {ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View} from 'react-native';
 
 import {Station} from '../api';
+import {StationCard} from '../components/StationCard';
 import {Route} from '../routes';
 import {Theme, useTheme} from '../theme';
 
@@ -28,22 +29,7 @@ export function StationsHomeScreen({
         keyExtractor={s => String(s.id)}
         contentContainerStyle={styles.list}
         renderItem={({item}) => (
-          <Pressable
-            style={styles.card}
-            onPress={() => onNavigate({name: 'stationDetail', id: item.id})}>
-            <View style={styles.cardHeader}>
-              <Text style={styles.cardTitle}>{item.name}</Text>
-              <View style={styles.statusRow}>
-                <View
-                  style={[styles.dot, {backgroundColor: item.reachable ? theme.success : theme.danger}]}
-                />
-                <Text style={styles.cardStatus}>{item.reachable ? item.status : 'unreachable'}</Text>
-              </View>
-            </View>
-            <Text style={styles.cardSubtitle}>
-              {item.provider_id} / {item.model_id}
-            </Text>
-          </Pressable>
+          <StationCard station={item} onPress={() => onNavigate({name: 'stationDetail', id: item.id})} />
         )}
         ListEmptyComponent={
           loading ? (
@@ -77,44 +63,6 @@ function makeStyles(theme: Theme) {
     list: {
       padding: 16,
       gap: 10,
-    },
-    card: {
-      borderWidth: 1,
-      borderColor: theme.border,
-      borderRadius: 10,
-      padding: 14,
-      backgroundColor: theme.surface,
-    },
-    cardHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-    },
-    cardTitle: {
-      fontSize: 16,
-      fontWeight: '700',
-      color: theme.text,
-    },
-    statusRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-    },
-    dot: {
-      width: 7,
-      height: 7,
-      borderRadius: 4,
-    },
-    cardStatus: {
-      fontSize: 11,
-      fontWeight: '600',
-      textTransform: 'uppercase',
-      color: theme.textMuted,
-    },
-    cardSubtitle: {
-      fontSize: 13,
-      color: theme.textMuted,
-      marginTop: 4,
     },
     spinner: {
       marginTop: 40,

@@ -4,11 +4,14 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Copy,
   GripVertical,
   LucideIcon,
   Menu,
   MoreVertical,
+  Send,
   Settings,
+  Square,
   Trash2,
   X,
 } from 'lucide-react-native';
@@ -30,7 +33,10 @@ export type IconName =
   | 'trash'
   | 'close'
   | 'check'
-  | 'drag-handle';
+  | 'drag-handle'
+  | 'copy'
+  | 'send'
+  | 'stop';
 
 const ICONS: Record<IconName, LucideIcon> = {
   menu: Menu,
@@ -43,7 +49,14 @@ const ICONS: Record<IconName, LucideIcon> = {
   close: X,
   check: Check,
   'drag-handle': GripVertical,
+  copy: Copy,
+  send: Send,
+  stop: Square,
 };
+
+// Icons that read better solid than outlined (a hollow square doesn't read
+// as clearly as "stop" as a filled one does).
+const FILLED: Partial<Record<IconName, boolean>> = {stop: true};
 
 export function Icon({
   name,
@@ -57,5 +70,12 @@ export function Icon({
   strokeWidth?: number;
 }): React.JSX.Element {
   const IconComponent = ICONS[name];
-  return <IconComponent size={size} color={color} strokeWidth={strokeWidth} />;
+  return (
+    <IconComponent
+      size={size}
+      color={color}
+      strokeWidth={strokeWidth}
+      fill={FILLED[name] ? color : 'none'}
+    />
+  );
 }

@@ -16,7 +16,7 @@ import {settingsStore} from './settings';
 import {Theme, ThemeProvider, useTheme} from './theme';
 
 const TITLES: Record<Route['name'], string> = {
-  stations: 'super-badger',
+  stations: 'Super Badger',
   stationDetail: 'Station',
   stationSettings: 'Data Points',
   addStation: 'Add Station',
@@ -114,13 +114,20 @@ function AppInner(): React.JSX.Element {
     };
   }, []);
 
-  const navigate = (next: Route) => {
+  // useCallback (stable identity) matters here: it's passed down as
+  // `onNavigate` and used as an effect dependency in child screens (e.g.
+  // StationSettingsScreen's header-back-button effect) — a fresh function
+  // reference every render would retrigger those effects every render, and
+  // since this effect's body itself calls a setState, that becomes an
+  // infinite render loop ("Maximum update depth exceeded"), confirmed live
+  // via adb logcat.
+  const navigate = useCallback((next: Route) => {
     if (next.name !== 'stationDetail' && next.name !== 'stationSettings') {
       setHeaderInfo(null);
     }
     setRoute(next);
     setDrawerOpen(false);
-  };
+  }, []);
 
   const openStation = useCallback((stationId: number) => {
     navigate({name: 'stationDetail', id: stationId});
@@ -201,7 +208,7 @@ function AppInner(): React.JSX.Element {
         </View>
       )}
 
-      <View style={styles.header}>
+      <View style={[styles.header, showingDetailHeader && styles.headerDetail]}>
         <Pressable
           style={styles.hamburger}
           onPress={() => {
@@ -331,18 +338,25 @@ function makeStyles(theme: Theme) {
     },
     header: {
       flexDirection: 'row',
-      // flex-start (not center): centering against a cross-axis height set
-      // by whichever column is tallest (the title/badges column, once
-      // badges wrap to a second line) left the hamburger and action buttons
-      // vertically centered in that taller row - i.e. visibly padded below
-      // them relative to the title's top edge. Top-aligning keeps every
-      // column starting at the same line regardless of how tall the badge
-      // row grows.
-      alignItems: 'flex-start',
+      // Plain center alignment for a single-line title (every non-station
+      // screen, and the station screens before their data loads) - the
+      // hamburger/actions are the same height as the title line here, so
+      // centering them together looks right.
+      alignItems: 'center',
       paddingHorizontal: 12,
       paddingVertical: 12,
       borderBottomWidth: 1,
       borderBottomColor: theme.border,
+    },
+    // Once a station header's badges can wrap to a second line, centering
+    // against that taller block left the hamburger/action buttons visibly
+    // padded below the title's top edge. Top-aligning instead keeps every
+    // column starting at the same line regardless of how tall the badge
+    // row grows - only applied here, not on the plain single-line title
+    // screens above, where top-aligning made the title look off-center
+    // against the fixed-height hamburger/action icon boxes.
+    headerDetail: {
+      alignItems: 'flex-start',
     },
     hamburger: {
       width: 36,

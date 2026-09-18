@@ -19,9 +19,9 @@ export function StationsDrawerContent({
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <Pressable style={styles.header} onPress={() => onNavigate({name: 'stations'})}>
         <Text style={styles.title}>Stations</Text>
-      </View>
+      </Pressable>
 
       <FlatList
         style={styles.list}
