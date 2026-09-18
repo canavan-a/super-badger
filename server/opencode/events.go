@@ -219,6 +219,17 @@ func (b *EventBroker) record(sessionID string, evt Event) {
 		return
 	}
 
+	// session.error is a one-off notification, not conversation state — if
+	// it were cached, every later History() replay (e.g. a client
+	// reopening the station or reconnecting) would re-deliver the same
+	// stale error and re-trigger the client's error banner indefinitely,
+	// even long after the client dismissed it and the underlying problem
+	// (if any) passed. Live subscribers still see it via dispatch; it's
+	// only excluded from the replay cache.
+	if evt.Type == "session.error" {
+		return
+	}
+
 	key, keyed := historyKey(evt)
 	if keyed {
 		if idx, exists := b.historyIndex[sessionID][key]; exists {
