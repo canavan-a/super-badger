@@ -316,7 +316,7 @@ export function StationDetailScreen({
         />
       )}
 
-      <ChatList chat={chat} outbox={outbox} styles={styles} theme={theme} />
+      <ChatList chat={chat} outbox={outbox} compacting={compacting} styles={styles} theme={theme} />
 
       {outbox.length > 0 && (
         <Text style={styles.queueBanner}>
@@ -413,11 +413,13 @@ export function StationDetailScreen({
 function ChatList({
   chat,
   outbox,
+  compacting,
   styles,
   theme,
 }: {
   chat: ChatState;
   outbox: QueuedMessage[];
+  compacting: boolean;
   styles: Styles;
   theme: Theme;
 }): React.JSX.Element {
@@ -540,7 +542,9 @@ function ChatList({
         style={styles.chat}
         data={turns}
         keyExtractor={turn => turn.messageID}
-        renderItem={({item}) => <TurnView turn={item} styles={styles} theme={theme} />}
+        renderItem={({item}) => (
+          <TurnView turn={item} compacting={compacting} styles={styles} theme={theme} />
+        )}
         contentContainerStyle={styles.chatContent}
         onScroll={handleScroll}
         scrollEventThrottle={16}
@@ -729,7 +733,17 @@ function QuestionPrompt({
   );
 }
 
-function TurnView({turn, styles, theme}: {turn: Turn; styles: Styles; theme: Theme}): React.JSX.Element {
+function TurnView({
+  turn,
+  compacting,
+  styles,
+  theme,
+}: {
+  turn: Turn;
+  compacting: boolean;
+  styles: Styles;
+  theme: Theme;
+}): React.JSX.Element {
   if (turn.role === 'user') {
     return (
       <View style={[styles.bubble, styles.bubbleYou]}>
@@ -749,7 +763,19 @@ function TurnView({turn, styles, theme}: {turn: Turn; styles: Styles; theme: The
       {turn.partOrder.map(id => (
         <PartView key={id} part={turn.parts[id]} styles={styles} theme={theme} />
       ))}
-      {!turn.done && turn.partOrder.length === 0 && <ActivityIndicator size="small" color={theme.textMuted} />}
+      {!turn.done && turn.partOrder.length === 0 && (
+        // Compact (see StationDetailScreen's doCompact) creates its own
+        // empty assistant turn on the wire — opencode's own summarize call
+        // never streams any parts into it — so without `compacting` this
+        // rendered as an indefinite bare spinner with nothing to explain it
+        // ("a blank dot chat"). A normal in-flight reply's spinner (driven
+        // by chat.busy, not this compact-only flag) is unaffected.
+        compacting ? (
+          <Text style={styles.chip}>⚙ Compaction triggered</Text>
+        ) : (
+          <ActivityIndicator size="small" color={theme.textMuted} />
+        )
+      )}
     </View>
   );
 }

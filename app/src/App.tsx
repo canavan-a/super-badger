@@ -1,5 +1,16 @@
-import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {Platform, Pressable, SafeAreaView, StatusBar, StyleSheet, Text, View} from 'react-native';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {
+  Animated,
+  Dimensions,
+  PanResponder,
+  Platform,
+  Pressable,
+  SafeAreaView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
 import {checkServerHealth, listStations, Station} from './api';
 import {Drawer} from './components/Drawer';
@@ -202,6 +213,59 @@ function AppInner(): React.JSX.Element {
   const showingDetailHeader = (route.name === 'stationDetail' || route.name === 'stationSettings') && headerInfo;
   const styles = makeStyles(theme);
 
+  // Edge-swipe station cycling: dragging in from the right edge of a
+  // station's chat screen steps to the *previous* station in the list
+  // (wrapping around at the start) — with 3 stations that's 3, 2, 1, 3, 2,
+  // 1, ... starting from station 3. "Previous" (not "next") is what actually
+  // matches a swipe that drags new content in from the right: the station
+  // that slides into view from off the right edge is the one before the
+  // current one in list order.
+  //
+  // Built on core PanResponder/Animated rather than adding
+  // react-native-gesture-handler/reanimated — those need native
+  // linking/rebuild, which is a lot of new surface for one gesture when the
+  // built-in APIs already cover it.
+  const orderedStations = useMemo(() => [...stations].sort((a, b) => a.id - b.id), [stations]);
+  const currentStationIndex =
+    route.name === 'stationDetail' ? orderedStations.findIndex(s => s.id === route.id) : -1;
+  const screenWidth = Dimensions.get('window').width;
+  const swipeX = useRef(new Animated.Value(0)).current;
+  const EDGE_ZONE = 28;
+  const SWIPE_THRESHOLD = 70;
+
+  const canSwipe = route.name === 'stationDetail' && currentStationIndex >= 0 && orderedStations.length > 1;
+
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: evt => canSwipe && evt.nativeEvent.pageX > screenWidth - EDGE_ZONE,
+        onMoveShouldSetPanResponder: (evt, gesture) =>
+          canSwipe && evt.nativeEvent.pageX > screenWidth - EDGE_ZONE && gesture.dx < -5,
+        onPanResponderMove: (_evt, gesture) => {
+          // Only follow a leftward drag (new content coming in from the
+          // right) — clamp so it can't be dragged the other way.
+          swipeX.setValue(Math.min(0, gesture.dx));
+        },
+        onPanResponderRelease: (_evt, gesture) => {
+          if (gesture.dx < -SWIPE_THRESHOLD) {
+            Animated.timing(swipeX, {toValue: -screenWidth, duration: 180, useNativeDriver: true}).start(() => {
+              const prevIndex = (currentStationIndex - 1 + orderedStations.length) % orderedStations.length;
+              navigate({name: 'stationDetail', id: orderedStations[prevIndex].id});
+              // Land the incoming screen just off the right edge, then
+              // animate it sliding in to 0 — the "gradual" part of the
+              // transition, rather than an instant cut to the new station.
+              swipeX.setValue(screenWidth);
+              Animated.timing(swipeX, {toValue: 0, duration: 220, useNativeDriver: true}).start();
+            });
+          } else {
+            Animated.spring(swipeX, {toValue: 0, useNativeDriver: true, bounciness: 6}).start();
+          }
+        },
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [canSwipe, currentStationIndex, orderedStations, screenWidth],
+  );
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle={theme.name === 'light' || theme.name === 'sepia' ? 'dark-content' : 'light-content'} />
@@ -294,7 +358,9 @@ function AppInner(): React.JSX.Element {
         ) : null}
       </View>
 
-      <View style={styles.body}>
+      <Animated.View
+        style={[styles.body, {transform: [{translateX: swipeX}]}]}
+        {...panResponder.panHandlers}>
         {route.name === 'stations' && (
           <StationsHomeScreen stations={stations} loading={loading} onNavigate={navigate} />
         )}
@@ -321,7 +387,7 @@ function AppInner(): React.JSX.Element {
         )}
         {route.name === 'addStation' && <AddStationScreen onNavigate={navigate} />}
         {route.name === 'settings' && <SettingsScreen />}
-      </View>
+      </Animated.View>
 
       <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)}>
         <StationsDrawerContent stations={stations} loading={loading} onNavigate={navigate} />

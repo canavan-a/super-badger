@@ -38,7 +38,12 @@ function connect(): void {
   ws.onmessage = ev => {
     try {
       const msg = JSON.parse(ev.data);
-      void handleNotificationMsg(msg);
+      handleNotificationMsg(msg).catch(err => {
+        // Fire-and-forget from a WS message handler — without this, a
+        // rejection here (e.g. Notifee misbehaving) vanished with zero
+        // trace, no different from the notification just never showing up.
+        console.warn('[BackgroundMonitorService] handleNotificationMsg failed', err);
+      });
     } catch {
       // ignore malformed frames
     }

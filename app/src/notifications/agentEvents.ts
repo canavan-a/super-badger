@@ -49,7 +49,21 @@ export async function handleNotificationMsg(msg: NotificationMsg): Promise<void>
   // Both kinds clear prior *chat* notifications for the station ("a data
   // notification overrides chat, but chat never clears data" — see above);
   // neither kind ever cancels an existing data notification.
-  await clearChatNotifications(msg.station_id);
+  //
+  // Best-effort: this used to be a plain `await` with nothing catching a
+  // rejection, and the caller (BackgroundMonitorService's onmessage) invokes
+  // this fire-and-forget with no .catch() either — so any failure here (a
+  // stale/bad notification id, a Notifee call misbehaving from the
+  // foreground-service JS context, etc.) silently aborted the whole function
+  // *before* the switch below ever got to call displayNotification. That
+  // turned "can't clean up an old notification" into "no notification ever
+  // shows again," for every message type, which is what actually happened
+  // here — never let housekeeping block the notification it's guarding.
+  try {
+    await clearChatNotifications(msg.station_id);
+  } catch (err) {
+    console.warn('[agentEvents] clearChatNotifications failed, continuing anyway', err);
+  }
 
   const data = (kind: NotificationKind) => ({stationId: String(msg.station_id), kind});
 
