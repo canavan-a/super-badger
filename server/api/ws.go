@@ -163,6 +163,9 @@ func stationWS(svc *station.Service, broker *opencode.EventBroker) gin.HandlerFu
 				if !ok {
 					return
 				}
+				if evt.Type == "session.error" {
+					log.Printf("[station %d] opencode session.error: %s", id, string(evt.Properties))
+				}
 				if err := conn.WriteJSON(evt); err != nil {
 					unsubscribe()
 					return
