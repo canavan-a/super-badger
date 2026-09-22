@@ -1,4 +1,4 @@
-// Fires the two alert notifications the background monitor cares about —
+// Fires the alert notifications the background monitor cares about —
 // see server/api/ws.go's notificationsWS for the message shapes this
 // consumes. Deterministic per-station-per-type notification IDs mean a
 // repeat event replaces the previous notification instead of stacking; no
@@ -11,7 +11,7 @@ import {formatDataPointValue} from '../api';
 import {CH_ALERTS} from './channels';
 
 export interface NotificationMsg {
-  type: 'agent_idle' | 'permission_requested' | 'datapoint_threshold';
+  type: 'agent_idle' | 'permission_requested' | 'question_requested' | 'datapoint_threshold';
   station_id: number;
   station_name: string;
   station_color?: string;
@@ -26,8 +26,9 @@ export interface NotificationMsg {
 
 // Every notification is one of two kinds, tagged via `data.kind` so a later
 // notification's clearing pass can tell them apart (see below):
-//  - "chat": agent_idle / permission_requested — transient "come look at the
-//    conversation" pings, fine to replace with whatever's newest.
+//  - "chat": agent_idle / permission_requested / question_requested —
+//    transient "come look at the conversation" pings, fine to replace with
+//    whatever's newest.
 //  - "data": datapoint_threshold — a temperature/usage/etc. threshold that
 //    tripped. These must never be silently cleared by a chat notification:
 //    the owner needs to still see it went above/below threshold even if the
@@ -89,6 +90,22 @@ export async function handleNotificationMsg(msg: NotificationMsg): Promise<void>
         id: `permission-${msg.station_id}`,
         title: 'Permission requested',
         body: `${msg.station_name} needs a permission decision`,
+        data: data('chat'),
+        android: {
+          channelId: CH_ALERTS,
+          smallIcon: 'ic_notification',
+          pressAction: {id: 'default'},
+          timestamp: Date.now(),
+          showTimestamp: true,
+          color: msg.station_color,
+        },
+      });
+      return;
+    case 'question_requested':
+      await notifee.displayNotification({
+        id: `question-${msg.station_id}`,
+        title: 'Question asked',
+        body: `${msg.station_name} needs an answer`,
         data: data('chat'),
         android: {
           channelId: CH_ALERTS,

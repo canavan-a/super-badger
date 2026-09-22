@@ -117,6 +117,7 @@
             echo "  db-reset         # delete the local sqlite db (fresh one created on next start)"
             echo "  badger           # manage API auth tokens, e.g. 'badger token generate <label>'"
             echo "  run-app-web      # foreground: mobile app web target via Vite (hot reload) on :5173"
+            echo "  run-app-web-build # builds app/dist — the static bundle services.superbadger.web serves in production"
             echo "  run-app-android  # foreground: mobile app on a connected Android device/emulator (needs system Android SDK)"
             echo "  dev-help         # re-print this list"
             echo "  (run-opencode / run-superbadger / run-app-web / run-app-android each attach to your terminal — run each in its own terminal, inside 'nix develop')"
@@ -128,6 +129,16 @@
             set -e
             cd "${repoRoot}/app"
             exec ${pkgs.nodejs_22}/bin/npm run web
+          '';
+
+          # Builds the static production bundle (app/dist) that
+          # services.superbadger.web (see module.nix) serves in production —
+          # lets that be tested locally (e.g. SUPERBADGER_STATIC_DIR=app/dist
+          # run-superbadger) without going through a NixOS activation.
+          run-app-web-build = pkgs.writeShellScriptBin "run-app-web-build" ''
+            set -e
+            cd "${repoRoot}/app"
+            exec ${pkgs.nodejs_22}/bin/npm run build:web
           '';
 
           # Requires the system-wide Android SDK/emulator already on this
@@ -155,6 +166,7 @@
               run-opencode
               run-superbadger
               run-app-web
+              run-app-web-build
               run-app-android
               dev-up
               dev-down

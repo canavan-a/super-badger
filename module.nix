@@ -7,7 +7,9 @@
 # reproducibility requirement that would justify carrying it (same tradeoff
 # horus-33 makes for horus-server). It rebuilds from ${self}/server on every
 # activation instead; goCache persists the module/build cache across rebuilds
-# so this stays fast after the first run.
+# so this stays fast after the first run. The mobile app's web build
+# (services.superbadger.web) follows the exact same tradeoff via npmCache
+# instead of an npmDepsHash.
 { self }:
 { config, lib, pkgs, ... }:
 let
@@ -15,6 +17,8 @@ let
   serverBin = "/var/lib/superbadger/bin/superbadger";
   badgerBin = "/var/lib/superbadger/bin/badger";
   goCache = "/var/cache/superbadger-go";
+  npmCache = "/var/cache/superbadger-npm";
+  webDir = "/var/lib/superbadger/web";
 
   # System-wide `badger` command (e.g. `badger token generate`) — a thin
   # wrapper so an admin doesn't have to know/export SUPERBADGER_DB_PATH by
@@ -74,6 +78,21 @@ in
       };
     };
 
+    web = {
+      enable = lib.mkEnableOption "serving the mobile app's built web client from superbadger, on its own port";
+
+      listenAddr = lib.mkOption {
+        type = lib.types.str;
+        default = ":8081";
+        description = ''
+          Address for the static web client to listen on — separate from
+          listenAddr (the API). No auth or CORS is applied here (see
+          server/static); exposing this externally (reverse proxy, tunnel,
+          etc.) is left up to you.
+        '';
+      };
+    };
+
     mullvad = {
       enable = lib.mkEnableOption "Mullvad VPN, controllable through superbadger's API";
 
@@ -118,6 +137,8 @@ in
       "d /var/lib/superbadger 0750 superbadger superbadger -"
       "d /var/lib/superbadger/bin 0755 root root -"
       "d ${goCache} 0755 root root -"
+    ] ++ lib.optionals cfg.web.enable [
+      "d ${npmCache} 0755 root root -"
     ];
 
     users.users.superbadger = {
@@ -129,7 +150,7 @@ in
     system.activationScripts.superbadgerBuild = {
       deps = [ ];
       text = ''
-        export PATH=${pkgs.go}/bin:${pkgs.bash}/bin:$PATH
+        export PATH=${pkgs.go}/bin:${pkgs.bash}/bin:${pkgs.nodejs_22}/bin:$PATH
         export HOME=${goCache}
         export GOCACHE=${goCache}/build
         export GOPATH=${goCache}/path
@@ -142,6 +163,21 @@ in
         mv -f ${serverBin}.new ${serverBin}
         ${pkgs.go}/bin/go build -o ${badgerBin}.new ./cmd/badger
         mv -f ${badgerBin}.new ${badgerBin}
+      '' + lib.optionalString cfg.web.enable ''
+        # Same rebuild-from-source-every-activation tradeoff as the Go build
+        # above, applied to the mobile app's web target (npm ci + vite
+        # build) instead of a buildNpmPackage derivation that would need an
+        # npmDepsHash kept in sync by hand.
+        export npm_config_cache=${npmCache}
+        cd ${self}/app
+        ${pkgs.nodejs_22}/bin/npm ci
+        ${pkgs.nodejs_22}/bin/npm run build:web
+        rm -rf ${webDir}.new
+        cp -r dist ${webDir}.new
+        chown -R superbadger:superbadger ${webDir}.new
+        rm -rf ${webDir}
+        mv -f ${webDir}.new ${webDir}
+      '' + ''
         ${pkgs.systemd}/bin/systemctl try-restart superbadger.service || true
       '';
     };
@@ -173,6 +209,9 @@ in
         SUPERBADGER_METRICS_INTERVAL = cfg.metrics.interval;
       } // lib.optionalAttrs cfg.mullvad.enable {
         SUPERBADGER_MULLVAD_BIN = "${pkgs.mullvad-vpn}/bin/mullvad";
+      } // lib.optionalAttrs cfg.web.enable {
+        SUPERBADGER_STATIC_DIR = webDir;
+        SUPERBADGER_STATIC_LISTEN_ADDR = cfg.web.listenAddr;
       };
       serviceConfig = {
         ExecStart = serverBin;

@@ -10,6 +10,12 @@ type Config struct {
 	OpencodeBaseURL  string
 	OpencodePassword string
 	MullvadBin       string
+	// StaticDir, when non-empty, enables serving the mobile app's built web
+	// client (see server/static) on StaticListenAddr — a separate port from
+	// ListenAddr, left disabled by default so existing API-only deployments
+	// are unaffected.
+	StaticDir        string
+	StaticListenAddr string
 }
 
 func Load() Config {
@@ -22,6 +28,8 @@ func Load() Config {
 		// launched unsecured, which is also fine for local dev.
 		OpencodePassword: os.Getenv("SUPERBADGER_OPENCODE_PASSWORD"),
 		MullvadBin:       getEnv("SUPERBADGER_MULLVAD_BIN", "mullvad"),
+		StaticDir:        os.Getenv("SUPERBADGER_STATIC_DIR"),
+		StaticListenAddr: getEnv("SUPERBADGER_STATIC_LISTEN_ADDR", ":8081"),
 	}
 }
 

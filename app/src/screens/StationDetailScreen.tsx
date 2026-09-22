@@ -133,10 +133,11 @@ export function StationDetailScreen({
     }
   };
 
-  // Sending a prompt blurs the composer (the platform hides the on-screen
-  // keyboard / moves focus away while chat.busy disables it) — jump focus
-  // back the moment the reply finishes so the user can immediately keep
-  // typing without having to reach for the input again.
+  // If the composer lost focus some other way while a reply was in flight
+  // (e.g. the user manually dismissed the keyboard), jump focus back the
+  // moment it finishes so they can immediately keep typing without reaching
+  // for the input again. Sending itself no longer blurs it — see the
+  // composer TextInput's blurOnSubmit={false}.
   const wasBusy = useRef(false);
   useEffect(() => {
     if (wasBusy.current && !chat.busy) {
@@ -334,16 +335,34 @@ export function StationDetailScreen({
           placeholder="Prompt this station's session..."
           placeholderTextColor={theme.textMuted}
           onSubmitEditing={send}
+          // A single-line TextInput defaults blurOnSubmit to true, so
+          // without this, hitting send auto-dismisses the keyboard at the
+          // exact instant the WS message goes out and the reply starts
+          // streaming in — the resulting keyboard-close resize collided with
+          // the new content landing and was a big part of the send-time
+          // jank. Keeping the keyboard open (as most chat apps do) removes
+          // that resize entirely.
+          blurOnSubmit={false}
         />
-        {chat.busy && (
-          <Pressable style={styles.stopButton} onPress={doAbort} disabled={aborting}>
-            {aborting ? (
-              <ActivityIndicator color={theme.primaryText} />
-            ) : (
-              <Icon name="stop" size={16} color={theme.primaryText} />
-            )}
-          </Pressable>
-        )}
+        {
+          // Always mounted (visibility/hit-testing toggled by chat.busy)
+          // rather than conditionally rendered — mounting/unmounting this
+          // button reflows the row (composerInput's flex width changes, plus
+          // a fresh layout pass) at the same moment chat.busy flips on
+          // send, compounding the same jank the keyboard fix above
+          // addresses. Keeping it always present keeps that layout stable.
+        }
+        <Pressable
+          style={[styles.stopButton, !chat.busy && styles.stopButtonHidden]}
+          onPress={doAbort}
+          disabled={aborting || !chat.busy}
+          pointerEvents={chat.busy ? 'auto' : 'none'}>
+          {aborting ? (
+            <ActivityIndicator color={theme.primaryText} />
+          ) : (
+            <Icon name="stop" size={16} color={theme.primaryText} />
+          )}
+        </Pressable>
         {
           // Sending while busy no longer blocks — it queues (see
           // useStationChat's outbox/pump) instead of racing the in-flight
@@ -510,13 +529,25 @@ function ChatList({
     }
   };
 
+  // Coalesces same-frame followBottom triggers into one scrollToOffset call.
+  // Right when a message is sent, onLayout (keyboard dismissing) and
+  // onContentSizeChange (the new turn landing) can both fire within the same
+  // frame — without this, each fired its own imperative scrollToOffset back
+  // to back, which is what made sending a message visibly stutter/jump even
+  // though ordinary mid-stream token arrival (only onContentSizeChange,
+  // repeatedly, with a stable layout) stayed smooth.
+  const followBottomScheduled = useRef(false);
   const followBottom = () => {
-    if (isNearBottom.current) {
+    if (!isNearBottom.current || followBottomScheduled.current) return;
+    followBottomScheduled.current = true;
+    requestAnimationFrame(() => {
+      followBottomScheduled.current = false;
+      if (!isNearBottom.current) return;
       // animated:false — an animation queued mid-stream just adds more lag
       // for the next update to out-run; snapping instantly is what actually
       // keeps pace with tokens arriving every ~50ms.
       listRef.current?.scrollToOffset({offset: contentHeight.current, animated: false});
-    }
+    });
   };
 
   const jumpToBottom = () => {
@@ -1035,6 +1066,26 @@ const HEADING_STYLES: Record<number, object> = {
 // minWidth:0 to actually shrink/wrap instead of forcing its container
 // wider), fixed on toolBox/toolOutput/toolError below. The numberOfLines
 // clipping is also now tap-to-expand instead of a silent permanent cutoff.
+// The command/args a tool call was invoked with — arrives in `state.input`
+// from the very start (it's needed to invoke the tool at all), unlike
+// `title`/`output` which some tools only fill in once running/completed.
+// Was already captured into Part.input by chat.ts's partFromRaw, but never
+// rendered anywhere, so a pending/running call showed nothing but the bare
+// tool name ("pending bash") with no indication of what it was actually
+// about to run.
+function formatToolInput(input: unknown): string | null {
+  if (input == null) return null;
+  if (typeof input === 'object' && 'command' in (input as Record<string, unknown>)) {
+    const command = (input as Record<string, unknown>).command;
+    if (typeof command === 'string') return command;
+  }
+  try {
+    return JSON.stringify(input);
+  } catch {
+    return null;
+  }
+}
+
 function ToolPartView({part, styles}: {part: Extract<Part, {kind: 'tool'}>; styles: Styles}): React.JSX.Element {
   const [expanded, setExpanded] = useState(false);
   const badgeStyle =
@@ -1044,11 +1095,16 @@ function ToolPartView({part, styles}: {part: Extract<Part, {kind: 'tool'}>; styl
       ? styles.toolBadgeError
       : styles.toolBadgePending;
 
+  const inputText = part.status === 'pending' || part.status === 'running' ? formatToolInput(part.input) : null;
+
   // numberOfLines can't tell us whether it actually truncated anything, so
   // this is a rough proxy for "is there plausibly more than the clip shows"
   // — good enough to decide whether the toggle is worth showing at all.
   const showToggle =
-    (part.error?.length ?? 0) > 200 || (part.output?.length ?? 0) > 200 || (part.title?.length ?? 0) > 40;
+    (part.error?.length ?? 0) > 200 ||
+    (part.output?.length ?? 0) > 200 ||
+    (part.title?.length ?? 0) > 40 ||
+    (inputText?.length ?? 0) > 200;
 
   return (
     <View style={styles.toolBox}>
@@ -1058,6 +1114,13 @@ function ToolPartView({part, styles}: {part: Extract<Part, {kind: 'tool'}>; styl
           {part.title || part.tool}
         </Text>
       </Pressable>
+      {inputText ? (
+        <Pressable onPress={() => setExpanded(e => !e)}>
+          <Text style={styles.toolInputText} numberOfLines={expanded ? undefined : 4}>
+            {inputText}
+          </Text>
+        </Pressable>
+      ) : null}
       {part.status === 'error' && part.error ? (
         <Pressable onPress={() => setExpanded(e => !e)}>
           <Text style={styles.toolError} numberOfLines={expanded ? undefined : 4}>
@@ -1521,6 +1584,18 @@ function makeStyles(theme: Theme) {
       minWidth: 0,
       wordBreak: 'break-all',
     },
+    // Distinct from toolOutput (the result) — this is the request, shown
+    // while pending/running so there's something to look at besides the bare
+    // tool name (e.g. the actual bash command about to run).
+    toolInputText: {
+      fontSize: 11,
+      fontFamily: 'monospace',
+      color: theme.text,
+      marginTop: 4,
+      flexShrink: 1,
+      minWidth: 0,
+      wordBreak: 'break-all',
+    },
     toolToggle: {
       fontSize: 11,
       fontWeight: '600',
@@ -1561,6 +1636,11 @@ function makeStyles(theme: Theme) {
       paddingHorizontal: 16,
       alignItems: 'center',
       justifyContent: 'center',
+    },
+    // Kept mounted (not conditionally rendered) so toggling chat.busy never
+    // reflows the composer row — see its usage site's comment.
+    stopButtonHidden: {
+      opacity: 0,
     },
   });
 }

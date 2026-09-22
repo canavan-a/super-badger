@@ -13,6 +13,7 @@ import (
 	"main/mullvad"
 	"main/notify"
 	"main/opencode"
+	"main/static"
 	"main/station"
 )
 
@@ -54,6 +55,15 @@ func main() {
 	})
 	mm := metrics.NewManager(db, notifier)
 	mm.Start(ctx)
+
+	if cfg.StaticDir != "" {
+		go func() {
+			log.Printf("serving web client on %s from %s", cfg.StaticListenAddr, cfg.StaticDir)
+			if err := static.Serve(cfg.StaticListenAddr, cfg.StaticDir); err != nil {
+				log.Fatalf("static server error: %v", err)
+			}
+		}()
+	}
 
 	router := api.NewRouter(svc, oc, mv, broker, db, mm, hub)
 	log.Printf("superbadger listening on %s, opencode at %s", cfg.ListenAddr, cfg.OpencodeBaseURL)

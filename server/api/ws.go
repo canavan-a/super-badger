@@ -180,10 +180,12 @@ func stationWS(svc *station.Service, broker *opencode.EventBroker) gin.HandlerFu
 	}
 }
 
-// notificationsWS is a read-only, cross-station feed for exactly the two
-// signals worth a background push notification: a station going idle (the
-// agent finished, it's the user's turn again) and a station asking for a
-// tool permission decision. Unlike stationWS (one connection per Station,
+// notificationsWS is a read-only, cross-station feed for exactly the signals
+// worth a background push notification: a station going idle (the agent
+// finished, it's the user's turn again), a station asking for a tool
+// permission decision, and a station asking the user a question (opencode's
+// separate AskUserQuestion-style mechanism — see station.Service.PendingQuestions).
+// Unlike stationWS (one connection per Station,
 // bidirectional, full event stream) this is one connection for the whole
 // app watching every Station at once — a mobile background service holds
 // this open instead of opening N per-station sockets, so notification
@@ -240,6 +242,8 @@ func notificationsWS(svc *station.Service, broker *opencode.EventBroker, hub *no
 					msg = gin.H{"type": "agent_idle"}
 				case "permission.asked":
 					msg = gin.H{"type": "permission_requested"}
+				case "question.asked":
+					msg = gin.H{"type": "question_requested"}
 				default:
 					continue
 				}
