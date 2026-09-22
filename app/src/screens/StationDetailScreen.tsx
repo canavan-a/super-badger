@@ -456,6 +456,13 @@ function ChatList({
   const [visibleCount, setVisibleCount] = useState(CHAT_PAGE_SIZE);
   const turns = allChatTurns.slice(-visibleCount);
   const hasMoreAbove = allChatTurns.length > visibleCount;
+  // Mirrored into a ref so renderItem below (needed for prevTurn) can stay a
+  // stable useCallback instead of a fresh closure every render — a fresh
+  // renderItem gives each cell a new element identity every time, which
+  // would defeat TurnView's React.memo and bring back a re-render of every
+  // mounted bubble on each flush tick.
+  const turnsRef = useRef(turns);
+  turnsRef.current = turns;
 
   // Guards the pagination trigger below so it fires once per "reached near
   // the top" event instead of on every one of onScroll's ~60-times-a-second
@@ -535,6 +542,19 @@ function ChatList({
     });
   };
 
+  const renderItem = useCallback(
+    ({item, index}: {item: Turn; index: number}) => (
+      <TurnView
+        turn={item}
+        prevTurn={index > 0 ? turnsRef.current[index - 1] : undefined}
+        compacting={compacting}
+        styles={styles}
+        theme={theme}
+      />
+    ),
+    [compacting, styles, theme],
+  );
+
   return (
     <View style={styles.chatContainer}>
       <FlatList
@@ -542,9 +562,7 @@ function ChatList({
         style={styles.chat}
         data={turns}
         keyExtractor={turn => turn.messageID}
-        renderItem={({item}) => (
-          <TurnView turn={item} compacting={compacting} styles={styles} theme={theme} />
-        )}
+        renderItem={renderItem}
         contentContainerStyle={styles.chatContent}
         onScroll={handleScroll}
         scrollEventThrottle={16}
@@ -733,18 +751,47 @@ function QuestionPrompt({
   );
 }
 
-function TurnView({
+// A real user prompt always has non-empty text (send() trims and bails on
+// empty). Auto-compaction (opencode compacting on its own when context fills
+// up, not via the Compact button) turned out to go through this same
+// message.updated/message.part.updated stream as a user+assistant turn pair
+// with no text content at all — that's a signature nothing else produces, so
+// it doubles as "this pair is a compaction artifact" regardless of what
+// triggered it, not just the manual button's `compacting` flag.
+function isEmptyUserTurn(t: Turn | undefined): boolean {
+  return (
+    !!t &&
+    t.role === 'user' &&
+    !t.partOrder.some(id => {
+      const p = t.parts[id];
+      return p.kind === 'text' && p.text;
+    })
+  );
+}
+
+// Memoized: without this, every mounted bubble re-renders on every 150ms WS
+// flush tick (see useStationChat's FLUSH_INTERVAL_MS comment) even though
+// only the actively-streaming turn's data actually changed — chat.ts's
+// updateTurn/upsertPart copy-on-write only the touched turn, so `turn`'s
+// reference is a reliable "did this one actually change" signal.
+const TurnView = React.memo(function TurnView({
   turn,
+  prevTurn,
   compacting,
   styles,
   theme,
 }: {
   turn: Turn;
+  prevTurn?: Turn;
   compacting: boolean;
   styles: Styles;
   theme: Theme;
-}): React.JSX.Element {
+}): React.JSX.Element | null {
   if (turn.role === 'user') {
+    // Hide rather than show an empty bubble ("a dot for mine") — the paired
+    // assistant turn right after it (below) carries the one visible badge
+    // for this pair instead.
+    if (isEmptyUserTurn(turn)) return null;
     return (
       <View style={[styles.bubble, styles.bubbleYou]}>
         {turn.partOrder.map(id => {
@@ -758,29 +805,37 @@ function TurnView({
       </View>
     );
   }
+  const isCompactionReply = turn.partOrder.length === 0 && (compacting || isEmptyUserTurn(prevTurn));
   return (
     <View style={[styles.bubble, styles.bubbleAssistant]}>
       {turn.partOrder.map(id => (
         <PartView key={id} part={turn.parts[id]} styles={styles} theme={theme} />
       ))}
-      {!turn.done && turn.partOrder.length === 0 && (
-        // Compact (see StationDetailScreen's doCompact) creates its own
-        // empty assistant turn on the wire — opencode's own summarize call
-        // never streams any parts into it — so without `compacting` this
-        // rendered as an indefinite bare spinner with nothing to explain it
-        // ("a blank dot chat"). A normal in-flight reply's spinner (driven
-        // by chat.busy, not this compact-only flag) is unaffected.
-        compacting ? (
+      {turn.partOrder.length === 0 &&
+        (isCompactionReply ? (
+          // Compact (button, or opencode auto-compacting on its own) creates
+          // its own empty turn pair on the wire with no parts ever streamed
+          // into it — so without this it rendered as an indefinite bare
+          // spinner with nothing to explain it ("a blank dot chat"). A
+          // normal in-flight reply's spinner (real content on the way) is
+          // unaffected by this check.
           <Text style={styles.chip}>⚙ Compaction triggered</Text>
         ) : (
-          <ActivityIndicator size="small" color={theme.textMuted} />
-        )
-      )}
+          !turn.done && <ActivityIndicator size="small" color={theme.textMuted} />
+        ))}
     </View>
   );
-}
+});
 
-function PartView({part, styles, theme}: {part: Part; styles: Styles; theme: Theme}): React.JSX.Element | null {
+const PartView = React.memo(function PartView({
+  part,
+  styles,
+  theme,
+}: {
+  part: Part;
+  styles: Styles;
+  theme: Theme;
+}): React.JSX.Element | null {
   switch (part.kind) {
     case 'reasoning':
       if (!part.text) return null;
@@ -806,7 +861,7 @@ function PartView({part, styles, theme}: {part: Part; styles: Styles; theme: The
     default:
       return null;
   }
-}
+});
 
 function runStyle(run: {code: boolean; bold: boolean; italic: boolean}, styles: Styles) {
   return [
@@ -816,7 +871,7 @@ function runStyle(run: {code: boolean; bold: boolean; italic: boolean}, styles: 
   ];
 }
 
-function InlineRuns({
+const InlineRuns = React.memo(function InlineRuns({
   runs,
   styles,
 }: {
@@ -832,7 +887,7 @@ function InlineRuns({
       ))}
     </>
   );
-}
+});
 
 // Renders a full (small-subset) markdown document: headings, list items,
 // paragraphs with bold/italic/inline-code, and fenced code blocks with basic
@@ -888,7 +943,7 @@ function MarkdownText({text, styles, theme}: {text: string; styles: Styles; them
 // truncation above, which this mirrors).
 const CODE_BLOCK_COLLAPSED_LINES = 12;
 
-function CodeBlockView({
+const CodeBlockView = React.memo(function CodeBlockView({
   seg,
   styles,
   theme,
@@ -955,7 +1010,7 @@ function CodeBlockView({
       )}
     </View>
   );
-}
+});
 
 
 function codeTokenStyleMap(theme: Theme): Record<string, object> {

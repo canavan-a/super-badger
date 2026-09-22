@@ -192,6 +192,27 @@ export function applyEvent(state: ChatState, evt: EventMsg): ChatState {
       // first — assume assistant, corrected (harmlessly, same messageID) if
       // a later message.updated says otherwise.
       let next = ensureTurn(state, rawPart.messageID, 'assistant');
+      // seedFromHistory (below) replays cached history events through this
+      // same reducer, and can resolve after live message.part.delta events
+      // have already grown this part past what the history snapshot had at
+      // fetch time (server merges deltas into the part's slot rather than
+      // caching them separately, so the snapshot is always some prefix of
+      // the eventually-live text). Applying that stale prefix would visibly
+      // snap the text backward and then forward again as later deltas
+      // continue, plus yank the scroll position via the resulting
+      // content-height dip. Checking for an actual prefix (not just
+      // "shorter") is what keeps this from also swallowing a genuine
+      // rewrite/revert that happens to be shorter than what's there.
+      const existingPart = next.turns[next.turnIndex[rawPart.messageID]]?.parts[part.id];
+      if (
+        existingPart &&
+        'text' in existingPart &&
+        'text' in part &&
+        (existingPart.text ?? '').length > (part.text ?? '').length &&
+        (existingPart.text ?? '').startsWith(part.text ?? '')
+      ) {
+        return next.notice ? {...next, notice: null} : next;
+      }
       next = updateTurn(next, rawPart.messageID, t => upsertPart(t, part));
       return next.notice ? {...next, notice: null} : next;
     }

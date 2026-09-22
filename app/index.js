@@ -27,6 +27,11 @@ notifee.onBackgroundEvent(async ({type, detail}) => {
   if (type === EventType.PRESS) {
     const id = detail.notification?.data?.stationId;
     if (id) pendingNav.set(Number(id));
+    // Notifee tears down this headless JS task as soon as the returned
+    // promise resolves, so an un-awaited cancel here can be killed before it
+    // actually lands — this handler being backgrounded (not killed) is
+    // exactly the case this cancel matters most for.
+    if (detail.notification?.id) await notifee.cancelNotification(detail.notification.id);
   }
 });
 

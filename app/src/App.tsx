@@ -184,12 +184,14 @@ function AppInner(): React.JSX.Element {
       notifee.getInitialNotification().then(initial => {
         const id = initial?.notification.data?.stationId;
         if (id) openStation(Number(id));
+        if (initial?.notification.id) notifee.cancelNotification(initial.notification.id);
       });
 
       unsubscribeForeground = notifee.onForegroundEvent(({type, detail}) => {
         if (type === EventType.PRESS) {
           const id = detail.notification?.data?.stationId;
           if (id) openStation(Number(id));
+          if (detail.notification?.id) notifee.cancelNotification(detail.notification.id);
         }
       });
     });
@@ -234,13 +236,43 @@ function AppInner(): React.JSX.Element {
   const SWIPE_THRESHOLD = 70;
 
   const canSwipe = route.name === 'stationDetail' && currentStationIndex >= 0 && orderedStations.length > 1;
+  // Guards against a new edge-swipe being accepted while the previous one's
+  // commit/snap-back animation is still running — without this, a second
+  // gesture's onPanResponderMove calls swipeX.setValue() directly, which
+  // fights the in-flight Animated.timing/spring and can leave swipeX stuck at
+  // whatever partial value the two last collided on.
+  const swipeAnimating = useRef(false);
+
+  // Not guarded by swipeAnimating: this is just the under-threshold/torn-away
+  // case, where nothing is fighting the spring for control of swipeX — a
+  // new drag's onPanResponderMove can freely override it mid-spring the same
+  // way it would any other in-progress Animated value. Blocking new gestures
+  // for the spring's full multi-hundred-ms settle time (unlike the commit
+  // path's fixed-duration timings, a bounciness spring doesn't have a fixed
+  // one) made an immediate re-swipe right after a rejected one get silently
+  // ignored.
+  const snapBack = () => {
+    Animated.spring(swipeX, {toValue: 0, useNativeDriver: true, bounciness: 6}).start();
+  };
 
   const panResponder = useMemo(
     () =>
       PanResponder.create({
-        onStartShouldSetPanResponder: evt => canSwipe && evt.nativeEvent.pageX > screenWidth - EDGE_ZONE,
+        onStartShouldSetPanResponder: evt =>
+          canSwipe && !swipeAnimating.current && evt.nativeEvent.pageX > screenWidth - EDGE_ZONE,
         onMoveShouldSetPanResponder: (evt, gesture) =>
-          canSwipe && evt.nativeEvent.pageX > screenWidth - EDGE_ZONE && gesture.dx < -5,
+          canSwipe &&
+          !swipeAnimating.current &&
+          evt.nativeEvent.pageX > screenWidth - EDGE_ZONE &&
+          gesture.dx < -5 &&
+          // Without a directionality check, a vertical scroll starting in
+          // this edge strip that drifts left as little as 5px claims this
+          // responder instead of the chat FlatList underneath — and with
+          // onPanResponderTerminationRequest below refusing to give it back,
+          // that scroll gesture gets swallowed entirely. Requiring the drag
+          // to be predominantly horizontal keeps normal vertical scrolling
+          // (even one that starts near the edge) working.
+          Math.abs(gesture.dx) > Math.abs(gesture.dy) * 2,
         onPanResponderMove: (_evt, gesture) => {
           // Only follow a leftward drag (new content coming in from the
           // right) — clamp so it can't be dragged the other way.
@@ -248,19 +280,48 @@ function AppInner(): React.JSX.Element {
         },
         onPanResponderRelease: (_evt, gesture) => {
           if (gesture.dx < -SWIPE_THRESHOLD) {
-            Animated.timing(swipeX, {toValue: -screenWidth, duration: 180, useNativeDriver: true}).start(() => {
-              const prevIndex = (currentStationIndex - 1 + orderedStations.length) % orderedStations.length;
-              navigate({name: 'stationDetail', id: orderedStations[prevIndex].id});
-              // Land the incoming screen just off the right edge, then
-              // animate it sliding in to 0 — the "gradual" part of the
-              // transition, rather than an instant cut to the new station.
-              swipeX.setValue(screenWidth);
-              Animated.timing(swipeX, {toValue: 0, duration: 220, useNativeDriver: true}).start();
-            });
+            swipeAnimating.current = true;
+            Animated.timing(swipeX, {toValue: -screenWidth, duration: 180, useNativeDriver: true}).start(
+              ({finished}) => {
+                // A second gesture starting mid-animation is now blocked by
+                // swipeAnimating above, but an interrupted timing (e.g. a
+                // future programmatic swipeX change) still invokes this
+                // callback with finished:false — skip the navigate/slide-in
+                // in that case instead of running it against a swipeX value
+                // that was never actually driven all the way to -screenWidth.
+                if (!finished) {
+                  swipeAnimating.current = false;
+                  return;
+                }
+                const prevIndex = (currentStationIndex - 1 + orderedStations.length) % orderedStations.length;
+                navigate({name: 'stationDetail', id: orderedStations[prevIndex].id});
+                // Land the incoming screen just off the right edge, then
+                // animate it sliding in to 0 — the "gradual" part of the
+                // transition, rather than an instant cut to the new station.
+                swipeX.setValue(screenWidth);
+                Animated.timing(swipeX, {toValue: 0, duration: 220, useNativeDriver: true}).start(() => {
+                  swipeAnimating.current = false;
+                });
+              },
+            );
           } else {
-            Animated.spring(swipeX, {toValue: 0, useNativeDriver: true, bounciness: 6}).start();
+            snapBack();
           }
         },
+        // The gesture can be torn away mid-drag (another responder, e.g. a
+        // ScrollView or the OS back-gesture edge, claiming it) — that fires
+        // onPanResponderTerminate instead of onPanResponderRelease, and
+        // without a handler here swipeX was left stuck at whatever partial
+        // value the drag last set. Snap back the same way an
+        // under-threshold release does.
+        onPanResponderTerminate: () => {
+          snapBack();
+        },
+        // Refusing termination requests keeps this gesture from being torn
+        // away mid-drag in the first place (the above stays as a fallback
+        // for the cases this can't prevent, e.g. the OS itself reclaiming
+        // it).
+        onPanResponderTerminationRequest: () => false,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [canSwipe, currentStationIndex, orderedStations, screenWidth],
