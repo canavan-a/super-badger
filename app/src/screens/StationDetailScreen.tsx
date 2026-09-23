@@ -542,10 +542,14 @@ function ChatList({
     followBottomScheduled.current = true;
     requestAnimationFrame(() => {
       followBottomScheduled.current = false;
-      if (!isNearBottom.current) return;
-      // animated:false — an animation queued mid-stream just adds more lag
-      // for the next update to out-run; snapping instantly is what actually
-      // keeps pace with tokens arriving every ~50ms.
+      // Not re-checking isNearBottom.current here on purpose: the content-size
+      // growth that triggered this call can itself fire a stale onScroll tick
+      // (contentSize already bigger, contentOffset not yet moved) that flips
+      // isNearBottom.current to false as a resize artifact, not a real scroll
+      // away — re-checking here aborted the follow, leaving the view stuck
+      // just short of the bottom, which read as a stuck/flashing scroll when
+      // sending a message. The decision to follow is locked in at the point
+      // the content actually changed, above.
       listRef.current?.scrollToOffset({offset: contentHeight.current, animated: false});
     });
   };
@@ -626,8 +630,14 @@ function ChatList({
         }
         // Only a handful of turns need to be mounted at once; keeping these
         // small is what makes virtualization actually pay off on a long
-        // history instead of just being FlatList's defaults.
-        initialNumToRender={12}
+        // history instead of just being FlatList's defaults. Bumped to the
+        // full page size (see CHAT_PAGE_SIZE) rather than a flat 12: on a
+        // freshly-mounted station (key={route.id} in App.tsx forces a full
+        // remount per switch), followBottom's jump to the full page's
+        // measured height could land past what a smaller initial render had
+        // actually laid out yet, showing blank cells until virtualization
+        // caught up — worse the taller the station's history.
+        initialNumToRender={CHAT_PAGE_SIZE}
         maxToRenderPerBatch={8}
         windowSize={7}
         updateCellsBatchingPeriod={50}

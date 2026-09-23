@@ -301,13 +301,34 @@ export function getTurn(state: ChatState, messageID: string): Turn | undefined {
   return idx === undefined ? undefined : state.turns[idx];
 }
 
-// Only assistant turns are rendered from the *live* event stream — the
-// user's own message is shown immediately, optimistically, by the screen
-// itself the moment they hit send (see StationDetailScreen), so echoing the
-// WS-reported user turn back would duplicate it. Restored history (below)
-// has no such optimistic echo to duplicate, so it includes both roles.
-export function assistantTurns(state: ChatState): Turn[] {
-  return state.turns.filter(t => t.role === 'assistant');
+// Adds the user's own message to the transcript immediately, rather than
+// waiting for opencode's own message.updated/part events to echo it back —
+// that echo isn't guaranteed to arrive promptly (or, under load, at all),
+// which previously meant a sent message could vanish between being removed
+// from the "Queued" list and the echo landing. See reconcileLocalUserTurn,
+// which folds the real event stream into this same turn once it does show up
+// (or the local id, if it never does, since a genuine send should never
+// disappear either way).
+export function addLocalUserTurn(state: ChatState, id: string, text: string): ChatState {
+  const turn: Turn = {messageID: id, role: 'user', partOrder: [id], parts: {[id]: {kind: 'text', id, text}}, done: true};
+  const turns = [...state.turns, turn];
+  return {...state, turns, turnIndex: {...state.turnIndex, [id]: turns.length - 1}};
+}
+
+// Swaps a locally-created optimistic turn's key for opencode's real
+// messageID once its own event for that message arrives, so the live event
+// stream folds into the same turn instead of appearing as an unrelated
+// second (duplicate) one. Clears the placeholder part — the
+// message.part.updated/delta events that follow populate the real content.
+export function reconcileLocalUserTurn(state: ChatState, localID: string, realID: string): ChatState {
+  const idx = state.turnIndex[localID];
+  if (idx === undefined || realID === localID) return state;
+  const turns = state.turns.slice();
+  turns[idx] = {...turns[idx], messageID: realID, parts: {}, partOrder: []};
+  const turnIndex = {...state.turnIndex};
+  delete turnIndex[localID];
+  turnIndex[realID] = idx;
+  return {...state, turns, turnIndex};
 }
 
 // Replays cached history events (see api.getStationHistory) on top of

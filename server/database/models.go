@@ -126,23 +126,6 @@ func GetStation(db *gorm.DB, id uint) (Station, error) {
 	return s, err
 }
 
-// FindActiveStationForBackend finds any Station (other than excludeID) already
-// holding a live session against the same provider/model pair, so callers can
-// tear it down before creating a new one — the local model backing a
-// provider/model has no session concurrency of its own.
-func FindActiveStationForBackend(db *gorm.DB, providerID, modelID string, excludeID uint) (*Station, error) {
-	var s Station
-	err := db.Where("provider_id = ? AND model_id = ? AND id != ? AND opencode_session_id != ''", providerID, modelID, excludeID).
-		First(&s).Error
-	if err == gorm.ErrRecordNotFound {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &s, nil
-}
-
 func UpdateStationSession(db *gorm.DB, id uint, sessionID string, status StationStatus) error {
 	return db.Model(&Station{}).Where("id = ?", id).Updates(map[string]any{
 		"opencode_session_id": sessionID,

@@ -1,7 +1,7 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 
 import {getStationHistory} from './api';
-import {applyEvent, ChatState, emptyChatState, seedFromHistory} from './chat';
+import {addLocalUserTurn, applyEvent, ChatState, emptyChatState, reconcileLocalUserTurn, seedFromHistory} from './chat';
 import {settingsStore} from './settings';
 
 function wsURL(stationId: number): string {
@@ -59,13 +59,29 @@ export function useStationChat(stationId: number) {
   // just forces a re-render whenever the ref's contents actually change.
   const outboxRef = useRef<QueuedMessage[]>([]);
   const [outboxVersion, setOutboxVersion] = useState(0);
+  // The single in-flight message's local turn id, set the moment pump() sends
+  // it and cleared once opencode's own message.updated echo for it arrives
+  // (see reconcileLocalUserTurn). Only ever one at a time — this station runs
+  // one prompt at a time (see pump()'s own comment) — so there's never more
+  // than one id to reconcile against.
+  const pendingLocalUserID = useRef<string | null>(null);
 
   useEffect(() => {
     flushTimer.current = setInterval(() => {
       if (pending.current.length === 0) return;
       const batch = pending.current;
       pending.current = [];
-      setState(prev => batch.reduce(applyEvent, prev));
+      setState(prev => {
+        let next = prev;
+        for (const evt of batch) {
+          if (pendingLocalUserID.current && evt.type === 'message.updated' && evt.properties?.info?.role === 'user') {
+            next = reconcileLocalUserTurn(next, pendingLocalUserID.current, evt.properties.info.id);
+            pendingLocalUserID.current = null;
+          }
+          next = applyEvent(next, evt);
+        }
+        return next;
+      });
     }, FLUSH_INTERVAL_MS);
     return () => {
       if (flushTimer.current) clearInterval(flushTimer.current);
@@ -150,7 +166,15 @@ export function useStationChat(stationId: number) {
     outboxRef.current = rest;
     busyRef.current = true;
     setOutboxVersion(v => v + 1);
-    setState(s => ({...s, busy: true, error: null}));
+    // Added as a real turn immediately rather than waiting on opencode's own
+    // message.updated echo — see addLocalUserTurn's comment for why the
+    // wait-for-echo approach could make a just-sent message vanish. Also
+    // fixes the "queued" bubble never being seen at all when nothing was
+    // busy: send() -> pump() dequeues synchronously in the same tick, so it
+    // never rendered as queued before this either.
+    const localID = `local-${head.id}`;
+    pendingLocalUserID.current = localID;
+    setState(s => ({...addLocalUserTurn(s, localID, head.text), busy: true, error: null}));
     wsRef.current?.send(JSON.stringify({type: 'prompt', text: head.text}));
   }, []);
 
@@ -205,6 +229,7 @@ export function useStationChat(stationId: number) {
     pending.current = [];
     outboxRef.current = [];
     busyRef.current = false;
+    pendingLocalUserID.current = null;
     setOutboxVersion(v => v + 1);
     setState(emptyChatState);
   }, []);

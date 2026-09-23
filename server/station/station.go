@@ -1,11 +1,8 @@
 // Package station implements Station lifecycle on top of the opencode API.
 //
-// The local LLMs behind a provider/model have no request concurrency: running
-// two opencode sessions against the same backend at once corrupts state. So
-// every Station operation that provisions a session first tears down any
-// other session already pointed at that same provider/model, and the whole
-// sequence is serialized per provider/model via backendLocks so concurrent
-// API calls can't race two session creations against the same backend.
+// Stations can run concurrent sessions against the same provider/model
+// backend just fine — each Station gets its own independent opencode
+// session, and activating one never touches another Station's session.
 package station
 
 import (
@@ -22,32 +19,17 @@ import (
 )
 
 type Service struct {
-	db       *gorm.DB
-	oc       *opencode.Client
-	broker   *opencode.EventBroker
-	locksMu  sync.Mutex
-	backendL map[string]*sync.Mutex
+	db     *gorm.DB
+	oc     *opencode.Client
+	broker *opencode.EventBroker
 }
 
 func NewService(db *gorm.DB, oc *opencode.Client, broker *opencode.EventBroker) *Service {
 	return &Service{
-		db:       db,
-		oc:       oc,
-		broker:   broker,
-		backendL: make(map[string]*sync.Mutex),
+		db:     db,
+		oc:     oc,
+		broker: broker,
 	}
-}
-
-func (s *Service) backendLock(providerID, modelID string) *sync.Mutex {
-	key := providerID + "|" + modelID
-	s.locksMu.Lock()
-	defer s.locksMu.Unlock()
-	l, ok := s.backendL[key]
-	if !ok {
-		l = &sync.Mutex{}
-		s.backendL[key] = l
-	}
-	return l
 }
 
 // agentBuild is the only agent Stations use. opencode's other "primary"
@@ -98,22 +80,10 @@ func (s *Service) Reset(ctx context.Context, id uint) (database.Station, error) 
 	return st, nil
 }
 
-// activate ensures st has a fresh, exclusive opencode session for its
-// provider/model, aborting any other Station's session on the same backend
-// first.
+// activate ensures st has a fresh opencode session for its provider/model.
+// Other Stations' sessions, including ones on the same provider/model, are
+// left untouched — they can run concurrently.
 func (s *Service) activate(ctx context.Context, st *database.Station) error {
-	lock := s.backendLock(st.ProviderID, st.ModelID)
-	lock.Lock()
-	defer lock.Unlock()
-
-	if other, err := database.FindActiveStationForBackend(s.db, st.ProviderID, st.ModelID, st.ID); err != nil {
-		return err
-	} else if other != nil {
-		_ = s.oc.AbortSession(ctx, other.OpencodeSessionID)
-		_ = database.UpdateStationSession(s.db, other.ID, "", database.StatusIdle)
-		s.broker.ClearHistory(other.OpencodeSessionID)
-	}
-
 	if st.OpencodeSessionID != "" {
 		_ = s.oc.AbortSession(ctx, st.OpencodeSessionID)
 		// This session is being replaced (manual reset or auto-recovery) —
