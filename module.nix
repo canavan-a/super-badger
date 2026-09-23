@@ -130,6 +130,13 @@ in
         Type = "oneshot";
         RemainAfterExit = true;
         ExecStart = "${pkgs.mullvad-vpn}/bin/mullvad lan set ${if cfg.mullvad.allowLan then "allow" else "block"}";
+        # after/wants above only order this against mullvad-daemon.service's
+        # own start, not against its RPC socket actually being ready —
+        # `mullvad lan set` can still lose that race and fail with "transport
+        # error ... No such file or directory" on a socket that hasn't been
+        # created yet. Retrying instead of failing outright rides that out.
+        Restart = "on-failure";
+        RestartSec = "2s";
       };
     };
 
@@ -168,8 +175,22 @@ in
         # above, applied to the mobile app's web target (npm ci + vite
         # build) instead of a buildNpmPackage derivation that would need an
         # npmDepsHash kept in sync by hand.
+        #
+        # Unlike the Go build above, this can't run straight out of
+        # ${self}/app: that's a path into the Nix store (self is a flake
+        # input), which is read-only, and `npm ci` needs to write
+        # node_modules directly into the project directory it's run from —
+        # go build has no such requirement, it only reads its source dir and
+        # writes elsewhere (GOCACHE/output), which is why that half of this
+        # script could get away with running in-place. Copying the app
+        # source into a writable scratch dir first is what actually lets npm
+        # ci succeed.
         export npm_config_cache=${npmCache}
-        cd ${self}/app
+        appBuild=/var/lib/superbadger/app-build
+        rm -rf "$appBuild"
+        mkdir -p "$appBuild"
+        cp -r ${self}/app/. "$appBuild"/
+        cd "$appBuild"
         ${pkgs.nodejs_22}/bin/npm ci
         ${pkgs.nodejs_22}/bin/npm run build:web
         rm -rf ${webDir}.new
