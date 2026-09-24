@@ -78,7 +78,7 @@
               SUPERBADGER_DB_PATH="$db_path" \
               SUPERBADGER_OPENCODE_URL="http://127.0.0.1:${opencodePort}" \
               SUPERBADGER_OPENCODE_PASSWORD="${opencodePassword}" \
-              ${pkgs.go}/bin/go run ./cmd/superbadger > "$data_dir/logs/superbadger.log" 2>&1 &)
+              ${pkgs.go}/bin/go run ./cmd/superbadger-server > "$data_dir/logs/superbadger.log" 2>&1 &)
 
             echo "opencode:    http://127.0.0.1:${opencodePort} (log: $data_dir/logs/opencode.log)"
             echo "superbadger: http://127.0.0.1${superbadgerAddr} (log: $data_dir/logs/superbadger.log)"
@@ -102,7 +102,7 @@
           dev-down = pkgs.writeShellScriptBin "dev-down" ''
             set -e
             pkill -f "opencode serve --port ${opencodePort}" 2>/dev/null || true
-            pkill -f "cmd/superbadger" 2>/dev/null || true
+            pkill -f "cmd/superbadger-server" 2>/dev/null || true
             pkill -f "go-build.*superbadger" 2>/dev/null || true
             pkill -f "tmp/superbadger" 2>/dev/null || true
             echo "stopped opencode + superbadger (best-effort)"
@@ -119,6 +119,7 @@
             echo "  run-app-web      # foreground: mobile app web target via Vite (hot reload) on :5173"
             echo "  run-app-web-build # builds app/dist — the static bundle services.superbadger.web serves in production"
             echo "  run-app-android  # foreground: mobile app on a connected Android device/emulator (needs system Android SDK)"
+            echo "  run-tui          # foreground: the superbadger terminal client (tui/), e.g. 'run-tui --server http://127.0.0.1:8080'"
             echo "  dev-help         # re-print this list"
             echo "  (run-opencode / run-superbadger / run-app-web / run-app-android each attach to your terminal — run each in its own terminal, inside 'nix develop')"
             echo ""
@@ -150,9 +151,44 @@
             exec ${pkgs.nodejs_22}/bin/npm run android
           '';
 
+          # The `superbadger` terminal client (tui/). Installable through the
+          # flake (`nix profile install .#superbadger`, or add it to
+          # environment.systemPackages) without a buildGoModule vendorHash: the
+          # wrapper `go build`s tui/ from the flake source on first run and
+          # caches the binary, keyed by the store path of tui/ alone (so only
+          # TUI changes trigger a rebuild, not server/app ones). Same
+          # from-source tradeoff as module.nix; needs network the first time to
+          # fetch Go modules.
+          tuiSrc = builtins.path { path = ./tui; name = "superbadger-tui-src"; };
+          superbadger-tui = pkgs.writeShellScriptBin "superbadger" ''
+            set -e
+            cache="''${XDG_CACHE_HOME:-$HOME/.cache}/superbadger"
+            bin="$cache/bin/superbadger-$(basename ${tuiSrc} | cut -d- -f1)"
+            if [ ! -x "$bin" ]; then
+              echo "superbadger: building the terminal client (first run)..." >&2
+              mkdir -p "$cache/bin"
+              export PATH=${pkgs.go}/bin:${pkgs.git}/bin:$PATH
+              export GOCACHE="$cache/go-build" GOPATH="$cache/go-path" CGO_ENABLED=0 GOFLAGS=-buildvcs=false
+              (cd ${tuiSrc} && go build -o "$bin.new" ./cmd/superbadger)
+              mv -f "$bin.new" "$bin"
+              # drop binaries left over from older builds
+              find "$cache/bin" -type f ! -name "$(basename "$bin")" -delete
+            fi
+            exec "$bin" "$@"
+          '';
+
+          run-tui = pkgs.writeShellScriptBin "run-tui" ''
+            set -e
+            cd "${repoRoot}/tui"
+            exec ${pkgs.go}/bin/go run ./cmd/superbadger "$@"
+          '';
+
           dev-help = pkgs.writeShellScriptBin "dev-help" printHelp;
         in
         {
+          packages.default = superbadger-tui;
+          packages.superbadger = superbadger-tui;
+
           devShells.default = pkgs.mkShell {
             buildInputs = [
               pkgs.go
@@ -168,6 +204,7 @@
               run-app-web
               run-app-web-build
               run-app-android
+              run-tui
               dev-up
               dev-down
               dev-help

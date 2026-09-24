@@ -101,7 +101,7 @@ func (b *EventBroker) ClearHistory(sessionID string) {
 
 // Run connects to opencode's event stream and dispatches events until ctx is
 // done, reconnecting with backoff on failure. Meant to run for the lifetime
-// of the process in its own goroutine (see cmd/superbadger/main.go).
+// of the process in its own goroutine (see cmd/superbadger-server/main.go).
 func (b *EventBroker) Run(ctx context.Context) {
 	backoff := time.Second
 	for {

@@ -14,7 +14,7 @@
 { config, lib, pkgs, ... }:
 let
   cfg = config.services.superbadger;
-  serverBin = "/var/lib/superbadger/bin/superbadger";
+  serverBin = "/var/lib/superbadger/bin/superbadger-server";
   badgerBin = "/var/lib/superbadger/bin/badger";
   goCache = "/var/cache/superbadger-go";
   npmCache = "/var/cache/superbadger-npm";
@@ -166,7 +166,7 @@ in
         export CGO_ENABLED=0
         mkdir -p /var/lib/superbadger/bin ${goCache}
         cd ${self}/server
-        ${pkgs.go}/bin/go build -o ${serverBin}.new ./cmd/superbadger
+        ${pkgs.go}/bin/go build -o ${serverBin}.new ./cmd/superbadger-server
         mv -f ${serverBin}.new ${serverBin}
         ${pkgs.go}/bin/go build -o ${badgerBin}.new ./cmd/badger
         mv -f ${badgerBin}.new ${badgerBin}
