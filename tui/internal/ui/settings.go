@@ -30,7 +30,7 @@ func newSettings(cfg *config.Config, c *api.Client, st Styles) *settingsModel {
 		{key: "auth_token", label: "Auth token", kind: fText, value: cfg.AuthToken, secret: true, note: "badger token generate <label>"},
 		{key: "test", label: "Test connection", kind: fAction},
 		{kind: fHeader, label: "Appearance"},
-		{key: "theme", label: "Theme", kind: fChoice, value: cfg.Theme, choices: config.ThemeNames},
+		{key: "theme", label: "Theme", kind: fChoice, value: cfg.Theme, choices: config.ThemeNames, note: "/splash previews the title screen"},
 		{kind: fHeader, label: "Notifications"},
 		{key: "notifications", label: "Other-station alerts", kind: fToggle, on: cfg.Notifications},
 		{key: "splash", label: "Launch art", kind: fToggle, on: cfg.Splash, note: "shown at launch"},

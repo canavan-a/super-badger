@@ -76,9 +76,12 @@ have to think about it.
   server it is `go build`-ed from source on first run, with no `vendorHash`.
   In the dev shell: `run-tui`. Keys: `ctrl+s` stations, `←`/`→` (with an empty input) or `ctrl+n`/`ctrl+p`
   swap, `ctrl+k` actions, `ctrl+e` station settings, `ctrl+g` settings,
-  `ctrl+o` tool output, `ctrl+r` reasoning, `ctrl+q` quit. Typed commands:
-  `/settings`, `/stations`, `/station`, `/quit`. Themes: burrow
-  (default), dark, slate, ember, light, sepia.
+  `ctrl+o` tool output, `ctrl+q`/`ctrl+c` quit (quitting never cancels a running
+  reply; `Esc` does nothing in the message box). Typed commands: `/stop` (cancel
+  the running reply and drop anything queued behind it), `/show` (toggle
+  thinking; `ctrl+r` too), `/settings`, `/stations`, `/station`, `/splash`
+  (replay the title screen), `/quit`. Themes: burrow (default), dark, slate,
+  ember, light, sepia — the title screen is recolored to match.
   Data: the TUI keeps only its own settings (server URL, token, theme, last
   station, …) in `config.json` under your user config dir
   (`~/.config/superbadger/` on Linux, `~/Library/Application Support/superbadger/`

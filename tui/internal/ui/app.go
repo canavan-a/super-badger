@@ -328,6 +328,12 @@ func (a *App) key(k tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 	c := a.chat
+	if k.String() == "ctrl+c" {
+		// Quits the TUI, never the reply: a reply already running on the
+		// server carries on, and /stop is what cancels one.
+		a.shutdown()
+		return tea.Quit
+	}
 	if !c.blocked() && !c.overlay() {
 		switch k.String() {
 		case "ctrl+s":
@@ -348,11 +354,6 @@ func (a *App) key(k tea.KeyMsg) tea.Cmd {
 			return a.setSub("stationsettings", newStationSettings(a.client, a.st, c.station))
 		case "ctrl+g":
 			return a.navigate("settings")
-		case "ctrl+c":
-			if !c.state.Busy {
-				a.shutdown()
-				return tea.Quit
-			}
 		}
 	}
 	return c.Update(k)
@@ -384,6 +385,14 @@ func (a *App) navigate(to string) tea.Cmd {
 	case "quit":
 		a.shutdown()
 		return tea.Quit
+	case "splash":
+		// Replay the title screen (handy for previewing a theme).
+		if a.w < splashW || a.h < splashH {
+			a.toast, a.toastAt = "terminal too small for the title screen", time.Now()
+			return nil
+		}
+		a.splash, a.splashN, a.splashUntil = true, 0, time.Time{}
+		return a.splashTick()
 	case "metrics":
 		return a.setSub("metrics", newMetrics(a.client, a.st))
 	case "mullvad":
@@ -582,10 +591,10 @@ func (a *App) splashView() string {
 	for i := 0; i < top; i++ {
 		lines = append(lines, "")
 	}
-	for _, l := range splashFrameRows(a.splashN) {
+	for _, l := range splashFor(a.st.T).frame(a.splashN) {
 		lines = append(lines, pad+l)
 	}
-	return NewStyles("burrow").Paint(strings.Join(lines, "\n"), a.w, a.h)
+	return a.st.Paint(strings.Join(lines, "\n"), a.w, a.h)
 }
 
 // welcome is the base page shown when there is no station to chat with yet:

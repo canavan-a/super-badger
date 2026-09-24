@@ -361,10 +361,10 @@ func (m *chatModel) key(k tea.KeyMsg) tea.Cmd {
 	}
 
 	switch s {
-	case "esc", "ctrl+c":
-		if m.state.Busy {
-			return m.runAction("abort")
-		}
+	case "esc":
+		// Deliberately does nothing here: stopping a reply is the explicit
+		// /stop command, so a stray Esc can't cancel work in progress.
+		return nil
 	case "ctrl+k":
 		m.menu, m.menuCur = true, 0
 		return nil
@@ -394,6 +394,10 @@ func (m *chatModel) key(k tea.KeyMsg) tea.Cmd {
 		text := strings.TrimSpace(m.ta.Value())
 		if text == "" {
 			return nil
+		}
+		if cmd, ok := m.localCommand(strings.ToLower(text)); ok {
+			m.ta.Reset()
+			return cmd
 		}
 		if to, ok := slashCommands[strings.ToLower(text)]; ok {
 			// A known /command is run locally, not sent to the model.
@@ -613,7 +617,7 @@ func (m *chatModel) hint() string {
 	if m.blocked() || m.overlay() {
 		return ""
 	}
-	return "^s stations · ←/→ swap · ^k actions · ^e station · ^g settings · ^o tools · ^r think · ^q quit"
+	return "^s stations · ←/→ swap · /stop · /show thinking · ^k actions · ^e station · ^g settings · ^o tools · ^q quit"
 }
 
 func (m *chatModel) topBar() string {
@@ -716,7 +720,7 @@ func (m *chatModel) transcript() string {
 		b.WriteString(m.userBlock(q.text, wrap, true) + "\n\n")
 	}
 	if m.state.Busy {
-		b.WriteString(" " + m.st.Primary.Render("◆ ") + m.st.Muted.Render("working…  esc to abort") + "\n")
+		b.WriteString(" " + m.st.Primary.Render("◆ ") + m.st.Muted.Render("working…  /stop to abort") + "\n")
 	}
 	if b.Len() == 0 {
 		b.WriteString("\n " + m.st.Muted.Render("nothing here yet — say something."))
@@ -936,7 +940,40 @@ func (m *chatModel) View() string {
 
 // slashCommands are typed into the message box and handled locally. Anything
 // else starting with "/" is sent to the model like normal text.
+// localCommand runs the /commands that act on this chat itself. ok is false
+// for anything else, which falls through to the navigation commands and then
+// to being sent to the model as ordinary text.
+func (m *chatModel) localCommand(text string) (cmd tea.Cmd, ok bool) {
+	switch text {
+	case "/show":
+		m.showThink = !m.showThink
+		m.dirty = true
+		if m.showThink {
+			m.state.Notice = "thinking shown"
+		} else {
+			m.state.Notice = "thinking hidden"
+		}
+		return nil, true
+	case "/stop":
+		queued := len(m.outbox)
+		m.outbox = nil // follow-ups typed ahead of the reply you just cancelled
+		m.dirty = true
+		switch {
+		case m.state.Busy:
+			m.state.Notice = "stopping…"
+			return m.runAction("abort"), true
+		case queued > 0:
+			m.state.Notice = "cleared the queued messages"
+		default:
+			m.state.Notice = "nothing to stop"
+		}
+		return nil, true
+	}
+	return nil, false
+}
+
 var slashCommands = map[string]string{
+	"/splash":   "splash",
 	"/settings": "settings",
 	"/stations": "picker",
 	"/station":  "stationsettings",

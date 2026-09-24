@@ -45,6 +45,10 @@ type splashCellT struct {
 	esc, r   string
 	fg, bg   string // "r;g;b" as last set on this cell
 	blankish bool   // draws nothing: ▀ or space with both halves the page color
+
+	// Which halves are the eye's cyan. Recorded from the original art so the
+	// eye can still be found after the art is recolored for another theme.
+	eyeFG, eyeBG bool
 }
 
 func parseSplashLine(line string) []splashCellT {
@@ -60,6 +64,7 @@ func parseSplashLine(line string) []splashCellT {
 				c.bg = rgb
 			}
 		}
+		c.eyeFG, c.eyeBG = isEyeRGB(c.fg), isEyeRGB(c.bg)
 		// A ▀ is fg over bg; a space shows only bg. Either is empty when
 		// what it would show is the page color. (Colored ▀ cells are the
 		// badger's pixels — they must survive.)
@@ -183,7 +188,7 @@ func isEyeRGB(rgb string) bool {
 // accent cyan in either half. Only meaningful on badger rows (the wordmark's
 // gradient reuses the cyan).
 func splashEye(c splashCellT) bool {
-	return !c.blankish && (isEyeRGB(c.fg) || isEyeRGB(c.bg))
+	return !c.blankish && (c.eyeFG || c.eyeBG)
 }
 
 func rowHasEye(row []splashCellT) bool {
@@ -221,9 +226,13 @@ func init() {
 // splashWordRow reports whether row y is part of the wordmark.
 func splashWordRow(y int) bool { return y > splashGap && y < len(splashGrid)-1 }
 
-// splashFrameRows renders animation frame n: the wordmark with a diagonal
-// glimmer sweeping left to right, and the "_" blinking.
-func splashFrameRows(n int) []string {
+// splashFrameRows renders frame n of the original (burrow) colors.
+func splashFrameRows(n int) []string { return splashFor(themes["burrow"]).frame(n) }
+
+// frame renders animation frame n: the wordmark with a diagonal glimmer
+// sweeping left to right, the eye's glint, and the "_" blinking.
+func (set *splashSet) frame(n int) []string {
+	splashGrid, splashRows := set.grid, set.rows
 	pos := float64((n * glimmerStep) % (splashW + glimmerGap))
 	on := (n/blinkFrames)%2 == 0
 	out := make([]string, len(splashGrid))
@@ -232,7 +241,7 @@ func splashFrameRows(n int) []string {
 		word := splashWordRow(y)
 		if !last && !word {
 			if rowHasEye(row) {
-				out[y] = eyeRow(row, y, pos)
+				out[y] = eyeRow(row, y, pos, set.to)
 			} else {
 				out[y] = splashRows[y] // badger body / gaps: static
 			}
@@ -257,7 +266,7 @@ func splashFrameRows(n int) []string {
 				if k <= 0 {
 					b.WriteString(c.esc + c.r)
 				} else {
-					b.WriteString(splashSGRs(c.bg, glimmerColor(c.fg, k)) + c.r)
+					b.WriteString(splashSGRs(c.bg, glimmerColorTo(c.fg, k, set.to)) + c.r)
 				}
 			}
 		}
@@ -267,7 +276,7 @@ func splashFrameRows(n int) []string {
 }
 
 // eyeRow renders a badger row with only the eye pixels catching the band.
-func eyeRow(row []splashCellT, y int, pos float64) string {
+func eyeRow(row []splashCellT, y int, pos float64, to string) string {
 	var b strings.Builder
 	for x, c := range row {
 		k := shine(float64(x)+float64(y)*2-pos, eyeHalf)
@@ -276,11 +285,11 @@ func eyeRow(row []splashCellT, y int, pos float64) string {
 			continue
 		}
 		fg, bg := c.fg, c.bg
-		if isEyeRGB(fg) {
-			fg = glimmerColor(fg, k)
+		if c.eyeFG {
+			fg = glimmerColorTo(fg, k, to)
 		}
-		if isEyeRGB(bg) {
-			bg = glimmerColor(bg, k)
+		if c.eyeBG {
+			bg = glimmerColorTo(bg, k, to)
 		}
 		b.WriteString(splashSGRs(bg, fg) + c.r)
 	}
@@ -299,14 +308,19 @@ func splashSGRs(bg, fg string) string {
 }
 
 // glimmerColor blends an "r;g;b" color toward white by k in (0,1]; k=1 is white.
-func glimmerColor(fg string, k float64) string {
-	p := strings.Split(fg, ";")
-	if len(p) != 3 {
+func glimmerColor(fg string, k float64) string { return glimmerColorTo(fg, k, "255;255;255") }
+
+// glimmerColorTo blends toward an arbitrary "r;g;b" (black on light themes,
+// where the strokes are dark and brightening would only fade them out).
+func glimmerColorTo(fg string, k float64, to string) string {
+	p, q := strings.Split(fg, ";"), strings.Split(to, ";")
+	if len(p) != 3 || len(q) != 3 {
 		return fg
 	}
-	mix := func(v string) string {
+	mix := func(v, target string) string {
 		n, _ := strconv.Atoi(v)
-		return strconv.Itoa(n + int(float64(255-n)*min(1, k)))
+		m, _ := strconv.Atoi(target)
+		return strconv.Itoa(n + int(float64(m-n)*min(1, k)))
 	}
-	return mix(p[0]) + ";" + mix(p[1]) + ";" + mix(p[2])
+	return mix(p[0], q[0]) + ";" + mix(p[1], q[1]) + ";" + mix(p[2], q[2])
 }

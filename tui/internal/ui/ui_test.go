@@ -475,3 +475,261 @@ func TestSplashIgnoresStrayKeysRightAfterLaunch(t *testing.T) {
 		t.Fatal("after the grace period any key should dismiss the splash")
 	}
 }
+
+// ---- chat commands ----
+
+func busyChat(t *testing.T) (*App, *chatModel) {
+	t.Helper()
+	a := testApp(100, 30)
+	a.cfg.ServerURL = "http://127.0.0.1:1"
+	a.client = api.New(a.cfg.ServerURL, "")
+	a.stations = []api.Station{{ID: 1, Name: "a", Reachable: true}}
+	a.chat = newChat(a.client, a.st, a.stations[0], 0, 1)
+	t.Cleanup(a.chat.Close)
+	a.chat.resize(98, 26)
+	a.chat.state.Busy = true
+	return a, a.chat
+}
+
+func TestEscAndCtrlCNeverCancelAReply(t *testing.T) {
+	a, c := busyChat(t)
+	if cmd := c.key(tea.KeyMsg{Type: tea.KeyEsc}); cmd != nil {
+		t.Fatal("Esc must not start an abort")
+	}
+	if !c.state.Busy {
+		t.Fatal("Esc must leave the reply running")
+	}
+	// ctrl+c quits the TUI (it does not abort the server-side reply).
+	cmd := a.key(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Fatal("ctrl+c should quit")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatalf("ctrl+c should produce a quit, not an abort request; got %T", cmd())
+	}
+}
+
+func TestStopCommandAbortsAndDropsQueuedMessages(t *testing.T) {
+	a, c := busyChat(t)
+	c.outbox = []queued{{"1", "follow-up one"}, {"2", "follow-up two"}}
+	c.ta.SetValue("/stop")
+	cmd := a.key(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("/stop while busy should issue the abort")
+	}
+	if len(c.outbox) != 0 {
+		t.Fatal("/stop should discard messages queued behind the cancelled reply")
+	}
+	if c.ta.Value() != "" {
+		t.Fatal("the input should clear")
+	}
+	if c.state.Notice == "" {
+		t.Fatal("the user should see that it's stopping")
+	}
+	// It must not have been sent to the model as a prompt.
+	for _, q := range c.outbox {
+		if q.text == "/stop" {
+			t.Fatal("/stop was queued as a message")
+		}
+	}
+}
+
+func TestStopWhenIdleSaysSoAndDoesNothing(t *testing.T) {
+	a, c := busyChat(t)
+	c.state.Busy = false
+	c.ta.SetValue("/stop")
+	if cmd := a.key(tea.KeyMsg{Type: tea.KeyEnter}); cmd != nil {
+		t.Fatal("nothing to stop, so no request should be made")
+	}
+	if !strings.Contains(c.state.Notice, "nothing to stop") {
+		t.Fatalf("notice = %q", c.state.Notice)
+	}
+}
+
+func TestShowTogglesThinking(t *testing.T) {
+	a, c := busyChat(t)
+	c.showThink = false
+	for i, want := range []bool{true, false, true} {
+		c.ta.SetValue("/show")
+		a.key(tea.KeyMsg{Type: tea.KeyEnter})
+		if c.showThink != want {
+			t.Fatalf("toggle %d: showThink=%v, want %v", i, c.showThink, want)
+		}
+		if len(c.outbox) != 0 {
+			t.Fatal("/show must not be sent to the model")
+		}
+	}
+	// Case-insensitive, like the other commands.
+	c.ta.SetValue("/SHOW")
+	a.key(tea.KeyMsg{Type: tea.KeyEnter})
+	if c.showThink {
+		t.Fatal("/SHOW should toggle too")
+	}
+}
+
+func TestSplashCommandReplaysTheTitleScreen(t *testing.T) {
+	a, c := busyChat(t)
+	c.state.Busy = false
+	a.splash = false
+	c.ta.SetValue("/splash")
+	cmd := a.key(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("/splash should navigate")
+	}
+	_, next := a.Update(cmd())
+	if !a.splash || next == nil {
+		t.Fatal("the title screen should be showing again and animating")
+	}
+	if a.splashN != 0 {
+		t.Fatal("it should restart from the first frame")
+	}
+	// Too small to fit: say so rather than showing a clipped picture.
+	a.splash = false
+	a.w, a.h = 50, 12
+	if a.navigate("splash") != nil || a.splash {
+		t.Fatal("a too-small terminal should not enter the splash")
+	}
+	if a.toast == "" {
+		t.Fatal("and should explain why")
+	}
+}
+
+// ---- themed title screen ----
+
+func TestBurrowSplashIsTheOriginalArt(t *testing.T) {
+	set := splashFor(themes["burrow"])
+	for y := range splashRows {
+		if set.rows[y] != splashRows[y] {
+			t.Fatalf("burrow row %d was altered", y)
+		}
+	}
+}
+
+func TestEveryThemeRecolorsTheSplashWithoutChangingTheShape(t *testing.T) {
+	burrow := splashFor(themes["burrow"])
+	for name, th := range themes {
+		set := splashFor(th)
+		if len(set.rows) != len(burrow.rows) {
+			t.Fatalf("%s: row count changed", name)
+		}
+		for y := range set.rows {
+			if plainRow(set.rows[y]) != plainRow(burrow.rows[y]) {
+				t.Fatalf("%s row %d: recoloring changed the glyphs", name, y)
+			}
+			if lipgloss.Width(set.rows[y]) != splashW && lipgloss.Width(set.rows[y]) != lipgloss.Width(burrow.rows[y]) {
+				t.Fatalf("%s row %d changed width", name, y)
+			}
+		}
+		if name != "burrow" && strings.Join(set.rows, "") == strings.Join(burrow.rows, "") {
+			t.Errorf("%s: the splash still has the burrow colors", name)
+		}
+	}
+}
+
+func TestSplashPageAndAccentMapToTheTheme(t *testing.T) {
+	for name, th := range themes {
+		if name == "burrow" {
+			continue
+		}
+		set := splashFor(th)
+		tr := themeRamp(th)
+		// The art's page color must become exactly the theme's page color.
+		if got := remapColor(artRamp[0], tr, hexVec(th.Accent)); got.str() != tr[0].str() {
+			t.Errorf("%s: page maps to %s, want %s", name, got.str(), tr[0].str())
+		}
+		// Cyan (the eye) must become the theme's accent.
+		acc := remapColor(artAccent, tr, hexVec(th.Accent))
+		if want := hexVec(th.Accent); absv(acc, want) > 2 {
+			t.Errorf("%s: cyan maps to %s, want the accent %s", name, acc.str(), want.str())
+		}
+		// Light strokes must become the theme's text color.
+		if got := remapColor(artRamp[4], tr, hexVec(th.Accent)); absv(got, hexVec(th.Text)) > 2 {
+			t.Errorf("%s: strokes map to %s, want text %s", name, got.str(), hexVec(th.Text).str())
+		}
+		// The eye is still findable after recoloring.
+		found := false
+		for y := 0; y < splashGap && !found; y++ {
+			for _, c := range set.grid[y] {
+				if splashEye(c) {
+					found = true
+					break
+				}
+			}
+		}
+		if !found {
+			t.Errorf("%s: the eye was lost", name)
+		}
+	}
+}
+
+func absv(a, b vec) float64 {
+	return abs(a[0]-b[0]) + abs(a[1]-b[1]) + abs(a[2]-b[2])
+}
+
+func TestShadesKeepTheirOrderInsideATheme(t *testing.T) {
+	// Darker art tones stay darker on a dark theme, and flip on a light one.
+	dark, light := themeRamp(themes["slate"]), themeRamp(themes["light"])
+	for i := 0; i+1 < len(artRamp); i++ {
+		d0 := vlum(remapColor(artRamp[i], dark, hexVec(themes["slate"].Accent)))
+		d1 := vlum(remapColor(artRamp[i+1], dark, hexVec(themes["slate"].Accent)))
+		if d1 <= d0 {
+			t.Errorf("slate: tone %d is not lighter than tone %d (%.0f vs %.0f)", i+1, i, d1, d0)
+		}
+		l0 := vlum(remapColor(artRamp[i], light, hexVec(themes["light"].Accent)))
+		l1 := vlum(remapColor(artRamp[i+1], light, hexVec(themes["light"].Accent)))
+		if l1 >= l0 {
+			t.Errorf("light: tone %d should be darker than tone %d (%.0f vs %.0f)", i+1, i, l1, l0)
+		}
+	}
+}
+
+func TestSplashViewUsesTheChosenThemesBackground(t *testing.T) {
+	cfg := config.Default()
+	cfg.Theme = "ember"
+	a := New(&cfg)
+	a.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	view := a.View()
+	if !strings.Contains(view, "48;2;5;4;3") { // ember page #050403
+		t.Fatal("the title screen should be painted on the ember page color")
+	}
+	if strings.Contains(view, "48;2;16;20;34") {
+		t.Fatal("the burrow navy leaked into the ember title screen")
+	}
+	// Switching theme changes it.
+	cfg2 := config.Default()
+	cfg2.Theme = "light"
+	b := New(&cfg2)
+	b.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	if !strings.Contains(b.View(), "48;2;255;255;255") {
+		t.Fatal("the light theme's title screen should be on a white page")
+	}
+}
+
+func TestGlimmerDarkensOnLightThemesAndBrightensOnDark(t *testing.T) {
+	if splashFor(themes["light"]).to != "0;0;0" || splashFor(themes["sepia"]).to != "0;0;0" {
+		t.Fatal("light themes should glimmer toward black")
+	}
+	if splashFor(themes["ember"]).to != "255;255;255" {
+		t.Fatal("dark themes should glimmer toward white")
+	}
+	if got := glimmerColorTo("100;100;100", 0.5, "0;0;0"); got != "50;50;50" {
+		t.Fatalf("toward black: %s", got)
+	}
+	// Animation still runs on a themed set and only changes colors.
+	set := splashFor(themes["light"])
+	changed := false
+	for n := 0; n < 30; n++ {
+		fr := set.frame(n)
+		for y := range fr {
+			if y != len(fr)-1 && plainRow(fr[y]) != plainRow(set.rows[y]) {
+				t.Fatalf("frame %d row %d: glyphs changed", n, y)
+			}
+			if fr[y] != set.rows[y] {
+				changed = true
+			}
+		}
+	}
+	if !changed {
+		t.Fatal("the themed splash never animates")
+	}
+}
