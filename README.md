@@ -61,7 +61,9 @@ have to think about it.
   - `api` — super-badger's own HTTP API.
 - `app/` — the React Native client (bare RN, not Expo). `npm run web` serves
   a Vite dev build of the exact same UI in a browser; `npm run android`
-  builds the native target. See `app/README.md`.
+  builds the native target. See `app/README.md`. It opens on an animated, themed
+  logo splash and has a per-theme launcher icon (the S), both generated from the
+  terminal art by `tui/tools/appart`.
 - `tui/` — the `superbadger` terminal client (Go, bubbletea; its own module,
   talks to the server over REST + WebSocket only). Chat-focused: pick/swap
   stations (the station screen shows just each one's metrics), streaming
@@ -78,9 +80,12 @@ have to think about it.
   swap, `ctrl+k` actions, `ctrl+e` station settings, `ctrl+g` settings,
   `ctrl+o` tool output, `ctrl+q`/`ctrl+c` quit (quitting never cancels a running
   reply; `Esc` does nothing in the message box). Typed commands: `/stop` (cancel
-  the running reply and drop anything queued behind it), `/show` (toggle
+  the running reply and drop anything queued behind it), `/help` (list these),
+  `/compact` (summarize older messages to free context), `/show` (toggle
   thinking; `ctrl+r` too), `/settings`, `/stations`, `/station`, `/splash`
-  (replay the title screen), `/quit`. Themes: burrow (default), dark, slate,
+  (replay the title screen), `/quit`. Typing `/` shows a dim ghost of the first
+  matching command; `Tab` completes it and pressing `Tab` again cycles the
+  matches. Themes: burrow (default), dark, slate,
   ember, light, sepia — the title screen is recolored to match.
   Data: the TUI keeps only its own settings (server URL, token, theme, last
   station, …) in `config.json` under your user config dir

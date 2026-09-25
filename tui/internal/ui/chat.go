@@ -92,10 +92,16 @@ type chatModel struct {
 	usage      api.TokenUsage
 	compacting bool
 
-	menu     bool
-	menuCur  int
-	confirm  string // "reset"|"delete" awaiting y/n
-	localErr string
+	menu bool
+	help bool // the /help command list is showing
+
+	// Tab-completion state: the text the user typed before the first Tab of a
+	// run, the last completion we inserted, and how far through the matches.
+	tabBase, tabLast string
+	tabIdx           int
+	menuCur          int
+	confirm          string // "reset"|"delete" awaiting y/n
+	localErr         string
 
 	// question prompt state
 	qCur    int
@@ -111,7 +117,7 @@ var genCounter int
 func newChat(c *api.Client, st Styles, s api.Station, idx, total int) *chatModel {
 	genCounter++
 	ta := textarea.New()
-	ta.Placeholder = "message  ·  enter sends  ·  alt+enter newline  ·  /settings"
+	ta.Placeholder = "message  ·  enter sends  ·  alt+enter newline  ·  /help"
 	ta.ShowLineNumbers = false
 	ta.SetPromptFunc(2, func(line int) string {
 		if line == 0 {
@@ -210,7 +216,7 @@ func (m *chatModel) blocked() bool {
 	return m.state.PendingPermission != nil || m.state.PendingQuestion != nil
 }
 
-func (m *chatModel) overlay() bool { return m.menu || m.confirm != "" }
+func (m *chatModel) overlay() bool { return m.menu || m.confirm != "" || m.help }
 
 func (m *chatModel) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
@@ -228,6 +234,9 @@ func (m *chatModel) Update(msg tea.Msg) tea.Cmd {
 		return m.waitFrame()
 
 	case flushMsg:
+		if m.compacting {
+			m.dirty = true
+		}
 		cmd := m.flush()
 		return tea.Batch(m.flushTick(), cmd)
 
@@ -326,7 +335,14 @@ func (m *chatModel) send(text string) tea.Cmd {
 func (m *chatModel) key(k tea.KeyMsg) tea.Cmd {
 	s := k.String()
 	m.localErr = ""
+	if s != "tab" {
+		m.tabBase = ""
+	}
 
+	if m.help {
+		m.help = false // any key closes the command list
+		return nil
+	}
 	if m.confirm != "" {
 		switch s {
 		case "y", "Y", "enter":
@@ -361,6 +377,9 @@ func (m *chatModel) key(k tea.KeyMsg) tea.Cmd {
 	}
 
 	switch s {
+	case "tab":
+		m.completeSlash() // no-op unless a /command is being typed
+		return nil
 	case "esc":
 		// Deliberately does nothing here: stopping a reply is the explicit
 		// /stop command, so a stray Esc can't cancel work in progress.
@@ -467,6 +486,9 @@ func (m *chatModel) runAction(what string) tea.Cmd {
 			return nil
 		}
 	case "compact":
+		if m.compacting {
+			return nil // one at a time
+		}
 		m.compacting = true
 		return func() tea.Msg {
 			if err := c.CompactStation(id); err != nil {
@@ -650,12 +672,8 @@ func (m *chatModel) topBar() string {
 	line1 := left + strings.Repeat(" ", gap) + right
 
 	var acts []string
-	if m.station.HasAction("compact") {
-		if m.compacting {
-			acts = append(acts, "compacting…")
-		} else {
-			acts = append(acts, "compact ⌥c")
-		}
+	if m.station.HasAction("compact") && !m.compacting {
+		acts = append(acts, "compact ⌥c")
 	}
 	if m.station.HasAction("reset") {
 		acts = append(acts, "reset ⌥r")
@@ -663,6 +681,11 @@ func (m *chatModel) topBar() string {
 	// Second row: directory + enabled action buttons. No model/provider here
 	// (wasted space), and the row is dropped entirely when there's nothing.
 	var row2 []string
+	if m.compacting {
+		// Shown regardless of the station's top-bar buttons: compaction is a
+		// long silent wait on the server, so it must never go unannounced.
+		row2 = append(row2, s.Primary.Bold(true).Render("◆ compacting…"))
+	}
 	if m.station.Directory != "" {
 		row2 = append(row2, s.Muted.Render(m.station.Directory))
 	}
@@ -721,6 +744,10 @@ func (m *chatModel) transcript() string {
 	}
 	if m.state.Busy {
 		b.WriteString(" " + m.st.Primary.Render("◆ ") + m.st.Muted.Render("working…  /stop to abort") + "\n")
+	}
+	if m.compacting {
+		dots := strings.Repeat(".", int(time.Now().UnixMilli()/400%4))
+		b.WriteString(" " + m.st.Primary.Render("◆ ") + m.st.Text.Render("compacting") + m.st.Muted.Render(dots+"  summarizing older messages to free up context") + "\n")
 	}
 	if b.Len() == 0 {
 		b.WriteString("\n " + m.st.Muted.Render("nothing here yet — say something."))
@@ -801,7 +828,17 @@ func (m *chatModel) renderPart(p *chat.Part, wrap lipgloss.Style) string {
 		}
 		return out
 	case chat.KindStepFinish:
-		if p.Tokens > 0 {
+		switch {
+		case p.Ctx > 0:
+			// The same basis as the top bar's ctx, so the two agree; thinking
+			// tokens are billed for the step but aren't part of the context,
+			// so they're shown separately rather than folded into one number.
+			line := fmt.Sprintf("╌ step done · %s context", api.FormatTokens(p.Ctx))
+			if p.Reasoning > 0 {
+				line += fmt.Sprintf(" · %s thinking", api.FormatTokens(p.Reasoning))
+			}
+			return m.st.Muted.Render(line)
+		case p.Tokens > 0: // a server that only reports a total
 			return m.st.Muted.Render(fmt.Sprintf("╌ step done · %s tokens", api.FormatTokens(p.Tokens)))
 		}
 		return ""
@@ -861,6 +898,16 @@ func (m *chatModel) bottom() string {
 	var panel []string
 	color := s.T.Accent
 	switch {
+	case m.help:
+		w := 0
+		for _, c := range commandHelp {
+			w = max(w, len(c.cmd))
+		}
+		panel = append(panel, s.Primary.Bold(true).Render("commands"), "")
+		for _, c := range commandHelp {
+			panel = append(panel, s.Primary.Render(c.cmd)+strings.Repeat(" ", w-len(c.cmd)+2)+s.Soft.Render(c.desc))
+		}
+		panel = append(panel, "", s.Muted.Render("any key to close"))
 	case m.confirm != "":
 		color = s.T.Danger
 		panel = append(panel, s.Danger.Render(fmt.Sprintf("%s this station? (y/N)", strings.Title(m.confirm)))) //nolint:staticcheck
@@ -917,7 +964,7 @@ func (m *chatModel) bottom() string {
 		}
 		panel = append(panel, "", s.Muted.Render(hint))
 	default:
-		lines = append(lines, box(m.ta.View(), m.w, s.T.Accent))
+		lines = append(lines, box(m.inputView(), m.w, s.T.Accent))
 		return strings.Join(lines, "\n")
 	}
 	lines = append(lines, box(strings.Join(panel, "\n"), m.w, color))
@@ -945,6 +992,22 @@ func (m *chatModel) View() string {
 // to being sent to the model as ordinary text.
 func (m *chatModel) localCommand(text string) (cmd tea.Cmd, ok bool) {
 	switch text {
+	case "/help":
+		m.help = true
+		return nil, true
+	case "/compact":
+		if m.state.Busy {
+			// Folding history into a summary while a reply is streaming would
+			// race the reply; make the user stop it (or wait) first.
+			m.state.Notice = "a reply is running — wait for it, or /stop it, then /compact"
+			return nil, true
+		}
+		if m.compacting {
+			m.state.Notice = "already compacting"
+			return nil, true
+		}
+		m.state.Notice = "compacting…"
+		return m.runAction("compact"), true
 	case "/show":
 		m.showThink = !m.showThink
 		m.dirty = true
@@ -972,6 +1035,20 @@ func (m *chatModel) localCommand(text string) (cmd tea.Cmd, ok bool) {
 	return nil, false
 }
 
+// commandHelp is what /help lists — every typed command, in the order shown.
+// (TestHelpListsEveryCommand keeps it in step with the commands that exist.)
+var commandHelp = []struct{ cmd, desc string }{
+	{"/help", "show this list"},
+	{"/stop", "cancel the running reply (and drop messages queued behind it)"},
+	{"/compact", "summarize older messages to free up context"},
+	{"/show", "show or hide the model's thinking"},
+	{"/settings", "open settings"},
+	{"/stations", "pick or create a station"},
+	{"/station", "settings for this station"},
+	{"/splash", "replay the title screen"},
+	{"/quit", "quit (also /exit)"},
+}
+
 var slashCommands = map[string]string{
 	"/splash":   "splash",
 	"/settings": "settings",
@@ -979,4 +1056,99 @@ var slashCommands = map[string]string{
 	"/station":  "stationsettings",
 	"/quit":     "quit",
 	"/exit":     "quit",
+}
+
+// ---- /command completion ----
+
+// slashCandidates lists every typed command that Tab can complete to, in the
+// order /help shows them (plus the /exit alias).
+func slashCandidates() []string {
+	out := make([]string, 0, len(commandHelp)+1)
+	for _, c := range commandHelp {
+		out = append(out, c.cmd)
+	}
+	return append(out, "/exit")
+}
+
+// slashMatches returns the commands that start with typed and are longer than
+// it (case-insensitively). A complete command has nothing left to offer.
+func slashMatches(typed string) []string {
+	if !strings.HasPrefix(typed, "/") || strings.ContainsAny(typed, " \t\n") {
+		return nil
+	}
+	low := strings.ToLower(typed)
+	var out []string
+	for _, c := range slashCandidates() {
+		if len(c) > len(low) && strings.HasPrefix(c, low) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// cursorAtEnd reports whether the cursor is at the end of a single-line input.
+func (m *chatModel) cursorAtEnd() bool {
+	v := m.ta.Value()
+	return m.ta.Line() == 0 && !strings.Contains(v, "\n") &&
+		m.ta.LineInfo().CharOffset == len([]rune(v))
+}
+
+// ghost is the dim completion shown after what has been typed: the rest of
+// the first matching command. Empty when there is nothing to suggest.
+func (m *chatModel) ghost() string {
+	v := m.ta.Value()
+	if ms := slashMatches(v); len(ms) > 0 && m.cursorAtEnd() {
+		return ms[0][len(v):]
+	}
+	return ""
+}
+
+// completeSlash is Tab: it fills in the ghost, and pressing Tab again cycles
+// through the other matches for what was originally typed.
+func (m *chatModel) completeSlash() bool {
+	v := m.ta.Value()
+	base := v
+	cycling := m.tabBase != "" && v == m.tabLast
+	if cycling {
+		base = m.tabBase
+	} else if !m.cursorAtEnd() {
+		return false
+	}
+	ms := slashMatches(base)
+	if len(ms) == 0 {
+		return false
+	}
+	if cycling {
+		m.tabIdx++
+	} else {
+		m.tabBase, m.tabIdx = v, 0
+	}
+	choice := ms[m.tabIdx%len(ms)]
+	m.ta.SetValue(choice)
+	m.tabLast = choice
+	return true
+}
+
+// inputView is the message box, with the ghost completion drawn after the
+// typed text. The textarea has no notion of ghost text, so the first line is
+// drawn here (cursor on the first ghost character) and the rest is its own.
+func (m *chatModel) inputView() string {
+	view := m.ta.View()
+	g := m.ghost()
+	if g == "" {
+		return view
+	}
+	s := m.st
+	lines := strings.Split(view, "\n")
+	width := lipgloss.Width(lines[0])
+	rs := []rune(g)
+	cursor := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(s.T.Bg)).Background(lipgloss.Color(s.T.Accent)).
+		Render(string(rs[0]))
+	first := s.Primary.Bold(true).Render("❯ ") + s.Text.Render(m.ta.Value()) + cursor + s.Muted.Render(string(rs[1:]))
+	if pad := width - lipgloss.Width(first); pad > 0 {
+		first += strings.Repeat(" ", pad)
+	}
+	lines[0] = first
+	return strings.Join(lines, "\n")
 }

@@ -25,6 +25,8 @@ import {StationSettingsScreen} from './screens/StationSettingsScreen';
 import {StationsHomeScreen} from './screens/StationsHomeScreen';
 import {settingsStore} from './settings';
 import {Theme, ThemeProvider, useTheme} from './theme';
+import {SplashGate} from './logo/SplashGate';
+import {useThemedAppIcon} from './appIcon';
 
 const TITLES: Record<Route['name'], string> = {
   stations: 'Super Badger',
@@ -69,6 +71,8 @@ export interface HeaderInfo {
 
 function AppInner(): React.JSX.Element {
   const theme = useTheme();
+  // Keeps the launcher icon in step with the theme (Android; see appIcon.ts).
+  useThemedAppIcon();
   const [route, setRoute] = useState<Route>({name: 'stations'});
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [stations, setStations] = useState<Station[]>([]);
@@ -595,7 +599,9 @@ function makeStyles(theme: Theme) {
 function App(): React.JSX.Element {
   return (
     <ThemeProvider>
-      <AppInner />
+      <SplashGate>
+        <AppInner />
+      </SplashGate>
     </ThemeProvider>
   );
 }

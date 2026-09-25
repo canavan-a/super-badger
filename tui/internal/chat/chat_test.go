@@ -85,3 +85,27 @@ func TestErrorFrames(t *testing.T) {
 		t.Fatal("error not applied")
 	}
 }
+
+func TestStepFinishSplitsContextFromThinking(t *testing.T) {
+	s := New()
+	s.Apply(ev(t, `{"type":"message.part.updated","properties":{"part":{"id":"sf","messageID":"m","type":"step-finish","tokens":{"total":80100,"input":1000,"output":2000,"reasoning":7500,"cache":{"read":69000,"write":600}}}}}`))
+	p := s.Turn("m").Parts["sf"]
+	if p.Ctx != 72600 {
+		t.Errorf("ctx = %d, want 72600 (input+output+cache, the top bar's basis)", p.Ctx)
+	}
+	if p.Reasoning != 7500 || p.Tokens != 80100 {
+		t.Errorf("reasoning=%d total=%d", p.Reasoning, p.Tokens)
+	}
+	// The gap between the provider's total and the context is the thinking.
+	if p.Tokens-p.Ctx != p.Reasoning {
+		t.Errorf("total-ctx = %d, want the thinking tokens %d", p.Tokens-p.Ctx, p.Reasoning)
+	}
+}
+
+func TestStepFinishWithOnlyATotalStillWorks(t *testing.T) {
+	s := New()
+	s.Apply(ev(t, `{"type":"message.part.updated","properties":{"part":{"id":"sf","messageID":"m","type":"step-finish","tokens":{"total":1234}}}}`))
+	if p := s.Turn("m").Parts["sf"]; p.Tokens != 1234 || p.Ctx != 0 {
+		t.Errorf("%+v", p)
+	}
+}

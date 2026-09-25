@@ -119,7 +119,17 @@ func bgTriple(hex string) string {
 func TestMain(m *testing.M) {
 	// No TTY under `go test`, so force color output to assert on it.
 	lipgloss.SetColorProfile(termenv.TrueColor)
-	os.Exit(m.Run())
+	// And never let a test see the developer's real config: point the config
+	// dir at a throwaway one for the whole run.
+	dir, err := os.MkdirTemp("", "superbadger-ui-test-")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("HOME", dir)
+	os.Setenv("XDG_CONFIG_HOME", dir)
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
 }
 
 func TestFrameWithHintIsExactWidth(t *testing.T) {
@@ -731,5 +741,373 @@ func TestGlimmerDarkensOnLightThemesAndBrightensOnDark(t *testing.T) {
 	}
 	if !changed {
 		t.Fatal("the themed splash never animates")
+	}
+}
+
+// ---- /help ----
+
+func TestHelpShowsTheCommandsAndAnyKeyClosesIt(t *testing.T) {
+	a, c := busyChat(t)
+	c.state.Busy = false
+	c.ta.SetValue("/help")
+	if cmd := a.key(tea.KeyMsg{Type: tea.KeyEnter}); cmd != nil {
+		t.Fatal("/help is purely local; it should not produce a command")
+	}
+	if !c.help || len(c.outbox) != 0 || c.ta.Value() != "" {
+		t.Fatalf("help=%v outbox=%d input=%q", c.help, len(c.outbox), c.ta.Value())
+	}
+	view := plainRow(c.View())
+	for _, cmd := range []string{"/help", "/stop", "/show", "/compact", "/settings", "/stations", "/station", "/splash", "/quit"} {
+		if !strings.Contains(view, cmd) {
+			t.Errorf("help is missing %s:\n%s", cmd, view)
+		}
+	}
+	if !strings.Contains(view, "any key to close") {
+		t.Error("help should say how to close it")
+	}
+	// Any key closes it and is not typed into the box.
+	a.key(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	if c.help || c.ta.Value() != "" {
+		t.Fatalf("help=%v input=%q after a key", c.help, c.ta.Value())
+	}
+	if strings.Contains(plainRow(c.View()), "any key to close") {
+		t.Fatal("help should be gone")
+	}
+}
+
+func TestHelpKeyDoesNotTriggerShortcutsBehindIt(t *testing.T) {
+	a, c := busyChat(t)
+	c.state.Busy = false
+	c.help = true
+	before := a.sub
+	a.key(tea.KeyMsg{Type: tea.KeyCtrlS}) // would open the picker if help weren't modal
+	if a.sub != before || c.help {
+		t.Fatal("the key should only close help")
+	}
+}
+
+func TestHelpListsEveryCommand(t *testing.T) {
+	listed := map[string]bool{}
+	for _, h := range commandHelp {
+		listed[h.cmd] = true
+	}
+	local := []string{"/help", "/stop", "/show", "/compact"}
+	// Every command that exists must be documented...
+	for cmd := range slashCommands {
+		if cmd == "/exit" {
+			continue // alias, documented under /quit
+		}
+		if !listed[cmd] {
+			t.Errorf("%s exists but is missing from /help", cmd)
+		}
+	}
+	for _, cmd := range local {
+		if !listed[cmd] {
+			t.Errorf("%s exists but is missing from /help", cmd)
+		}
+	}
+	// ...and everything documented must exist.
+	_, c := busyChat(t)
+	for _, h := range commandHelp {
+		if _, nav := slashCommands[h.cmd]; nav {
+			continue
+		}
+		c.state.Busy = false
+		if _, ok := c.localCommand(h.cmd); !ok {
+			t.Errorf("/help lists %s but it isn't a command", h.cmd)
+		}
+		c.help = false
+	}
+}
+
+func TestTheSuiteCannotTouchTheRealConfig(t *testing.T) {
+	p, err := config.DefaultPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(p, os.TempDir()) {
+		t.Fatalf("the default config path %q is outside the temp dir: tests could overwrite a real config", p)
+	}
+	// Exercise the two places the app saves (opening a station, and
+	// switching station), then make sure nothing was written anywhere.
+	a := testApp(100, 30)
+	a.stations = []api.Station{{ID: 1, Name: "a"}, {ID: 2, Name: "b"}}
+	a.openStation(1)
+	defer func() { a.chat.Close() }()
+	a.swap(1)
+	if _, err := os.Stat(p); err == nil {
+		t.Fatalf("a test wrote %s", p)
+	}
+}
+
+// ---- /command ghost text and Tab completion ----
+
+func typed(c *chatModel, s string) {
+	c.ta.SetValue(s) // leaves the cursor at the end, like typing
+}
+
+func TestGhostShowsTheRestOfACommand(t *testing.T) {
+	_, c := busyChat(t)
+	for in, want := range map[string]string{
+		"/":         "help",  // first command
+		"/s":        "top",   // /stop is listed before /settings
+		"/st":       "op",    // still /stop first
+		"/set":      "tings", //
+		"/stations": "",      // complete, and nothing longer
+		"/station":  "s",     // /stations is longer
+		"/STO":      "p",     // case-insensitive, completes in lowercase
+		"/zzz":      "",      // no such command
+		"hello":     "",      // not a command
+		"":          "",      //
+		"/stop now": "",      // already has an argument
+		"/quit":     "",      //
+		"/e":        "xit",   // the alias completes too
+	} {
+		typed(c, in)
+		if got := c.ghost(); got != want {
+			t.Errorf("ghost(%q) = %q, want %q", in, got, want)
+		}
+	}
+	// Not while the cursor is somewhere in the middle of the text.
+	typed(c, "/st")
+	c.ta.SetCursor(1)
+	if c.ghost() != "" {
+		t.Error("no ghost when the cursor is not at the end")
+	}
+	// Not on a multi-line message that happens to start with a slash.
+	typed(c, "/st\nmore")
+	if c.ghost() != "" {
+		t.Error("no ghost on a multi-line input")
+	}
+}
+
+func TestTabAcceptsTheGhost(t *testing.T) {
+	a, c := busyChat(t)
+	c.state.Busy = false
+	typed(c, "/se")
+	a.key(tea.KeyMsg{Type: tea.KeyTab})
+	if c.ta.Value() != "/settings" {
+		t.Fatalf("tab gave %q", c.ta.Value())
+	}
+	if c.ghost() != "" {
+		t.Fatal("nothing left to suggest after completing")
+	}
+	// The completed command then runs like any other.
+	if cmd := a.key(tea.KeyMsg{Type: tea.KeyEnter}); cmd == nil {
+		t.Fatal("enter on the completed /settings should navigate")
+	}
+}
+
+func TestTabCyclesThroughMatchesAndWraps(t *testing.T) {
+	a, c := busyChat(t)
+	c.state.Busy = false
+	typed(c, "/st")
+	var seq []string
+	for i := 0; i < 5; i++ {
+		a.key(tea.KeyMsg{Type: tea.KeyTab})
+		seq = append(seq, c.ta.Value())
+	}
+	want := []string{"/stop", "/stations", "/station", "/stop", "/stations"}
+	if strings.Join(seq, ",") != strings.Join(want, ",") {
+		t.Fatalf("tab sequence %v, want %v", seq, want)
+	}
+}
+
+func TestTypingAnythingEndsACompletionRun(t *testing.T) {
+	a, c := busyChat(t)
+	c.state.Busy = false
+	typed(c, "/s")
+	a.key(tea.KeyMsg{Type: tea.KeyTab}) // -> /stop
+	a.key(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	if c.tabBase != "" {
+		t.Fatal("a normal key should reset the cycle")
+	}
+	// A fresh Tab now completes from what is actually in the box.
+	typed(c, "/se")
+	a.key(tea.KeyMsg{Type: tea.KeyTab})
+	if c.ta.Value() != "/settings" {
+		t.Fatalf("got %q", c.ta.Value())
+	}
+}
+
+func TestTabDoesNothingOutsideACommand(t *testing.T) {
+	a, c := busyChat(t)
+	c.state.Busy = false
+	for _, in := range []string{"", "hello there", "/nosuchcommand", "/stop now"} {
+		typed(c, in)
+		if cmd := a.key(tea.KeyMsg{Type: tea.KeyTab}); cmd != nil {
+			t.Errorf("tab on %q produced a command", in)
+		}
+		if c.ta.Value() != in {
+			t.Errorf("tab changed %q into %q", in, c.ta.Value())
+		}
+	}
+}
+
+func TestGhostIsDrawnInTheInputBoxAndIsStyledDim(t *testing.T) {
+	_, c := busyChat(t)
+	c.state.Busy = false
+	typed(c, "/st")
+	raw := c.bottom()
+	if !strings.Contains(plainRow(raw), "❯ /stop") {
+		t.Fatalf("the ghost should complete the text in the box:\n%s", plainRow(raw))
+	}
+	// The typed part and the suggestion must not look the same: the typed
+	// text is in the normal text color, the ghost after the cursor is muted.
+	if !strings.Contains(raw, c.st.Text.Render("/st")) {
+		t.Error("the typed text should be in the normal text color")
+	}
+	if !strings.Contains(raw, c.st.Muted.Render("p")) {
+		t.Error("the suggestion should be drawn in the muted color")
+	}
+	// Width is stable, so the box border does not jump as suggestions appear.
+	typed(c, "/zzz")
+	if lipgloss.Width(strings.Split(c.bottom(), "\n")[0]) != lipgloss.Width(strings.Split(raw, "\n")[0]) {
+		t.Fatal("the input box changed width when a suggestion appeared")
+	}
+	for _, l := range strings.Split(plainRow(raw), "\n") {
+		if w := lipgloss.Width(l); w > c.w {
+			t.Fatalf("a line is %d wide (> %d): %q", w, c.w, l)
+		}
+	}
+}
+
+func TestCompactCommand(t *testing.T) {
+	a, c := busyChat(t)
+	c.state.Busy = false
+	c.ta.SetValue("/compact")
+	cmd := a.key(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("/compact should start the compaction")
+	}
+	if !c.compacting {
+		t.Fatal("the top bar should show it is compacting")
+	}
+	if len(c.outbox) != 0 || c.ta.Value() != "" {
+		t.Fatal("/compact must not be sent to the model, and the box should clear")
+	}
+
+	// Refuses mid-reply, with a pointer to /stop, and does nothing.
+	c.compacting = false
+	c.state.Busy = true
+	c.ta.SetValue("/compact")
+	if cmd := a.key(tea.KeyMsg{Type: tea.KeyEnter}); cmd != nil {
+		t.Fatal("must not compact while a reply is running")
+	}
+	if !strings.Contains(c.state.Notice, "/stop") || c.compacting {
+		t.Fatalf("notice %q, compacting=%v", c.state.Notice, c.compacting)
+	}
+
+	// Tab completes it: /co -> /compact.
+	c.state.Busy = false
+	typed(c, "/co")
+	a.key(tea.KeyMsg{Type: tea.KeyTab})
+	if c.ta.Value() != "/compact" {
+		t.Fatalf("tab gave %q", c.ta.Value())
+	}
+}
+
+// ---- compaction feedback ----
+
+func TestCompactingIsAlwaysVisible(t *testing.T) {
+	a, c := busyChat(t)
+	c.state.Busy = false
+	// The station has no top-bar buttons enabled: the old indicator lived on
+	// the compact button, so nothing at all was shown.
+	if len(c.station.TopBarActions) != 0 {
+		t.Fatal("test setup: expected no top-bar actions")
+	}
+	c.ta.SetValue("/compact")
+	if cmd := a.key(tea.KeyMsg{Type: tea.KeyEnter}); cmd == nil {
+		t.Fatal("/compact should start")
+	}
+	if !strings.Contains(plainRow(c.topBar()), "compacting") {
+		t.Fatalf("the top bar should say it is compacting:\n%s", plainRow(c.topBar()))
+	}
+	if !strings.Contains(plainRow(c.transcript()), "compacting") {
+		t.Fatalf("the transcript should show a compacting line:\n%s", plainRow(c.transcript()))
+	}
+	// Events arriving mid-compaction clear notices; the indicator must not go with them.
+	e, _ := chat.ParseEvent([]byte(`{"type":"message.part.updated","properties":{"part":{"id":"p","messageID":"m","type":"text","text":"x"}}}`))
+	c.pending = append(c.pending, e)
+	c.flush()
+	if !c.compacting || !strings.Contains(plainRow(c.transcript()), "compacting") {
+		t.Fatal("the compacting indicator vanished when an event arrived")
+	}
+}
+
+func TestCompactingKeepsRedrawingSoItAnimates(t *testing.T) {
+	_, c := busyChat(t)
+	c.state.Busy = false
+	c.compacting = true
+	c.dirty = false
+	c.Update(flushMsg{c.gen})
+	if !c.dirty {
+		t.Fatal("the transcript should be redrawn each tick while compacting")
+	}
+	c.compacting, c.dirty = false, false
+	c.Update(flushMsg{c.gen})
+	if c.dirty {
+		t.Fatal("no needless redraws when idle")
+	}
+}
+
+func TestCompactingEndsOnSuccessAndOnError(t *testing.T) {
+	_, c := busyChat(t)
+	c.state.Busy = false
+	for name, msg := range map[string]tea.Msg{
+		"done":  chatNoticeMsg{c.gen, "Conversation compacted"},
+		"error": chatErrMsg{c.gen, fmt.Errorf("boom")},
+	} {
+		c.compacting = true
+		c.Update(msg)
+		if c.compacting {
+			t.Errorf("%s: still shows compacting", name)
+		}
+		if strings.Contains(plainRow(c.transcript()), "summarizing older") {
+			t.Errorf("%s: the compacting line should be gone", name)
+		}
+	}
+	if !strings.Contains(c.state.Notice, "compacted") && c.localErr == "" {
+		t.Error("the user should be told how it ended")
+	}
+}
+
+func TestCompactWhileCompactingDoesNotStartASecond(t *testing.T) {
+	a, c := busyChat(t)
+	c.state.Busy = false
+	c.compacting = true
+	c.ta.SetValue("/compact")
+	if cmd := a.key(tea.KeyMsg{Type: tea.KeyEnter}); cmd != nil {
+		t.Fatal("a second compaction must not be started")
+	}
+	if !strings.Contains(c.state.Notice, "already") {
+		t.Fatalf("notice %q", c.state.Notice)
+	}
+	// Same for the alt+c button path.
+	c.station.TopBarActions = []string{"compact"}
+	if cmd := c.runAction("compact"); cmd != nil {
+		t.Fatal("runAction must not start a second compaction either")
+	}
+}
+
+func TestStepLineShowsTheSameNumberAsTheTopBar(t *testing.T) {
+	_, c := busyChat(t)
+	c.state.Busy = false
+	// The top bar's ctx comes from the usage endpoint: input+output+cache.
+	c.station.TopBarActions = []string{"tokens"}
+	c.usage = api.TokenUsage{Input: 1000, Output: 2000, Reasoning: 7500, CacheRead: 69000, CacheWrite: 600}
+	top := plainRow(c.topBar())
+	e, _ := chat.ParseEvent([]byte(`{"type":"message.part.updated","properties":{"part":{"id":"sf","messageID":"m","type":"step-finish","tokens":{"total":80100,"input":1000,"output":2000,"reasoning":7500,"cache":{"read":69000,"write":600}}}}}`))
+	c.state.Apply(e)
+	step := plainRow(c.transcript())
+	if !strings.Contains(top, "72.6k") {
+		t.Fatalf("top bar should show 72.6k ctx:\n%s", top)
+	}
+	if !strings.Contains(step, "72.6k context") || !strings.Contains(step, "7.5k thinking") {
+		t.Fatalf("the step line should show the same 72.6k plus the 7.5k thinking:\n%s", step)
+	}
+	if strings.Contains(step, "80.1k") {
+		t.Fatalf("the step line must not show the different provider total:\n%s", step)
 	}
 }

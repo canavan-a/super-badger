@@ -140,3 +140,29 @@ func TestCorruptConfigIsKeptNotLost(t *testing.T) {
 		t.Fatal("the backup was overwritten by a later save")
 	}
 }
+
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "superbadger-config-test-")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("HOME", dir)
+	os.Setenv("XDG_CONFIG_HOME", dir)
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
+}
+
+func TestSavingAPathlessConfigFromATestNeverWrites(t *testing.T) {
+	// Even with the config dir sandboxed, a config with no explicit path is
+	// the "real user config" case and must not be written by a test binary.
+	p, _ := DefaultPath()
+	c := Default()
+	c.ServerURL = "http://should-not-be-saved"
+	if err := c.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(p); err == nil {
+		t.Fatalf("Save wrote the default config path %s from a test", p)
+	}
+}

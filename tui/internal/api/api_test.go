@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestAuthHeaderAndErrorBody(t *testing.T) {
@@ -75,5 +76,25 @@ func TestWSURLAndFormatting(t *testing.T) {
 	}
 	if FormatValue(3.14159, 2) != "3.14" || FormatValue(3, 9) != "3.000000" {
 		t.Fatal("FormatValue")
+	}
+}
+
+func TestCompactOutlastsTheNormalRequestTimeout(t *testing.T) {
+	// Summarizing can take much longer than a normal call; the server holds
+	// the request open until it is done. A slow response must not be turned
+	// into a failure by the ordinary client timeout.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(150 * time.Millisecond)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "")
+	c.HTTP.Timeout = 30 * time.Millisecond // stands in for the usual 30s
+	if _, err := c.GetStation(1); err == nil {
+		t.Fatal("a normal call should hit the short timeout in this setup")
+	}
+	if err := c.CompactStation(1); err != nil {
+		t.Fatalf("compact must not use the ordinary timeout: %v", err)
 	}
 }

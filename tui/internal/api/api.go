@@ -148,6 +148,15 @@ func New(baseURL, token string) *Client {
 }
 
 func (c *Client) do(method, path string, body, out any) error {
+	return c.doWith(c.HTTP, method, path, body, out)
+}
+
+// compactTimeout bounds a compaction request. The server holds the request
+// open until the summary is finished, which for a long conversation can be far
+// longer than a normal call, so it gets its own, generous limit.
+const compactTimeout = 15 * time.Minute
+
+func (c *Client) doWith(hc *http.Client, method, path string, body, out any) error {
 	var r io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -164,7 +173,7 @@ func (c *Client) do(method, path string, body, out any) error {
 	if c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
-	res, err := c.HTTP.Do(req)
+	res, err := hc.Do(req)
 	if err != nil {
 		return err
 	}
@@ -219,7 +228,7 @@ func (c *Client) ResetStation(id uint) (out Station, err error) {
 }
 
 func (c *Client) CompactStation(id uint) error {
-	return c.do("POST", fmt.Sprintf("/stations/%d/compact", id), nil, nil)
+	return c.doWith(&http.Client{Timeout: compactTimeout}, "POST", fmt.Sprintf("/stations/%d/compact", id), nil, nil)
 }
 
 func (c *Client) AbortStation(id uint) error {

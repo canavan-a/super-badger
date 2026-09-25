@@ -53,6 +53,7 @@ export function SettingsScreen(): React.JSX.Element {
   // imports notifee/BackgroundMonitorService since this screen is shared
   // with the Vite web build, which must never statically import either.
   const [bgNotifications, setBgNotifications] = useState(false);
+  const [themedIcon, setThemedIcon] = useState(true);
   const [bgNotifBusy, setBgNotifBusy] = useState(false);
   // Surfaces what requestPermission() actually returned — the toggle above
   // used to fire-and-forget this (see audit: it kept the foreground service
@@ -99,6 +100,7 @@ export function SettingsScreen(): React.JSX.Element {
       setServerUrl(s.serverUrl);
       setAuthToken(s.authToken);
       setBgNotifications(s.bgNotifications);
+      setThemedIcon(s.themedIcon);
       testConnection(s.serverUrl);
     });
     if (Platform.OS === 'android') {
@@ -195,6 +197,11 @@ export function SettingsScreen(): React.JSX.Element {
     }
   };
 
+  const toggleThemedIcon = async (value: boolean) => {
+    setThemedIcon(value);
+    await settingsStore.save({...settingsStore.get(), themedIcon: value});
+  };
+
   const save = async () => {
     await settingsStore.save({...settingsStore.get(), serverUrl: serverUrl.trim(), authToken: authToken.trim()});
     setSaved(true);
@@ -221,6 +228,20 @@ export function SettingsScreen(): React.JSX.Element {
           </Pressable>
         ))}
       </View>
+
+      {Platform.OS === 'android' && (
+        <View style={styles.rowBetween}>
+          <View style={styles.rowBetweenText}>
+            <Text style={styles.label}>Match app icon to theme</Text>
+            <Text style={styles.hint}>
+              Changes the launcher icon to the one for your theme. It switches when you leave the app,
+              and some launchers take a moment to refresh (or briefly drop a home-screen shortcut) —
+              turn this off if yours does.
+            </Text>
+          </View>
+          <Switch value={themedIcon} onValueChange={toggleThemedIcon} />
+        </View>
+      )}
 
       <View style={styles.divider} />
 

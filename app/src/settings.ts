@@ -23,6 +23,10 @@ export interface Settings {
   // app isn't open. Off by default — it's a real foreground service with a
   // persistent notification, opt-in only.
   bgNotifications: boolean;
+  // Android-only: switch the launcher icon to the one matching the current
+  // theme (see src/appIcon.ts). On by default; turn it off if your launcher
+  // reacts badly to icons changing.
+  themedIcon: boolean;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -30,6 +34,7 @@ const DEFAULT_SETTINGS: Settings = {
   authToken: '',
   themeName: 'light',
   bgNotifications: false,
+  themedIcon: true,
 };
 
 type Listener = (settings: Settings) => void;

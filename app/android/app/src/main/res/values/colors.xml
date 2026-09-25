@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- Adaptive-icon background — sampled from ic_launcher_foreground's own
-         source photo (see res/mipmap-*/ic_launcher_foreground.png) so the
-         inset margin around the badgers reads as a subtle border instead of
-         Android's default stark-white auto-generated one. -->
-    <color name="ic_launcher_background">#7C7D75</color>
-</resources>

@@ -34,7 +34,11 @@ type Part struct {
 	Input  any
 	Output string
 	Error  string
-	Tokens int
+	Tokens int // a step-finish's provider "total" (includes thinking tokens)
+	// A step-finish's breakdown: Ctx is what the context window holds after the
+	// step (input + output + cache read/write — the same figure as the top
+	// bar's "ctx"), Reasoning the thinking tokens, which Ctx leaves out.
+	Ctx, Reasoning int
 }
 
 func (p Part) hasText() bool { return p.Kind == KindText || p.Kind == KindReasoning }
@@ -157,9 +161,15 @@ func partFromRaw(raw map[string]any) *Part {
 		return p
 	case "step-finish":
 		p := &Part{Kind: KindStepFinish, ID: id}
-		if f, ok := obj(raw, "tokens")["total"].(float64); ok {
-			p.Tokens = int(f)
+		tk := obj(raw, "tokens")
+		n := func(m map[string]any, k string) int {
+			f, _ := m[k].(float64)
+			return int(f)
 		}
+		cache := obj(tk, "cache")
+		p.Tokens = n(tk, "total")
+		p.Reasoning = n(tk, "reasoning")
+		p.Ctx = n(tk, "input") + n(tk, "output") + n(cache, "read") + n(cache, "write")
 		return p
 	case "step-start":
 		return nil

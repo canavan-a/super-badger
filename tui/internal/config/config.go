@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"testing"
 )
 
 // There is deliberately no default server: until one is set the TUI shows a
@@ -62,6 +63,9 @@ func Default() Config {
 	return Config{Theme: "burrow", Notifications: true, Splash: true}
 }
 
+// DefaultPath is where the config lives unless a path is given explicitly.
+func DefaultPath() (string, error) { return defaultPath() }
+
 func defaultPath() (string, error) {
 	dir, err := os.UserConfigDir()
 	if err != nil {
@@ -110,6 +114,13 @@ func LoadFrom(p string) (*Config, error) {
 
 func (c *Config) Save() error {
 	if c.path == "" {
+		// A test binary must never write the real user config. Tests once did
+		// (they build configs with no path, which means "the default"), and
+		// every test run overwrote the developer's own server URL and token.
+		// Tests that want to save give the config an explicit temp path.
+		if testing.Testing() {
+			return nil
+		}
 		p, err := defaultPath()
 		if err != nil {
 			return err
