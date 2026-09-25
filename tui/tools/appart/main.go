@@ -4,6 +4,7 @@
 //
 //	go run ./tools/appart            # from tui/: writes into ../app
 //	go run ./tools/appart -preview /tmp/out   # also renders PNG previews
+//	go run ./tools/appart -image ../docs/superbadger.png   # the README picture
 //
 // It writes:
 //
@@ -38,6 +39,7 @@ func main() {
 	artPath := flag.String("art", "internal/ui/splash.ans", "the enhanced title art")
 	app := flag.String("app", "../app", "the app directory")
 	preview := flag.String("preview", "", "also render PNG previews into this directory")
+	image := flag.String("image", "", "also write the title screen, in the art's own colors, to this PNG (for the README)")
 	flag.Parse()
 
 	src, err := os.ReadFile(*artPath)
@@ -60,6 +62,9 @@ func main() {
 	must(writeAndroid(filepath.Join(*app, "android/app/src/main/res"), pals, s))
 	if *preview != "" {
 		must(writePreviews(*preview, logo, pals, s))
+	}
+	if *image != "" {
+		must(writePNG(*image, renderTitle(logo)))
 	}
 	fmt.Println("generated logo data, palette and icons from", *artPath)
 }
@@ -479,4 +484,31 @@ func writePreviews(dir string, l *art.Logo, pals map[string]art.Palette, s *sGly
 
 func toNRGBA(c art.RGB) color.NRGBA {
 	return color.NRGBA{R: uint8(c[0] + 0.5), G: uint8(c[1] + 0.5), B: uint8(c[2] + 0.5), A: 255}
+}
+
+// renderTitle draws the title screen (badger + wordmark) exactly as the
+// terminal shows it: the art's own colors on its own navy page, each sub-pixel
+// 3x4 units (the terminal's proportions) at 3x scale. No fonts or terminal are
+// involved, so it is the same on every machine.
+func renderTitle(l *art.Logo) *image.NRGBA {
+	const scale = 3
+	const margin = 8 // sub-pixels of page around the logo
+	pw, ph := pixW*scale, pixH*scale
+	rows := len(l.Badger) + l.Gap + len(l.Word)
+	img := image.NewNRGBA(image.Rect(0, 0, (l.W+2*margin)*pw, (rows+2*margin)*ph))
+	draw.Draw(img, img.Bounds(), &image.Uniform{toNRGBA(art.Page)}, image.Point{}, draw.Src)
+	fill := func(px [][]art.Sub, yOff int) {
+		for y, row := range px {
+			for x, sub := range row {
+				if !sub.On {
+					continue
+				}
+				r := image.Rect((x+margin)*pw, (y+yOff+margin)*ph, (x+margin+1)*pw, (y+yOff+margin+1)*ph)
+				draw.Draw(img, r, &image.Uniform{toNRGBA(sub.C)}, image.Point{}, draw.Src)
+			}
+		}
+	}
+	fill(l.Badger, 0)
+	fill(l.Word, len(l.Badger)+l.Gap)
+	return img
 }
