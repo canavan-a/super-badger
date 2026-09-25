@@ -11,7 +11,7 @@ import (
 
 // splashArt is superbadger.ans: an 80x28 truecolor piece — a pixel-art badger
 // drawn in colored half-blocks (▀), the wordmark, and a "press any key" line.
-// It also draws its own terminal window (title bar, dots, side rails) and a
+// It also draws its own terminal window (title bar, side rails) and a
 // fake shell prompt, which would read as a terminal inside the terminal, so
 // buildSplash strips those and keeps only the picture and the prompt line.
 //

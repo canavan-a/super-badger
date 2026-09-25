@@ -85,7 +85,9 @@ have to think about it.
   thinking; `ctrl+r` too), `/settings`, `/stations`, `/station`, `/splash`
   (replay the title screen), `/quit`. Typing `/` shows a dim ghost of the first
   matching command; `Tab` completes it and pressing `Tab` again cycles the
-  matches. Themes: burrow (default), dark, slate,
+  matches. In the message box `ctrl+←/→` (or `alt+←/→`, `alt+b/f`) jump by word
+  and `Home`/`End` jump to the start/end of the line (on an empty box they scroll
+  the transcript). Themes: burrow (default), dark, slate,
   ember, light, sepia — the title screen is recolored to match.
   Data: the TUI keeps only its own settings (server URL, token, theme, last
   station, …) in `config.json` under your user config dir

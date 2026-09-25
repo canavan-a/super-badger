@@ -543,19 +543,17 @@ func (a *App) View() string {
 }
 
 // frame wraps the screen in the rounded "terminal window" from the
-// superbadger.ans art: a title bar with three dots, side rails, and a bottom
-// edge that carries the key hints.
+// superbadger.ans art: a title in the top edge, side rails, and a bottom edge
+// that carries the key hints.
 func (a *App) frame(body, foot, hint string) string {
 	iw, ih := a.innerW(), a.contentHeight()+1 // +1: toast row
 	edge := a.st.Border
-	dots := a.st.Soft.Render("● ● ●")
 	title := a.st.Primary.Bold(true).Render("superbadger")
-	// ╭─ ● ● ● ───────── superbadger ─────────╮
-	fill := iw - 5 - lipgloss.Width(dots) - lipgloss.Width(title)
+	// ╭───────────── superbadger ─────────────╮   (the border simply continues)
+	fill := iw - 2 - lipgloss.Width(title) // the two spaces around the title
 	left := max(1, fill/2)
 	right := max(1, fill-left)
-	top := edge.Render("╭─ ") + dots + edge.Render(" "+strings.Repeat("─", left)+" ") + title +
-		edge.Render(" "+strings.Repeat("─", right)+"╮")
+	top := edge.Render("╭"+strings.Repeat("─", left)+" ") + title + edge.Render(" "+strings.Repeat("─", right)+"╮")
 
 	lines := strings.Split(body, "\n")
 	if len(lines) > ih-1 {

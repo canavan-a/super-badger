@@ -1111,3 +1111,139 @@ func TestStepLineShowsTheSameNumberAsTheTopBar(t *testing.T) {
 		t.Fatalf("the step line must not show the different provider total:\n%s", step)
 	}
 }
+
+// ---- word jumps and line jumps in the message box ----
+
+func cursor(c *chatModel) int { return c.ta.LineInfo().CharOffset }
+
+func atStartOf(c *chatModel, text string, col int) {
+	c.ta.SetValue(text)
+	c.ta.SetCursor(col)
+}
+
+func TestWordJumpKeysMoveByWord(t *testing.T) {
+	const text = "hello brave new world"
+	for _, tc := range []struct {
+		name string
+		key  tea.KeyMsg
+		from int
+		want int
+	}{
+		// forward: from the start of "brave" to just after it
+		{"ctrl+right", tea.KeyMsg{Type: tea.KeyCtrlRight}, 6, 11},
+		{"alt+right", tea.KeyMsg{Type: tea.KeyRight, Alt: true}, 6, 11},
+		{"alt+f", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("f"), Alt: true}, 6, 11},
+		// backward: from the start of "brave" to the start of "hello"
+		{"ctrl+left", tea.KeyMsg{Type: tea.KeyCtrlLeft}, 6, 0},
+		{"alt+left", tea.KeyMsg{Type: tea.KeyLeft, Alt: true}, 6, 0},
+		{"alt+b", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("b"), Alt: true}, 6, 0},
+		// from mid-word, jump to the end / start of that word
+		{"ctrl+right mid-word", tea.KeyMsg{Type: tea.KeyCtrlRight}, 8, 11},
+		{"ctrl+left mid-word", tea.KeyMsg{Type: tea.KeyCtrlLeft}, 8, 6},
+		// and across the end / start of the text
+		{"ctrl+right at end", tea.KeyMsg{Type: tea.KeyCtrlRight}, len(text), len(text)},
+		{"ctrl+left at start", tea.KeyMsg{Type: tea.KeyCtrlLeft}, 0, 0},
+	} {
+		a, c := busyChat(t)
+		c.state.Busy = false
+		atStartOf(c, text, tc.from)
+		a.key(tc.key)
+		if got := cursor(c); got != tc.want {
+			t.Errorf("%s from %d: cursor at %d, want %d", tc.name, tc.from, got, tc.want)
+		}
+		if c.ta.Value() != text {
+			t.Errorf("%s changed the text: %q", tc.name, c.ta.Value())
+		}
+		if a.sub != nil || c.menu {
+			t.Errorf("%s triggered a shortcut instead of moving the cursor", tc.name)
+		}
+	}
+}
+
+func TestCtrlLeftRightDoNotRollStationsWhenThereIsText(t *testing.T) {
+	// Plain ←/→ roll stations only on an empty box; ctrl+←/→ must never do so.
+	a, c := busyChat(t)
+	c.state.Busy = false
+	a.stations = []api.Station{{ID: 1, Name: "a"}, {ID: 2, Name: "b"}}
+	c.station = a.stations[0]
+	c.ta.SetValue("")
+	a.key(tea.KeyMsg{Type: tea.KeyCtrlRight})
+	if a.chat.station.ID != 1 {
+		t.Fatal("ctrl+right must not switch stations, even on an empty box")
+	}
+}
+
+func TestAltDeleteRemovesTheNextWord(t *testing.T) {
+	a, c := busyChat(t)
+	c.state.Busy = false
+	atStartOf(c, "hello brave new world", 6)
+	a.key(tea.KeyMsg{Type: tea.KeyDelete, Alt: true})
+	if c.ta.Value() != "hello  new world" {
+		t.Fatalf("alt+delete gave %q", c.ta.Value())
+	}
+}
+
+func TestHomeAndEndMoveTheCursorWhenThereIsText(t *testing.T) {
+	a, c := busyChat(t)
+	c.state.Busy = false
+	atStartOf(c, "hello brave new world", 8)
+	a.key(tea.KeyMsg{Type: tea.KeyHome})
+	if cursor(c) != 0 {
+		t.Fatalf("home: cursor at %d, want 0", cursor(c))
+	}
+	a.key(tea.KeyMsg{Type: tea.KeyEnd})
+	if cursor(c) != len("hello brave new world") {
+		t.Fatalf("end: cursor at %d", cursor(c))
+	}
+}
+
+func TestHomeAndEndStillScrollTheTranscriptOnAnEmptyBox(t *testing.T) {
+	a, c := busyChat(t)
+	c.state.Busy = false
+	var long strings.Builder
+	for i := 0; i < 120; i++ {
+		long.WriteString(fmt.Sprintf("line %d\n", i))
+	}
+	c.vp.Height = 10
+	c.vp.SetContent(long.String())
+	c.ta.SetValue("")
+	a.key(tea.KeyMsg{Type: tea.KeyHome})
+	if !c.vp.AtTop() {
+		t.Fatal("home on an empty box should scroll to the top")
+	}
+	a.key(tea.KeyMsg{Type: tea.KeyEnd})
+	if !c.vp.AtBottom() {
+		t.Fatal("end on an empty box should scroll to the bottom")
+	}
+	// With text, the transcript stays put.
+	c.vp.GotoTop()
+	c.ta.SetValue("draft")
+	a.key(tea.KeyMsg{Type: tea.KeyEnd})
+	if !c.vp.AtTop() {
+		t.Fatal("end with text in the box must not scroll the transcript")
+	}
+}
+
+func TestWindowFrameTopEdgeIsAContinuousBorderWithNoDots(t *testing.T) {
+	for _, w := range []int{40, 80, 100, 132} {
+		a := testApp(w, 24)
+		top := strings.Split(ansi.ReplaceAllString(a.View(), ""), "\n")[0]
+		if strings.ContainsAny(top, "●•○") {
+			t.Fatalf("width %d: the top edge should have no dots: %q", w, top)
+		}
+		if lipgloss.Width(top) != w {
+			t.Fatalf("width %d: top edge is %d wide: %q", w, lipgloss.Width(top), top)
+		}
+		if !strings.HasPrefix(top, "╭─") || !strings.HasSuffix(top, "─╮") {
+			t.Fatalf("width %d: the border should run right up to both corners: %q", w, top)
+		}
+		if !strings.Contains(top, " superbadger ") {
+			t.Fatalf("width %d: the title is missing: %q", w, top)
+		}
+		// Everything except the title and its two spaces is the border line.
+		rest := strings.Replace(top, " superbadger ", "", 1)
+		if strings.Trim(rest, "╭╮─") != "" {
+			t.Fatalf("width %d: something other than border line in the top edge: %q", w, top)
+		}
+	}
+}

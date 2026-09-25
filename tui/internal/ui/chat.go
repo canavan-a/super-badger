@@ -128,6 +128,11 @@ func newChat(c *api.Client, st Styles, s api.Station, idx, total int) *chatModel
 	ta.SetHeight(3)
 	ta.CharLimit = 0
 	ta.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("alt+enter", "ctrl+j"))
+	// Word jumps: the textarea only binds alt+←/→ and alt+b/f. Most terminals
+	// (kitty, alacritty, foot, gnome-terminal, Windows Terminal...) send ctrl+←/→
+	// for "jump a word", so those are added.
+	ta.KeyMap.WordForward = key.NewBinding(key.WithKeys("alt+right", "alt+f", "ctrl+right"))
+	ta.KeyMap.WordBackward = key.NewBinding(key.WithKeys("alt+left", "alt+b", "ctrl+left"))
 	ta.Focus()
 	qi := textinput.New()
 	qi.Prompt = "other: "
@@ -425,17 +430,27 @@ func (m *chatModel) key(k tea.KeyMsg) tea.Cmd {
 		}
 		m.ta.Reset()
 		return m.send(text)
-	case "pgup", "pgdown", "ctrl+u", "ctrl+d", "home", "end":
+	case "home", "end":
+		// With text in the box these move the cursor to the start/end of the
+		// line, as in any editor; only on an empty box do they scroll the
+		// transcript to the top/bottom.
+		if m.ta.Value() != "" {
+			break
+		}
+		if s == "home" {
+			m.vp.GotoTop()
+		} else {
+			m.vp.GotoBottom()
+		}
+		m.stick = m.vp.AtBottom()
+		return nil
+	case "pgup", "pgdown", "ctrl+u", "ctrl+d":
 		var cmd tea.Cmd
 		switch s {
 		case "ctrl+u":
 			m.vp.HalfViewUp()
 		case "ctrl+d":
 			m.vp.HalfViewDown()
-		case "home":
-			m.vp.GotoTop()
-		case "end":
-			m.vp.GotoBottom()
 		default:
 			m.vp, cmd = m.vp.Update(k)
 		}
