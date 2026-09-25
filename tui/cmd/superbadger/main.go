@@ -30,7 +30,7 @@ func main() {
 	// Flags apply to this run only; they are never written to the config file.
 	cfg.Override(*server, *token, *noSplash)
 
-	p := tea.NewProgram(ui.New(cfg), tea.WithAltScreen(), tea.WithMouseCellMotion())
+	p := tea.NewProgram(ui.New(cfg), tea.WithAltScreen(), tea.WithMouseCellMotion(), tea.WithReportFocus())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "superbadger:", err)
 		os.Exit(1)

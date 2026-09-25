@@ -68,9 +68,14 @@ You've successfully run and modified your React Native App. :partying_face:
 
 The app opens on the same badger and wordmark as the terminal client's title
 screen (`src/logo/`), recolored for the current theme: the badger settles in,
-the letters rise in one by one, then a slanted shine sweeps across and catches
-the badger's eye. Tap to skip; it honors the system "reduce motion" setting, and
-plays once per launch. To watch it on its own, run `npm run web` and open
+the letters rise in one by one, then a shine sweeps across and catches the
+badger's eye. Tap to skip; it honors the system "reduce motion" setting, and
+plays once per launch. It only ever animates opacity and simple moves (the
+shine is a row of thin strips fading in and out), because React Native on
+Android is unforgiving of anything fancier. **If it ever fails to finish on two
+launches in a row, it turns itself off** (Settings → "Launch animation" says so,
+and turning it back on gives it a fresh start), so a bad device can't get stuck
+in a crash loop. To watch it on its own, run `npm run web` and open
 `/splash-preview.html?theme=ember` (any of `light dark slate sepia ember`).
 
 **The launcher icon is the blackletter S from the wordmark, one per theme.**

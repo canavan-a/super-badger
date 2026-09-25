@@ -2,16 +2,22 @@ import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {AccessibilityInfo, Animated, Easing, Platform, Pressable, StyleSheet, View, useWindowDimensions} from 'react-native';
 
 import type {Theme} from '../theme';
-import {BADGER_H, FullLogo, LOGO_H, LOGO_W, PIXEL_H, PIXEL_W, ToneLayer, WORD_H, WORD_TOP} from './LogoArt';
+import {BADGER_H, BADGER_STRIPS, LOGO_H, LOGO_W, PIXEL_W, SHINE_STRIPS, ToneLayer, WORD_H, WORD_STRIPS, WORD_TOP} from './LogoArt';
 import {LOGO, ToneRuns} from './logoData';
 import {shineColor, toneColor} from './logoTheme';
 
 // The launch screen: the same badger and wordmark as the terminal's title
 // screen, recolored for the current theme. The badger settles into place, the
-// letters rise in one after another, then a slanted glint sweeps across the
-// whole logo and catches the badger's eye on the way. Everything animated is a
-// transform or an opacity, so it runs on the native driver and stays smooth
-// while the app underneath is still loading.
+// letters rise in one after another, then a shine sweeps across the whole logo
+// and catches the badger's eye on the way.
+//
+// Everything animated is an opacity or a translate/scale on the native driver,
+// and nothing else: no skew, no clipping, no layers moving against each other.
+// (The shine used to be a slanted, clipped window sliding over a counter-moving
+// copy of the logo. React Native on Android drops skew from view transforms
+// anyway, so it could never look right there, and it was the riskiest part of
+// the screen.) The shine is now a row of thin strips of a lightened copy of the
+// logo, each fading in and out as the sweep passes it.
 
 /** Timeline, in milliseconds. */
 export const SPLASH_TIMING = {
@@ -25,14 +31,33 @@ export const SPLASH_TIMING = {
   exit: 350,
 };
 
-/** Slant of the shine, in degrees. */
-const SKEW = 18;
-
 /** How much of the way toward the shine target the highlight colors go. */
 const SHINE_STRENGTH = 0.7;
 
+/** How bright the highlight gets on the strip the sweep is over (its opacity). */
+const SHINE_PEAK = 0.55;
+
+/** The wordmark's part of the sweep trails the badger's a little, which reads as a diagonal. */
+const WORD_LAG = 0.05;
+
 /** Total running time. */
 export const SPLASH_TOTAL = SPLASH_TIMING.hold + SPLASH_TIMING.exit;
+
+/**
+ * The shine's progress (0..1) at which the sweep is over strip i of n: the
+ * strip fades up from nothing, peaks, and fades away. Strictly increasing, as
+ * an interpolation's input range must be.
+ */
+export function pulseRange(i: number, n: number, lag: number): [number, number, number] {
+  const c = 0.06 + (0.88 * i) / (n - 1) + lag;
+  return [Math.max(0, c - 0.13), c, Math.min(1, c + 0.13)];
+}
+
+/** The shine's progress at which the sweep is over the badger's eye. */
+export function eyePassAt(): number {
+  const c = 0.06 + 0.88 * (LOGO.eye.cx / LOGO.width);
+  return c;
+}
 
 interface Props {
   theme: Theme;
@@ -62,18 +87,40 @@ export function SplashScreen({theme, onDone, reduceMotion}: Props): React.JSX.El
     };
   }, [reduceMotion]);
 
-  const v = useRef({
-    badger: new Animated.Value(reduce ? 1 : 0),
-    letters: LOGO.word.slices.map(() => new Animated.Value(reduce ? 1 : 0)),
-    shine: new Animated.Value(0),
-    exit: new Animated.Value(1),
-  }).current;
+  // Created once. (useRef({...}) would build a fresh set of Animated.Values on
+  // every render and throw all but the first away.)
+  const values = useRef<{
+    badger: Animated.Value;
+    letters: Animated.Value[];
+    shine: Animated.Value;
+    exit: Animated.Value;
+  } | null>(null);
+  if (!values.current) {
+    values.current = {
+      badger: new Animated.Value(reduce ? 1 : 0),
+      letters: LOGO.word.slices.map(() => new Animated.Value(reduce ? 1 : 0)),
+      shine: new Animated.Value(0),
+      exit: new Animated.Value(1),
+    };
+  }
+  const v = values.current;
 
   const finished = useRef(false);
+  const skipping = useRef(false);
+  const running = useRef<Animated.CompositeAnimation | null>(null);
   const done = () => {
     if (finished.current) return;
     finished.current = true;
     onDone();
+  };
+  // A tap fades the splash out rather than unmounting it on the spot: pulling
+  // views out from under natively-driven animations that are still running is
+  // a classic way to crash React Native on Android.
+  const skip = () => {
+    if (finished.current || skipping.current) return;
+    skipping.current = true;
+    running.current?.stop();
+    Animated.timing(v.exit, {toValue: 0, duration: 160, easing: Easing.linear, useNativeDriver: useNative}).start(done);
   };
 
   useEffect(() => {
@@ -89,8 +136,12 @@ export function SplashScreen({theme, onDone, reduceMotion}: Props): React.JSX.El
           timing(v.shine, 1, T.shineDur, T.shineStart, Easing.inOut(Easing.quad)),
           Animated.sequence([Animated.delay(T.hold), timing(v.exit, 0, T.exit, 0, Easing.in(Easing.quad))]),
         ]);
+    running.current = animation;
     animation.start(r => r.finished && done());
-    return () => animation.stop();
+    return () => {
+      running.current = null;
+      animation.stop();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reduce]);
 
@@ -98,54 +149,46 @@ export function SplashScreen({theme, onDone, reduceMotion}: Props): React.JSX.El
   const base = useMemo(() => (t: ToneRuns) => toneColor(theme, t.u, t.w), [theme]);
   const glint = useMemo(() => (t: ToneRuns) => shineColor(toneColor(theme, t.u, t.w), theme, SHINE_STRENGTH), [theme]);
 
-  // the shine: a slanted band, wide and soft with a narrower brighter core
-  const bandW = W * 0.24;
-  const coreW = bandW * 0.38;
-  const from = -bandW * 1.6;
-  const to = W + bandW * 0.6;
-  const tx = v.shine.interpolate({inputRange: [0, 1], outputRange: [from, to]});
-  const txBack = v.shine.interpolate({inputRange: [0, 1], outputRange: [-from, -to]});
-
-  // Where in the sweep the band's center is level with the eye, so the eye's
-  // glint fires exactly as the shine passes it. The slant shifts the band
-  // sideways by tan(SKEW) per unit of height from the vertical middle.
-  const eyeX = LOGO.eye.cx * PIXEL_W * scale;
-  const eyeY = LOGO.eye.cy * PIXEL_H * scale;
-  const slantShift = Math.tan((SKEW * Math.PI) / 180) * (H / 2 - eyeY);
-  const eyeAt = (eyeX - bandW / 2 - slantShift - from) / (to - from);
-  const eyeGlow = v.shine.interpolate({
-    inputRange: [Math.max(0, eyeAt - 0.09), eyeAt, Math.min(1, eyeAt + 0.13)],
-    outputRange: [0, 1, 0],
-    extrapolate: 'clamp',
-  });
-
-  const band = (width: number, opacity: number, key: string) => {
-    const left = (bandW - width) / 2;
-    return (
-      <Animated.View
-        key={key}
-        pointerEvents="none"
-        style={[
-          styles.abs,
-          {left, width, height: H, overflow: 'hidden', opacity},
-          {transform: [{translateX: tx}, {skewX: `-${SKEW}deg`}]},
-        ]}>
-        {/* the logo, held still against the moving window */}
-        <Animated.View
-          style={[styles.abs, {left: -left, width: W, height: H}, {transform: [{skewX: `${SKEW}deg`}, {translateX: txBack}]}]}>
-          <FullLogo fill={glint} width={W} height={H} />
-        </Animated.View>
-      </Animated.View>
-    );
-  };
+  // The shine's opacities, built once so their native nodes aren't recreated.
+  const fades = useMemo(() => {
+    const pulse = (range: [number, number, number], peak: number) =>
+      v.shine.interpolate({inputRange: range, outputRange: [0, peak, 0], extrapolate: 'clamp'});
+    const at = eyePassAt();
+    return {
+      badger: BADGER_STRIPS.map((_, i) => pulse(pulseRange(i, SHINE_STRIPS, 0), SHINE_PEAK)),
+      word: WORD_STRIPS.map((_, i) => pulse(pulseRange(i, SHINE_STRIPS, WORD_LAG), SHINE_PEAK)),
+      eye: pulse([Math.max(0, at - 0.09), at, Math.min(1, at + 0.13)], 1),
+    };
+  }, [v]);
 
   const badgerH = BADGER_H * scale;
   const wordTop = WORD_TOP * scale;
   const wordH = WORD_H * scale;
 
+  const strips = (list: typeof BADGER_STRIPS, opacities: Animated.AnimatedInterpolation<number>[], top: number, height: number, regionH: number, key: string) =>
+    list.map((s, i) =>
+      s.tones.length === 0 ? null : (
+        <Animated.View
+          key={`${key}${i}`}
+          pointerEvents="none"
+          style={[
+            styles.abs,
+            {left: s.x0 * PIXEL_W * scale, top, width: (s.x1 - s.x0) * PIXEL_W * scale, height, opacity: opacities[i]},
+          ]}>
+          <ToneLayer
+            tones={s.tones}
+            fill={glint}
+            view={[s.x0 * PIXEL_W, 0, (s.x1 - s.x0) * PIXEL_W, regionH]}
+            width={(s.x1 - s.x0) * PIXEL_W * scale}
+            height={height}
+          />
+        </Animated.View>
+      ),
+    );
+
   return (
     <Animated.View style={[StyleSheet.absoluteFill, {backgroundColor: theme.bg, opacity: v.exit}]} accessible accessibilityLabel="Super Badger">
-      <Pressable style={styles.center} onPress={done} accessibilityRole="button" accessibilityLabel="Skip intro">
+      <Pressable style={styles.center} onPress={skip} accessibilityRole="button" accessibilityLabel="Skip intro">
         <View style={{width: W, height: H}}>
           <Animated.View
             style={[
@@ -160,7 +203,7 @@ export function SplashScreen({theme, onDone, reduceMotion}: Props): React.JSX.El
             ]}>
             <ToneLayer tones={LOGO.badger.tones} fill={base} view={[0, 0, LOGO_W, BADGER_H]} width={W} height={badgerH} />
             <ToneLayer tones={LOGO.eye.tones} fill={base} view={[0, 0, LOGO_W, BADGER_H]} width={W} height={badgerH} />
-            <Animated.View style={[styles.abs, {width: W, height: badgerH, opacity: eyeGlow}]}>
+            <Animated.View style={[styles.abs, {width: W, height: badgerH, opacity: fades.eye}]}>
               <ToneLayer tones={LOGO.eye.tones} fill={glint} view={[0, 0, LOGO_W, BADGER_H]} width={W} height={badgerH} />
             </Animated.View>
           </Animated.View>
@@ -191,8 +234,8 @@ export function SplashScreen({theme, onDone, reduceMotion}: Props): React.JSX.El
 
           {!reduce && (
             <View style={[styles.abs, {width: W, height: H}]} pointerEvents="none">
-              {band(bandW, 0.34, 'wide')}
-              {band(coreW, 0.6, 'core')}
+              {strips(BADGER_STRIPS, fades.badger, 0, badgerH, BADGER_H, 'b')}
+              {strips(WORD_STRIPS, fades.word, wordTop, wordH, WORD_H, 'w')}
             </View>
           )}
         </View>

@@ -21,6 +21,9 @@ export function resetSplashForTests(): void {
 
 type Phase = 'wait' | 'play' | 'done';
 
+/** Consecutive launches whose splash didn't finish before it turns itself off. */
+export const MAX_SPLASH_STRIKES = 2;
+
 /**
  * The splash is decoration: if anything in it throws, drop it and let the app
  * through rather than taking the whole app down with it.
@@ -45,9 +48,29 @@ export function SplashGate({children}: {children: React.ReactNode}): React.JSX.E
   useEffect(() => {
     if (phase !== 'wait') return;
     let alive = true;
-    settingsStore.load().then(() => {
-      if (alive) setPhase('play');
-    });
+    const skipToApp = () => {
+      played = true;
+      setPhase('done');
+    };
+    settingsStore
+      .load()
+      .then(async settings => {
+        if (!alive) return;
+        if (settings.launchSplash === false) return skipToApp(); // turned off in Settings
+        const strikes = settings.splashStrikes ?? 0;
+        if (strikes >= MAX_SPLASH_STRIKES) {
+          // The last launches never got to the end of the animation (a crash,
+          // most likely). Don't crash a third time: turn it off and say so.
+          await settingsStore.save({...settings, launchSplash: false, splashStrikes: 0, splashAutoDisabled: true});
+          if (alive) skipToApp();
+          return;
+        }
+        // Recorded *before* the animation starts, so a crash mid-animation
+        // still leaves the strike behind.
+        await settingsStore.save({...settings, splashStrikes: strikes + 1});
+        if (alive) setPhase('play');
+      })
+      .catch(() => alive && skipToApp()); // never let storage trouble block the app
     return () => {
       alive = false;
     };
@@ -65,6 +88,8 @@ export function SplashGate({children}: {children: React.ReactNode}): React.JSX.E
           <SplashScreen
             theme={theme}
             onDone={() => {
+              // It got to the end: clear the strike.
+              settingsStore.save({...settingsStore.get(), splashStrikes: 0}).catch(() => {});
               played = true;
               setPhase('done');
             }}

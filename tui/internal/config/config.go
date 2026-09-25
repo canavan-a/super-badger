@@ -23,8 +23,12 @@ type Config struct {
 	Theme         string `json:"theme"`
 	LastStationID uint   `json:"last_station_id"`
 	Notifications bool   `json:"notifications"`
-	Splash        bool   `json:"splash"` // launch art; default on
-	path          string
+	// DesktopNotifications sends native desktop notifications (see the notify
+	// package); on by default, and a no-op with a clear message if the machine
+	// can't show them.
+	DesktopNotifications bool `json:"desktop_notifications"`
+	Splash               bool `json:"splash"` // launch art; default on
+	path                 string
 
 	// Command-line flags override values for one run only. Save writes the
 	// on-disk values back for any field still overridden, so a flag is never
@@ -60,7 +64,7 @@ func (c *Config) Override(server, token string, noSplash bool) {
 func (c *Config) Touch(field string) { delete(c.overridden, field) }
 
 func Default() Config {
-	return Config{Theme: "burrow", Notifications: true, Splash: true}
+	return Config{Theme: "burrow", Notifications: true, DesktopNotifications: true, Splash: true}
 }
 
 // DefaultPath is where the config lives unless a path is given explicitly.

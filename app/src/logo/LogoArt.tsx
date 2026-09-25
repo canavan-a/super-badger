@@ -39,11 +39,11 @@ export function tonePath(t: ToneRuns): string {
   return d;
 }
 
-/** Every slice of the wordmark's tones merged, for drawing it in one piece. */
-export const WORD_TONES: ToneRuns[] = (() => {
+/** Merges tone groups that share a tone (same u and w) into one. */
+export function mergeTones(...groups: ToneRuns[][]): ToneRuns[] {
   const merged = new Map<string, ToneRuns>();
-  for (const s of LOGO.word.slices) {
-    for (const t of s.tones) {
+  for (const g of groups) {
+    for (const t of g) {
       const key = `${t.u}/${t.w}`;
       const m = merged.get(key);
       if (m) m.runs = m.runs.concat(t.runs);
@@ -51,7 +51,38 @@ export const WORD_TONES: ToneRuns[] = (() => {
     }
   }
   return Array.from(merged.values());
-})();
+}
+
+/** Every slice of the wordmark's tones merged, for drawing it in one piece. */
+export const WORD_TONES: ToneRuns[] = mergeTones(...LOGO.word.slices.map(s => s.tones));
+
+/** The runs of each tone clipped to the columns [x0, x1). Tones left empty are dropped. */
+export function sliceTones(tones: ToneRuns[], x0: number, x1: number): ToneRuns[] {
+  const out: ToneRuns[] = [];
+  for (const t of tones) {
+    const runs: number[] = [];
+    for (let i = 0; i < t.runs.length; i += 3) {
+      const start = Math.max(t.runs[i], x0);
+      const end = Math.min(t.runs[i] + t.runs[i + 2], x1);
+      if (end > start) runs.push(start, t.runs[i + 1], end - start);
+    }
+    if (runs.length) out.push({u: t.u, w: t.w, runs});
+  }
+  return out;
+}
+
+/** How many vertical strips the shine is cut into. */
+export const SHINE_STRIPS = 16;
+
+/** The strips' column spans, tiling the logo's width exactly. */
+export const STRIP_SPANS: {x0: number; x1: number}[] = Array.from({length: SHINE_STRIPS}, (_, i) => ({
+  x0: Math.round((i * LOGO.width) / SHINE_STRIPS),
+  x1: Math.round(((i + 1) * LOGO.width) / SHINE_STRIPS),
+}));
+
+/** Each strip's share of the badger (with its eye) and of the wordmark. */
+export const BADGER_STRIPS = STRIP_SPANS.map(s => ({...s, tones: sliceTones(mergeTones(LOGO.badger.tones, LOGO.eye.tones), s.x0, s.x1)}));
+export const WORD_STRIPS = STRIP_SPANS.map(s => ({...s, tones: sliceTones(WORD_TONES, s.x0, s.x1)}));
 
 // Every layer sits at the origin of its container and overlays its siblings.
 // (Without this the SVGs are flex children and *stack*: on the web an <svg>

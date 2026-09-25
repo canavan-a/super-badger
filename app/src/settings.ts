@@ -27,6 +27,15 @@ export interface Settings {
   // theme (see src/appIcon.ts). On by default; turn it off if your launcher
   // reacts badly to icons changing.
   themedIcon: boolean;
+  // Play the animated launch splash. On by default; switching it off skips the
+  // splash entirely (also a quick way to rule it out when debugging a crash).
+  launchSplash: boolean;
+  // Crash-loop protection for the splash: a launch counts as a strike before
+  // the animation starts and is cleared when it finishes, so a launch that dies
+  // mid-animation leaves one behind. After MAX_SPLASH_STRIKES in a row the
+  // splash turns itself off (and says so in Settings) instead of crashing again.
+  splashStrikes: number;
+  splashAutoDisabled: boolean;
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -35,6 +44,9 @@ const DEFAULT_SETTINGS: Settings = {
   themeName: 'light',
   bgNotifications: false,
   themedIcon: true,
+  launchSplash: true,
+  splashStrikes: 0,
+  splashAutoDisabled: false,
 };
 
 type Listener = (settings: Settings) => void;

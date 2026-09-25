@@ -54,6 +54,8 @@ export function SettingsScreen(): React.JSX.Element {
   // with the Vite web build, which must never statically import either.
   const [bgNotifications, setBgNotifications] = useState(false);
   const [themedIcon, setThemedIcon] = useState(true);
+  const [launchSplash, setLaunchSplash] = useState(true);
+  const [splashAutoDisabled, setSplashAutoDisabled] = useState(false);
   const [bgNotifBusy, setBgNotifBusy] = useState(false);
   // Surfaces what requestPermission() actually returned — the toggle above
   // used to fire-and-forget this (see audit: it kept the foreground service
@@ -101,6 +103,8 @@ export function SettingsScreen(): React.JSX.Element {
       setAuthToken(s.authToken);
       setBgNotifications(s.bgNotifications);
       setThemedIcon(s.themedIcon);
+      setLaunchSplash(s.launchSplash);
+      setSplashAutoDisabled(s.splashAutoDisabled);
       testConnection(s.serverUrl);
     });
     if (Platform.OS === 'android') {
@@ -197,6 +201,13 @@ export function SettingsScreen(): React.JSX.Element {
     }
   };
 
+  const toggleLaunchSplash = async (value: boolean) => {
+    setLaunchSplash(value);
+    setSplashAutoDisabled(false);
+    // Turning it back on wipes the automatic-off state so it gets a fresh try.
+    await settingsStore.save({...settingsStore.get(), launchSplash: value, splashStrikes: 0, splashAutoDisabled: false});
+  };
+
   const toggleThemedIcon = async (value: boolean) => {
     setThemedIcon(value);
     await settingsStore.save({...settingsStore.get(), themedIcon: value});
@@ -227,6 +238,19 @@ export function SettingsScreen(): React.JSX.Element {
             <Text style={styles.themeSwatchLabel}>{opt.label}</Text>
           </Pressable>
         ))}
+      </View>
+
+      <View style={styles.rowBetween}>
+        <View style={styles.rowBetweenText}>
+          <Text style={styles.label}>Launch animation</Text>
+          <Text style={styles.hint}>
+            The animated logo shown when the app opens. Takes effect next launch.
+            {splashAutoDisabled
+              ? ' It was turned off automatically because it didn\'t finish on two launches in a row — turn it back on to try again.'
+              : ''}
+          </Text>
+        </View>
+        <Switch value={launchSplash} onValueChange={toggleLaunchSplash} />
       </View>
 
       {Platform.OS === 'android' && (

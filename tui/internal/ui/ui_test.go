@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"regexp"
@@ -15,6 +16,7 @@ import (
 	"superbadger-tui/internal/api"
 	"superbadger-tui/internal/chat"
 	"superbadger-tui/internal/config"
+	"superbadger-tui/internal/notify"
 )
 
 var ansi = regexp.MustCompile(`\x1b\[[0-9;]*m`)
@@ -1245,5 +1247,286 @@ func TestWindowFrameTopEdgeIsAContinuousBorderWithNoDots(t *testing.T) {
 		if strings.Trim(rest, "╭╮─") != "" {
 			t.Fatalf("width %d: something other than border line in the top edge: %q", w, top)
 		}
+	}
+}
+
+// ---- desktop notifications ----
+
+// fakeDesk records the notifications it is asked to send.
+type fakeDesk struct {
+	sent []string
+	err  error
+}
+
+func (f *fakeDesk) Name() string { return "fake-send" }
+func (f *fakeDesk) Notify(_ context.Context, title, body string) error {
+	f.sent = append(f.sent, title+" | "+body)
+	return f.err
+}
+
+func deskApp(t *testing.T) (*App, *fakeDesk) {
+	t.Helper()
+	a, _ := busyChat(t)
+	a.chat.state.Busy = false
+	a.stations = []api.Station{{ID: 1, Name: "alpha", Reachable: true}, {ID: 2, Name: "beta", Reachable: true}}
+	a.cfg.Notifications = true
+	a.cfg.DesktopNotifications = true
+	f := &fakeDesk{}
+	a.desk, a.deskWhy = f, nil
+	return a, f
+}
+
+// event feeds one notification frame through the real handler and runs the
+// command it returns (the send), feeding the result back like the runtime does.
+func event(t *testing.T, a *App, typ string, stationID uint, name string) {
+	t.Helper()
+	raw := fmt.Sprintf(`{"type":%q,"station_id":%d,"station_name":%q}`, typ, stationID, name)
+	cmd := a.onNotification([]byte(raw))
+	if cmd == nil {
+		return
+	}
+	a.Update(cmd())
+}
+
+func TestOtherStationEventGivesAToastAndADesktopNotification(t *testing.T) {
+	a, f := deskApp(t)
+	event(t, a, "agent_idle", 2, "beta") // current station is 1
+	if len(f.sent) != 1 || !strings.Contains(f.sent[0], "beta finished") {
+		t.Fatalf("desktop: %v", f.sent)
+	}
+	if !strings.Contains(a.toast, "beta finished") {
+		t.Fatalf("toast: %q", a.toast)
+	}
+}
+
+func TestEachEventTypeHasItsOwnText(t *testing.T) {
+	for typ, want := range map[string]string{
+		"agent_idle":           "finished",
+		"permission_requested": "needs permission",
+		"question_requested":   "has a question",
+	} {
+		a, f := deskApp(t)
+		event(t, a, typ, 2, "beta")
+		if len(f.sent) != 1 || !strings.Contains(f.sent[0], "beta "+want) {
+			t.Errorf("%s: %v", typ, f.sent)
+		}
+	}
+	a, f := deskApp(t)
+	raw := `{"type":"datapoint_threshold","station_id":2,"station_name":"beta","key":"gpu_temp_c","label":"GPU °C","decimals":1,"value":83.25,"direction":"above"}`
+	if cmd := a.onNotification([]byte(raw)); cmd != nil {
+		a.Update(cmd())
+	}
+	if len(f.sent) != 1 || !strings.Contains(f.sent[0], "GPU °C") || !strings.Contains(f.sent[0], "above") || !strings.Contains(f.sent[0], "83.2") {
+		t.Fatalf("threshold: %v", f.sent)
+	}
+	// An event type we don't know is ignored, not sent as a blank popup.
+	a, f = deskApp(t)
+	event(t, a, "something_new", 2, "beta")
+	if len(f.sent) != 0 {
+		t.Fatalf("unknown event sent: %v", f.sent)
+	}
+}
+
+func TestNoPopupForTheStationYouAreLookingAt(t *testing.T) {
+	// current station (1), terminal known to be focused
+	a, f := deskApp(t)
+	a.Update(tea.FocusMsg{})
+	event(t, a, "agent_idle", 1, "alpha")
+	if len(f.sent) != 0 {
+		t.Fatalf("popped up about the screen in front of you: %v", f.sent)
+	}
+	// ...but once the terminal loses focus, it should.
+	a.Update(tea.BlurMsg{})
+	event(t, a, "agent_idle", 1, "alpha")
+	if len(f.sent) != 1 || !strings.Contains(f.sent[0], "alpha finished") {
+		t.Fatalf("blurred: %v", f.sent)
+	}
+}
+
+func TestWithoutFocusReportingItNotifiesRatherThanStayingSilent(t *testing.T) {
+	a, f := deskApp(t) // no FocusMsg/BlurMsg ever arrives (terminal doesn't report)
+	if a.focusKnown {
+		t.Fatal("focus should start unknown")
+	}
+	event(t, a, "agent_idle", 1, "alpha")
+	if len(f.sent) != 1 {
+		t.Fatalf("with unknown focus the current station's completion should still notify: %v", f.sent)
+	}
+}
+
+func TestOtherStationsNotifyEvenWhenFocused(t *testing.T) {
+	a, f := deskApp(t)
+	a.Update(tea.FocusMsg{})
+	event(t, a, "agent_idle", 2, "beta")
+	if len(f.sent) != 1 {
+		t.Fatalf("beta finishing while you look at alpha should notify: %v", f.sent)
+	}
+}
+
+func TestTheDesktopSettingIsIndependentOfTheToastSetting(t *testing.T) {
+	a, f := deskApp(t)
+	a.cfg.DesktopNotifications = false
+	event(t, a, "agent_idle", 2, "beta")
+	if len(f.sent) != 0 || !strings.Contains(a.toast, "beta") {
+		t.Fatalf("desktop off, toasts on: sent=%v toast=%q", f.sent, a.toast)
+	}
+	a, f = deskApp(t)
+	a.cfg.Notifications = false
+	event(t, a, "agent_idle", 2, "beta")
+	if len(f.sent) != 1 || a.toast != "" {
+		t.Fatalf("toasts off, desktop on: sent=%v toast=%q", f.sent, a.toast)
+	}
+	// The feed itself runs if either is on.
+	a.cfg.ServerURL = "http://127.0.0.1:1"
+	a.cfg.Notifications, a.cfg.DesktopNotifications = false, false
+	if a.startNotifications() != nil {
+		t.Fatal("no feed needed when both are off")
+	}
+	a.cfg.DesktopNotifications = true
+	if a.startNotifications() == nil {
+		t.Fatal("the feed must run for desktop notifications alone")
+	}
+	a.notif.Close()
+}
+
+func TestRepeatedIdenticalEventsAreCoalesced(t *testing.T) {
+	a, f := deskApp(t)
+	event(t, a, "agent_idle", 2, "beta")
+	event(t, a, "agent_idle", 2, "beta")
+	event(t, a, "agent_idle", 2, "beta")
+	if len(f.sent) != 1 {
+		t.Fatalf("a burst should send one popup, got %d", len(f.sent))
+	}
+	event(t, a, "permission_requested", 2, "beta") // a different event still goes through
+	if len(f.sent) != 2 {
+		t.Fatalf("a different event must not be swallowed: %v", f.sent)
+	}
+	a.deskLast["agent_idle/2"] = time.Now().Add(-desktopDedupe - time.Second)
+	event(t, a, "agent_idle", 2, "beta")
+	if len(f.sent) != 3 {
+		t.Fatalf("after the window it should notify again: %v", f.sent)
+	}
+}
+
+func TestNoNotifierMeansOneClearWarningNotACrash(t *testing.T) {
+	a, _ := deskApp(t)
+	a.desk = nil
+	a.deskWhy = &notify.Unavailable{Reason: "notify-send was not found — install libnotify"}
+	event(t, a, "agent_idle", 2, "beta")
+	if !strings.Contains(a.toast, "desktop notifications unavailable") || !strings.Contains(a.toast, "notify-send") || !strings.Contains(a.toast, "/settings") {
+		t.Fatalf("the warning should say what's wrong and how to turn it off: %q", a.toast)
+	}
+	// Later events don't nag again.
+	a.toast = ""
+	event(t, a, "permission_requested", 2, "beta")
+	if strings.Contains(a.toast, "unavailable") {
+		t.Fatalf("warned twice: %q", a.toast)
+	}
+	if !strings.Contains(a.toast, "needs permission") {
+		t.Fatalf("the ordinary in-terminal toast must still work without a notifier: %q", a.toast)
+	}
+}
+
+func TestAFailingSendIsReportedOnceThenStops(t *testing.T) {
+	a, f := deskApp(t)
+	f.err = fmt.Errorf("notify-send: exit status 1 (Cannot autolaunch D-Bus)")
+	event(t, a, "agent_idle", 2, "beta")
+	if !a.deskFailed || !strings.Contains(a.toast, "desktop notification failed") || !strings.Contains(a.toast, "D-Bus") {
+		t.Fatalf("failed=%v toast=%q", a.deskFailed, a.toast)
+	}
+	n := len(f.sent)
+	a.toast = ""
+	event(t, a, "permission_requested", 2, "beta")
+	if len(f.sent) != n {
+		t.Fatal("must stop trying after a failure instead of failing on every event")
+	}
+	if strings.Contains(a.toast, "failed") {
+		t.Fatalf("reported the failure twice: %q", a.toast)
+	}
+	// Changing settings gives it another chance.
+	f.err = nil
+	a.onSettingsChanged()
+	event(t, a, "question_requested", 2, "beta")
+	if len(f.sent) != n+1 || a.deskFailed {
+		t.Fatalf("after a settings change it should retry: sent=%d failed=%v", len(f.sent), a.deskFailed)
+	}
+}
+
+func TestSettingsShowsAvailabilityAndTheTestButtonReportsBothOutcomes(t *testing.T) {
+	cfg := config.Default()
+	f := &fakeDesk{}
+	m := newSettings(&cfg, api.New("http://127.0.0.1:1", ""), NewStyles("burrow"), f, nil)
+	if !strings.Contains(m.form.View(m.st), "via fake-send") {
+		t.Fatalf("settings should say which tool is used:\n%s", m.form.View(m.st))
+	}
+	press := func(m *settingsModel, field string) tea.Cmd {
+		for i, fd := range m.form.fields {
+			if fd.key == field {
+				m.form.cursor = i
+			}
+		}
+		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+		return cmd
+	}
+	cmd := press(m, "desktest")
+	if cmd == nil {
+		t.Fatal("the test button should run something")
+	}
+	res := cmd().(deskTestDoneMsg)
+	m.Update(res)
+	if res.err != nil || !strings.Contains(m.msg, "✓") || len(f.sent) != 1 || !strings.Contains(f.sent[0], "working") {
+		t.Fatalf("success: %+v msg=%q sent=%v", res, m.msg, f.sent)
+	}
+	f.err = fmt.Errorf("boom")
+	res = press(m, "desktest")().(deskTestDoneMsg)
+	m.Update(res)
+	if !strings.Contains(m.msg, "✗") || !strings.Contains(m.msg, "boom") {
+		t.Fatalf("failure: %q", m.msg)
+	}
+
+	// With no notifier the switch says why, and the test button reports it.
+	un := newSettings(&cfg, api.New("http://127.0.0.1:1", ""), NewStyles("burrow"), nil, &notify.Unavailable{Reason: "notify-send was not found"})
+	if !strings.Contains(un.form.View(un.st), "unavailable") || !strings.Contains(un.form.View(un.st), "notify-send was not found") {
+		t.Fatalf("settings should explain the missing tool:\n%s", un.form.View(un.st))
+	}
+	res = press(un, "desktest")().(deskTestDoneMsg)
+	un.Update(res)
+	if res.err == nil || !strings.Contains(un.msg, "✗") || !strings.Contains(un.msg, "notify-send was not found") {
+		t.Fatalf("unavailable test: %+v %q", res, un.msg)
+	}
+}
+
+func TestATestThatWorksReEnablesNotificationsAfterAFailure(t *testing.T) {
+	a, f := deskApp(t)
+	a.deskFailed = true
+	a.Update(deskTestDoneMsg{err: nil, name: f.Name()})
+	if a.deskFailed {
+		t.Fatal("a successful test should clear the failure")
+	}
+	a.deskFailed = true
+	a.Update(deskTestDoneMsg{err: fmt.Errorf("still broken")})
+	if !a.deskFailed {
+		t.Fatal("a failed test must not clear it")
+	}
+}
+
+func TestFocusMessagesAreTracked(t *testing.T) {
+	a, _ := deskApp(t)
+	if a.focusKnown {
+		t.Fatal("unknown at first")
+	}
+	a.Update(tea.BlurMsg{})
+	if !a.focusKnown || a.focused {
+		t.Fatal("blur")
+	}
+	a.Update(tea.FocusMsg{})
+	if !a.focusKnown || !a.focused {
+		t.Fatal("focus")
+	}
+}
+
+func TestDesktopNotificationsAreOnByDefault(t *testing.T) {
+	if !config.Default().DesktopNotifications {
+		t.Fatal("default should be on")
 	}
 }

@@ -160,6 +160,12 @@
           # from-source tradeoff as module.nix; needs network the first time to
           # fetch Go modules.
           tuiSrc = builtins.path { path = ./tui; name = "superbadger-tui-src"; };
+          # Desktop notifications shell out to notify-send (libnotify) on Linux.
+          # It is appended to PATH so a machine that already has one keeps using
+          # its own, and one that doesn't still gets working notifications.
+          # (macOS uses osascript, which ships with the OS.)
+          tuiNotifyPath = pkgs.lib.optionalString pkgs.stdenv.isLinux
+            "export PATH=\"$PATH:${pkgs.libnotify}/bin\"";
           superbadger-tui = pkgs.writeShellScriptBin "superbadger" ''
             set -e
             cache="''${XDG_CACHE_HOME:-$HOME/.cache}/superbadger"
@@ -174,6 +180,7 @@
               # drop binaries left over from older builds
               find "$cache/bin" -type f ! -name "$(basename "$bin")" -delete
             fi
+            ${tuiNotifyPath}
             exec "$bin" "$@"
           '';
 

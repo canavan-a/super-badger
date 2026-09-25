@@ -76,7 +76,38 @@ URL** and, if the server has auth tokens, the **Auth token**
   long as it takes.
 - With **Other-station alerts** on (Settings), another station finishing, asking
   for permission or a question, or a data point crossing its threshold shows a
-  one-line notice and rings the terminal bell.
+  one-line notice and rings the terminal bell. Native desktop notifications for
+  the same events are covered below.
+
+### Desktop notifications
+
+superbadger can raise a native desktop notification when an agent finishes,
+needs a permission, asks a question, or a data point crosses its threshold. It
+uses the platform's own tool, so there is nothing extra to install on most
+machines:
+
+| Platform | Uses | Notes |
+| --- | --- | --- |
+| Linux | `notify-send` (libnotify) | needs a desktop session; the Nix package brings its own `notify-send` as a fallback |
+| macOS | `osascript` | ships with the OS |
+| Windows, other | — | not supported yet; you're told so instead of getting an error |
+
+- **When it fires.** For any station that is *not* the one on screen, and for the
+  station on screen when your terminal is not focused. It stays quiet about the
+  station you're looking at in a focused terminal. Focus is only known if your
+  terminal reports it (most do; in tmux add `set -g focus-events on`); if it
+  can't tell, it notifies rather than risk missing something. Bursts of the same
+  event within 3 seconds are shown once.
+- **It never gets in the way when it can't work.** If `notify-send` (or a desktop
+  session) isn't there, or a send fails, the TUI keeps running, says so **once**
+  ("desktop notifications unavailable: notify-send was not found — install
+  libnotify …") and stops trying until you change a setting. Nothing crashes and
+  the in-terminal toasts keep working.
+- **Settings** (`/settings`): **Desktop notifications** turns them on or off and
+  shows which tool is used (or why none is available); **Send a test
+  notification** sends one right now and reports the result, so you can check
+  your setup. They are separate from **Other-station alerts**, which controls the
+  in-terminal toast and bell; either can be on without the other.
 
 ### Keys
 
@@ -123,7 +154,8 @@ Anything else starting with `/` is sent to the model as ordinary text.
 - **Appearance:** theme (`burrow` (default), `dark`, `slate`, `ember`, `light`,
   `sepia`). Each theme paints its own background, and the title screen is
   recolored to match.
-- **Notifications** and **Launch art** switches.
+- **Notifications:** other-station alerts (in-terminal), desktop notifications, and
+  a test button (see above). **Launch art** switch.
 - **Metric sources** (add, edit, enable/disable, delete) and **Mullvad VPN**
   (status, connect/disconnect, location, LAN access).
 - **Station settings** (`Ctrl+E`): name, alias, color, which buttons and the token

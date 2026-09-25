@@ -3,9 +3,11 @@
 package ui
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 
 	"superbadger-tui/internal/api"
 	"superbadger-tui/internal/config"
+	"superbadger-tui/internal/notify"
 	"superbadger-tui/internal/ws"
 )
 
@@ -50,6 +53,19 @@ type App struct {
 	// startup (query replies, the Enter that launched us), and an "any key"
 	// splash would otherwise be dismissed before it is ever seen.
 	splashUntil time.Time
+
+	// Desktop notifications. desk is nil when this machine can't show them
+	// (deskWhy says why); deskFailed stops further attempts after a send fails,
+	// until the settings change; deskWarned makes each problem announce itself
+	// only once. focused/focusKnown track terminal focus (only terminals that
+	// report it tell us), so we don't pop up about the screen you're looking at.
+	desk       notify.Notifier
+	deskWhy    error
+	deskFailed bool
+	deskWarned bool
+	focused    bool
+	focusKnown bool
+	deskLast   map[string]time.Time
 }
 
 func New(cfg *config.Config) *App {
@@ -58,6 +74,8 @@ func New(cfg *config.Config) *App {
 	if cfg.Notice != "" {
 		a.toast, a.toastAt = cfg.Notice, time.Now()
 	}
+	a.desk, a.deskWhy = notify.Detect()
+	a.deskLast = map[string]time.Time{}
 	return a
 }
 
@@ -98,7 +116,9 @@ func (a *App) startNotifications() tea.Cmd {
 		a.notif.Close()
 		a.notif = nil
 	}
-	if !a.cfg.Notifications || !a.configured() {
+	// The feed serves both the in-terminal toasts and the desktop
+	// notifications, so it runs if either is on.
+	if !(a.cfg.Notifications || a.cfg.DesktopNotifications) || !a.configured() {
 		return nil
 	}
 	a.notifGen++
@@ -203,10 +223,37 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.gen != a.notifGen {
 			return a, nil
 		}
+		var cmd tea.Cmd
 		if msg.m.Frame != nil {
-			a.onNotification(msg.m.Frame)
+			cmd = a.onNotification(msg.m.Frame)
 		}
-		return a, a.waitNotif()
+		return a, tea.Batch(a.waitNotif(), cmd)
+
+	case tea.FocusMsg:
+		a.focused, a.focusKnown = true, true
+		return a, nil
+	case tea.BlurMsg:
+		a.focused, a.focusKnown = false, true
+		return a, nil
+
+	case deskResultMsg:
+		if msg.err != nil {
+			// Never fatal: say so once and stop trying until the settings change.
+			a.deskFailed = true
+			a.warnOnce("desktop notification failed: " + msg.err.Error() + " — turned off for now; check /settings")
+		}
+		return a, nil
+
+	case deskTestDoneMsg:
+		if msg.err == nil {
+			a.deskFailed = false // it works: let real notifications through again
+		}
+		if a.sub != nil {
+			var c tea.Cmd
+			a.sub, c = a.sub.Update(msg)
+			return a, c
+		}
+		return a, nil
 
 	case openStationMsg:
 		if a.index(msg.id) < 0 {
@@ -374,7 +421,7 @@ func (a *App) navigate(to string) tea.Cmd {
 		// Opened with no station yet: once the connection details work,
 		// carry straight on into the first station.
 		a.recovering = a.chat == nil
-		return a.setSub("settings", newSettings(a.cfg, a.client, a.st))
+		return a.setSub("settings", newSettings(a.cfg, a.client, a.st, a.desk, a.deskWhy))
 	case "picker":
 		return a.setSub("picker", newPicker(a.client, a.st, a.stations, a.currentID()))
 	case "stationsettings":
@@ -456,6 +503,7 @@ func (a *App) onStations(m stationsMsg) tea.Cmd {
 // onSettingsChanged rebuilds the client/theme after the user edits settings
 // and reconnects everything against the (possibly new) server.
 func (a *App) onSettingsChanged() tea.Cmd {
+	a.deskFailed, a.deskWarned = false, false // changed something: give it another chance
 	a.st = NewStyles(a.cfg.Theme)
 	a.client = api.New(a.cfg.ServerURL, a.cfg.AuthToken)
 	cmds := []tea.Cmd{a.startNotifications(), a.loadStations()}
@@ -482,7 +530,30 @@ func (a *App) onSettingsChanged() tea.Cmd {
 // answers with its station list (onStations picks LastStationID up).
 func (a *App) pendingOpen(id uint) { a.cfg.LastStationID = id }
 
-func (a *App) onNotification(raw json.RawMessage) {
+// deskResultMsg reports how a desktop notification send went.
+type deskResultMsg struct{ err error }
+
+// deskTestDoneMsg is the result of Settings' "send a test notification".
+type deskTestDoneMsg struct {
+	err  error
+	name string // the tool used, when there was one
+}
+
+// desktopDedupe is how long an identical notification is suppressed for.
+const desktopDedupe = 3 * time.Second
+
+// warnOnce shows a problem as a toast the first time only; the rest stay quiet.
+func (a *App) warnOnce(text string) {
+	if a.deskWarned {
+		return
+	}
+	a.deskWarned = true
+	a.toast, a.toastAt = text, time.Now()
+}
+
+// onNotification handles one event from the notifications feed: an in-terminal
+// toast (for other stations) and/or a native desktop notification.
+func (a *App) onNotification(raw json.RawMessage) tea.Cmd {
 	var n struct {
 		Type        string  `json:"type"`
 		StationID   uint    `json:"station_id"`
@@ -493,29 +564,69 @@ func (a *App) onNotification(raw json.RawMessage) {
 		Value       float64 `json:"value"`
 		Direction   string  `json:"direction"`
 	}
-	if json.Unmarshal(raw, &n) != nil || n.StationID == a.currentID() {
-		return
+	if json.Unmarshal(raw, &n) != nil {
+		return nil
 	}
-	what := ""
+	what, title, body := "", "", ""
 	switch n.Type {
 	case "agent_idle":
-		what = "finished"
+		what, title, body = "finished", n.StationName+" finished", "The agent is done and waiting for you."
 	case "permission_requested":
-		what = "needs permission"
+		what, title, body = "needs permission", n.StationName+" needs permission", "Open superbadger to allow or reject."
 	case "question_requested":
-		what = "has a question"
+		what, title, body = "has a question", n.StationName+" has a question", "Open superbadger to answer."
 	case "datapoint_threshold":
 		name := n.Label
 		if name == "" {
 			name = n.Key
 		}
-		what = fmt.Sprintf("%s is %s threshold (%s)", name, n.Direction, api.FormatValue(n.Value, n.Decimals))
+		val := api.FormatValue(n.Value, n.Decimals)
+		what = fmt.Sprintf("%s is %s threshold (%s)", name, n.Direction, val)
+		title, body = n.StationName+": "+name+" alert", fmt.Sprintf("%s is %s its threshold (%s).", name, n.Direction, val)
 	default:
-		return
+		return nil
 	}
-	a.toast = fmt.Sprintf("● %s %s", n.StationName, what)
-	a.toastAt = time.Now()
-	_, _ = os.Stderr.WriteString("\a") // terminal bell
+
+	current := n.StationID == a.currentID()
+	if a.cfg.Notifications && !current {
+		a.toast = fmt.Sprintf("● %s %s", n.StationName, what)
+		a.toastAt = time.Now()
+		_, _ = os.Stderr.WriteString("\a") // terminal bell
+	}
+	return a.desktopNotify(n.Type+"/"+strconv.Itoa(int(n.StationID)), title, body, current)
+}
+
+// desktopNotify sends a native notification if the setting is on and it makes
+// sense right now. It never blocks the UI (the send runs as a command) and
+// never fails loudly: an unavailable or failing notifier is reported once.
+func (a *App) desktopNotify(key, title, body string, current bool) tea.Cmd {
+	if !a.cfg.DesktopNotifications || a.deskFailed {
+		return nil
+	}
+	if a.desk == nil {
+		reason := "not available on this machine"
+		if a.deskWhy != nil {
+			reason = a.deskWhy.Error()
+		}
+		a.warnOnce("desktop notifications unavailable: " + reason + " (turn them off in /settings)")
+		return nil
+	}
+	// You're looking at that station in a focused terminal: no popup needed.
+	// (Focus is only known if the terminal reports it; if not, we notify.)
+	if current && a.focusKnown && a.focused {
+		return nil
+	}
+	now := time.Now()
+	if last, ok := a.deskLast[key]; ok && now.Sub(last) < desktopDedupe {
+		return nil
+	}
+	a.deskLast[key] = now
+	d := a.desk
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*notify.SendTimeout)
+		defer cancel()
+		return deskResultMsg{d.Notify(ctx, title, body)}
+	}
 }
 
 func (a *App) View() string {

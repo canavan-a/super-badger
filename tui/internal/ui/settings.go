@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -9,21 +10,35 @@ import (
 
 	"superbadger-tui/internal/api"
 	"superbadger-tui/internal/config"
+	"superbadger-tui/internal/notify"
 )
 
 // ---- global settings (server URL, token, theme, notifications) ----
 
 type settingsModel struct {
-	cfg    *config.Config
-	client *api.Client
-	st     Styles
-	form   form
-	msg    string
-	w, h   int
+	cfg     *config.Config
+	client  *api.Client
+	st      Styles
+	form    form
+	msg     string
+	w, h    int
+	desk    notify.Notifier // nil when unavailable
+	deskWhy error
 }
 
-func newSettings(cfg *config.Config, c *api.Client, st Styles) *settingsModel {
-	m := &settingsModel{cfg: cfg, client: c, st: st}
+// deskNote is the hint beside the Desktop notifications switch.
+func deskNote(d notify.Notifier, why error) string {
+	if d != nil {
+		return "via " + d.Name()
+	}
+	if why != nil {
+		return "unavailable — " + why.Error()
+	}
+	return "unavailable on this machine"
+}
+
+func newSettings(cfg *config.Config, c *api.Client, st Styles, desk notify.Notifier, deskWhy error) *settingsModel {
+	m := &settingsModel{cfg: cfg, client: c, st: st, desk: desk, deskWhy: deskWhy}
 	m.form = newForm([]field{
 		{kind: fHeader, label: "Connection"},
 		{key: "server_url", label: "Server URL", kind: fText, value: cfg.ServerURL, note: "e.g. http://localhost:8080"},
@@ -33,6 +48,8 @@ func newSettings(cfg *config.Config, c *api.Client, st Styles) *settingsModel {
 		{key: "theme", label: "Theme", kind: fChoice, value: cfg.Theme, choices: config.ThemeNames, note: "/splash previews the title screen"},
 		{kind: fHeader, label: "Notifications"},
 		{key: "notifications", label: "Other-station alerts", kind: fToggle, on: cfg.Notifications},
+		{key: "desktop", label: "Desktop notifications", kind: fToggle, on: cfg.DesktopNotifications, note: deskNote(desk, deskWhy)},
+		{key: "desktest", label: "Send a test notification", kind: fAction},
 		{key: "splash", label: "Launch art", kind: fToggle, on: cfg.Splash, note: "shown at launch"},
 		{kind: fHeader, label: "Server"},
 		{key: "metrics", label: "Metric sources…", kind: fAction},
@@ -47,6 +64,12 @@ func (m *settingsModel) resize(w, h int) { m.w, m.h = w, h; m.form.width = w }
 
 func (m *settingsModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 	switch msg := msg.(type) {
+	case deskTestDoneMsg:
+		if msg.err != nil {
+			m.msg = "✗ desktop notification failed: " + msg.err.Error()
+		} else {
+			m.msg = "✓ sent via " + msg.name + " — you should see it on your desktop now"
+		}
 	case opMsg:
 		if msg.tag == "test" {
 			if msg.err != nil || !msg.val.(bool) {
@@ -81,6 +104,21 @@ func (m *settingsModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 			m.cfg.Touch("splash")
 		case "notifications":
 			m.cfg.Notifications = ev.on
+		case "desktop":
+			m.cfg.DesktopNotifications = ev.on
+		case "desktest":
+			d, why := m.desk, m.deskWhy
+			return m, func() tea.Msg {
+				if d == nil {
+					if why == nil {
+						why = fmt.Errorf("not available on this machine")
+					}
+					return deskTestDoneMsg{err: why}
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 2*notify.SendTimeout)
+				defer cancel()
+				return deskTestDoneMsg{err: d.Notify(ctx, "superbadger", "Desktop notifications are working."), name: d.Name()}
+			}
 		case "test":
 			c := api.New(m.cfg.ServerURL, m.cfg.AuthToken)
 			return m, func() tea.Msg { return opMsg{"test", nil, c.Health()} }

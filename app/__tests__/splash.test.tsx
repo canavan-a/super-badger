@@ -6,8 +6,9 @@ import React from 'react';
 import {afterEach, beforeEach, describe, expect, it, jest} from '@jest/globals';
 import renderer, {act} from 'react-test-renderer';
 
-import {SplashBoundary, SplashGate, resetSplashForTests} from '../src/logo/SplashGate';
+import {MAX_SPLASH_STRIKES, SplashBoundary, SplashGate, resetSplashForTests} from '../src/logo/SplashGate';
 import {SPLASH_TIMING, SPLASH_TOTAL, SplashScreen} from '../src/logo/SplashScreen';
+import {BADGER_STRIPS, WORD_STRIPS} from '../src/logo/LogoArt';
 import {settingsStore} from '../src/settings';
 import {ThemeProvider, THEMES} from '../src/theme';
 
@@ -43,12 +44,27 @@ describe('SplashScreen', () => {
     }
   });
 
-  it('draws the whole logo: badger, eye, eleven letters and the shine', () => {
+  const svgCount = (tree: renderer.ReactTestRenderer) =>
+    tree.root.findAll(n => typeof n.props?.viewBox === 'string' && n.props.width !== undefined).length;
+
+  it('draws the whole logo: badger, eye and glint, eleven letters, and the shine strips', () => {
     const tree = mount(() => {});
-    // 11 letters + badger group + the shine's two bands
-    const svgs = tree.root.findAll(n => (n.type as any)?.displayName === 'Svg' || (n.type as any)?.name === 'Svg');
-    expect(svgs.length).toBeGreaterThanOrEqual(11 + 3);
+    const strips = [...BADGER_STRIPS, ...WORD_STRIPS].filter(s => s.tones.length > 0).length;
+    expect(svgCount(tree)).toBe(3 + 11 + strips); // badger + eye + eye glint, letters, strips
     act(() => tree.unmount());
+  });
+
+  it('uses nothing that React Native on Android handles badly: no skew, no clipping', () => {
+    // The shine was a skewed, clipped window sliding over a counter-moving copy
+    // of the logo. Android drops skew from view transforms, and the clipped,
+    // counter-animated layers were the riskiest part of the screen.
+    for (const reduceMotion of [false, true]) {
+      const tree = mount(() => {}, {reduceMotion});
+      const json = JSON.stringify(tree.toJSON());
+      expect(json).not.toContain('skew');
+      expect(json).not.toContain('"overflow":"hidden"');
+      act(() => tree.unmount());
+    }
   });
 
   it('overlays every SVG layer at the origin instead of letting them stack', () => {
@@ -102,7 +118,11 @@ describe('SplashScreen', () => {
     act(() => jest.advanceTimersByTime(500));
     const skip = tree.root.findAll(n => n.props?.accessibilityLabel === 'Skip intro')[0];
     act(() => skip.props.onPress());
+    // It fades out first; it must not unmount under animations that are still running.
+    expect(onDone).not.toHaveBeenCalled();
+    act(() => jest.advanceTimersByTime(400));
     expect(onDone).toHaveBeenCalledTimes(1);
+    act(() => skip.props.onPress()); // more taps while fading change nothing
     act(() => jest.advanceTimersByTime(SPLASH_TOTAL + 1000));
     expect(onDone).toHaveBeenCalledTimes(1);
     act(() => tree.unmount());
@@ -111,16 +131,15 @@ describe('SplashScreen', () => {
   it('with reduced motion, skips the shine and finishes quickly', () => {
     const onDone = jest.fn();
     const tree = mount(onDone, {reduceMotion: true});
-    expect(JSON.stringify(tree.toJSON())).not.toContain('skewX');
+    const still = svgCount(tree);
+    act(() => tree.unmount());
+    const moving = mount(() => {});
+    expect(still).toBeLessThan(svgCount(moving)); // no shine strips
+    act(() => moving.unmount());
+    const again = mount(onDone, {reduceMotion: true});
     act(() => jest.advanceTimersByTime(1200));
     expect(onDone).toHaveBeenCalledTimes(1);
-    act(() => tree.unmount());
-  });
-
-  it('uses the shine only when motion is allowed', () => {
-    const tree = mount(() => {});
-    expect(JSON.stringify(tree.toJSON())).toContain('skewX');
-    act(() => tree.unmount());
+    act(() => again.unmount());
   });
 
   it('is a sane length', () => {
@@ -174,6 +193,56 @@ describe('SplashGate', () => {
     const second = await mountGate();
     expect(hasSplash(second)).toBe(false);
     await act(async () => second.unmount());
+  });
+
+  it('counts a strike before the animation starts and clears it when it finishes', async () => {
+    await settingsStore.load();
+    await settingsStore.save({...settingsStore.get(), launchSplash: true, splashStrikes: 0, splashAutoDisabled: false});
+    const tree = await mountGate();
+    // recorded up front, so a crash mid-animation would still leave it behind
+    expect(settingsStore.get().splashStrikes).toBe(1);
+    expect(hasSplash(tree)).toBe(true);
+    await act(async () => {
+      jest.advanceTimersByTime(SPLASH_TOTAL + 500);
+    });
+    expect(settingsStore.get().splashStrikes).toBe(0);
+    await act(async () => tree.unmount());
+  });
+
+  it('turns the splash off by itself after consecutive launches that never finished', async () => {
+    await settingsStore.load();
+    await settingsStore.save({...settingsStore.get(), launchSplash: true, splashStrikes: MAX_SPLASH_STRIKES, splashAutoDisabled: false});
+    const tree = await mountGate();
+    expect(hasSplash(tree)).toBe(false); // did not try a third time
+    expect(tree.root.findAll(n => n.props?.testID === 'app').length).toBeGreaterThan(0);
+    const s = settingsStore.get();
+    expect(s.launchSplash).toBe(false);
+    expect(s.splashAutoDisabled).toBe(true);
+    expect(s.splashStrikes).toBe(0);
+    await act(async () => tree.unmount());
+    await settingsStore.save({...settingsStore.get(), launchSplash: true, splashAutoDisabled: false});
+  });
+
+  it('still plays after a single unfinished launch (one strike is not enough)', async () => {
+    await settingsStore.load();
+    await settingsStore.save({...settingsStore.get(), launchSplash: true, splashStrikes: MAX_SPLASH_STRIKES - 1, splashAutoDisabled: false});
+    const tree = await mountGate();
+    expect(hasSplash(tree)).toBe(true);
+    await act(async () => {
+      jest.advanceTimersByTime(SPLASH_TOTAL + 500);
+    });
+    expect(settingsStore.get().splashStrikes).toBe(0);
+    await act(async () => tree.unmount());
+  });
+
+  it('is skipped entirely when the launch animation is switched off', async () => {
+    await settingsStore.load();
+    await settingsStore.save({...settingsStore.get(), launchSplash: false});
+    const tree = await mountGate();
+    expect(hasSplash(tree)).toBe(false);
+    expect(tree.root.findAll(n => n.props?.testID === 'app').length).toBeGreaterThan(0);
+    await act(async () => tree.unmount());
+    await settingsStore.save({...settingsStore.get(), launchSplash: true});
   });
 
   it('shows the splash in the saved theme, not the default one', async () => {
