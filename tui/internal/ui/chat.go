@@ -396,10 +396,6 @@ func (m *chatModel) key(k tea.KeyMsg) tea.Cmd {
 		m.showTools = !m.showTools
 		m.dirty = true
 		return nil
-	case "ctrl+r":
-		m.showThink = !m.showThink
-		m.dirty = true
-		return nil
 	case "alt+c":
 		if m.station.HasAction("compact") {
 			return m.runAction("compact")
@@ -813,7 +809,7 @@ func (m *chatModel) renderPart(p *chat.Part, wrap lipgloss.Style) string {
 		return m.renderText(p.Text, wrap)
 	case chat.KindReasoning:
 		if !m.showThink {
-			return m.st.Muted.Render("· thinking  (ctrl+r to show)")
+			return m.st.Muted.Render("· thinking  (/show to expand)")
 		}
 		return m.st.Muted.Italic(true).Render(wrap.Render(p.Text))
 	case chat.KindTool:
