@@ -139,7 +139,7 @@ func newChat(c *api.Client, st Styles, s api.Station, idx, total int) *chatModel
 	m := &chatModel{
 		gen: genCounter, client: c, st: st, station: s, pos: [2]int{idx, total},
 		state: chat.New(), status: "connecting", vp: viewport.New(80, 10), ta: ta,
-		stick: true, dirty: true, showTools: true, qSel: map[int]bool{}, qInput: qi,
+		stick: true, dirty: true, showTools: true, showThink: true, qSel: map[int]bool{}, qInput: qi,
 	}
 	m.applyStyles()
 	m.conn = ws.Dial(c.WSURL(fmt.Sprintf("/stations/%d/ws", s.ID)))
@@ -1032,6 +1032,11 @@ func (m *chatModel) localCommand(text string) (cmd tea.Cmd, ok bool) {
 			m.state.Notice = "thinking hidden"
 		}
 		return nil, true
+	case "/reset":
+		// Same y/n confirm as alt+r and the ^k menu: it throws away the
+		// session's history, so a typo shouldn't be enough.
+		m.confirm = "reset"
+		return nil, true
 	case "/stop":
 		queued := len(m.outbox)
 		m.outbox = nil // follow-ups typed ahead of the reply you just cancelled
@@ -1056,7 +1061,8 @@ var commandHelp = []struct{ cmd, desc string }{
 	{"/help", "show this list"},
 	{"/stop", "cancel the running reply (and drop messages queued behind it)"},
 	{"/compact", "summarize older messages to free up context"},
-	{"/show", "show or hide the model's thinking"},
+	{"/show", "hide or show the model's thinking (shown by default)"},
+	{"/reset", "clear this station's session and start fresh"},
 	{"/settings", "open settings"},
 	{"/stations", "pick or create a station"},
 	{"/station", "settings for this station"},

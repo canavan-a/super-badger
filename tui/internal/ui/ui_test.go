@@ -560,8 +560,10 @@ func TestStopWhenIdleSaysSoAndDoesNothing(t *testing.T) {
 
 func TestShowTogglesThinking(t *testing.T) {
 	a, c := busyChat(t)
-	c.showThink = false
-	for i, want := range []bool{true, false, true} {
+	if !c.showThink {
+		t.Fatal("thinking should be shown by default")
+	}
+	for i, want := range []bool{false, true, false} {
 		c.ta.SetValue("/show")
 		a.key(tea.KeyMsg{Type: tea.KeyEnter})
 		if c.showThink != want {
@@ -574,7 +576,7 @@ func TestShowTogglesThinking(t *testing.T) {
 	// Case-insensitive, like the other commands.
 	c.ta.SetValue("/SHOW")
 	a.key(tea.KeyMsg{Type: tea.KeyEnter})
-	if c.showThink {
+	if !c.showThink {
 		t.Fatal("/SHOW should toggle too")
 	}
 }
@@ -759,7 +761,7 @@ func TestHelpShowsTheCommandsAndAnyKeyClosesIt(t *testing.T) {
 		t.Fatalf("help=%v outbox=%d input=%q", c.help, len(c.outbox), c.ta.Value())
 	}
 	view := plainRow(c.View())
-	for _, cmd := range []string{"/help", "/stop", "/show", "/compact", "/settings", "/stations", "/station", "/splash", "/quit"} {
+	for _, cmd := range []string{"/help", "/stop", "/show", "/reset", "/compact", "/settings", "/stations", "/station", "/splash", "/quit"} {
 		if !strings.Contains(view, cmd) {
 			t.Errorf("help is missing %s:\n%s", cmd, view)
 		}
@@ -793,7 +795,7 @@ func TestHelpListsEveryCommand(t *testing.T) {
 	for _, h := range commandHelp {
 		listed[h.cmd] = true
 	}
-	local := []string{"/help", "/stop", "/show", "/compact"}
+	local := []string{"/help", "/stop", "/show", "/reset", "/compact"}
 	// Every command that exists must be documented...
 	for cmd := range slashCommands {
 		if cmd == "/exit" {
@@ -1528,5 +1530,26 @@ func TestFocusMessagesAreTracked(t *testing.T) {
 func TestDesktopNotificationsAreOnByDefault(t *testing.T) {
 	if !config.Default().DesktopNotifications {
 		t.Fatal("default should be on")
+	}
+}
+
+func TestResetCommandAsksFirst(t *testing.T) {
+	a, c := busyChat(t)
+	c.ta.SetValue("/reset")
+	if cmd := a.key(tea.KeyMsg{Type: tea.KeyEnter}); cmd != nil {
+		t.Fatal("/reset should only ask, not reset yet")
+	}
+	if c.confirm != "reset" || len(c.outbox) != 0 || c.ta.Value() != "" {
+		t.Fatalf("confirm=%q outbox=%d input=%q", c.confirm, len(c.outbox), c.ta.Value())
+	}
+	// Anything but y backs out.
+	a.key(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	if c.confirm != "" {
+		t.Fatal("n should cancel the reset")
+	}
+	c.ta.SetValue("/reset")
+	a.key(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd := a.key(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")}); cmd == nil || c.confirm != "" {
+		t.Fatal("y should run the reset")
 	}
 }
