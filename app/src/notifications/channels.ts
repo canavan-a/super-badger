@@ -16,3 +16,9 @@ export async function ensureChannels(): Promise<void> {
   await notifee.createChannel({id: CH_SERVICE, name: 'Monitoring', importance: AndroidImportance.LOW});
   await notifee.createChannel({id: CH_ALERTS, name: 'Agent alerts', importance: AndroidImportance.HIGH});
 }
+
+// Tap target for every notification. Not Notifee's 'default' launch activity:
+// that resolves to whichever launcher alias is enabled (.IconLight, .IconDark,
+// … — see AndroidManifest.xml), which isn't a class Notifee can start, so taps
+// did nothing. Name the real activity instead.
+export const PRESS_ACTION = {id: 'default', launchActivity: 'com.superbadgerapp.MainActivity'};

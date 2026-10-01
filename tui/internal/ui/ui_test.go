@@ -761,7 +761,7 @@ func TestHelpShowsTheCommandsAndAnyKeyClosesIt(t *testing.T) {
 		t.Fatalf("help=%v outbox=%d input=%q", c.help, len(c.outbox), c.ta.Value())
 	}
 	view := plainRow(c.View())
-	for _, cmd := range []string{"/help", "/stop", "/show", "/reset", "/compact", "/settings", "/stations", "/station", "/splash", "/quit"} {
+	for _, cmd := range []string{"/help", "/stop", "/kill", "/show", "/reset", "/compact", "/settings", "/stations", "/station", "/splash", "/quit"} {
 		if !strings.Contains(view, cmd) {
 			t.Errorf("help is missing %s:\n%s", cmd, view)
 		}
@@ -795,7 +795,7 @@ func TestHelpListsEveryCommand(t *testing.T) {
 	for _, h := range commandHelp {
 		listed[h.cmd] = true
 	}
-	local := []string{"/help", "/stop", "/show", "/reset", "/compact"}
+	local := []string{"/help", "/stop", "/kill", "/show", "/reset", "/compact"}
 	// Every command that exists must be documented...
 	for cmd := range slashCommands {
 		if cmd == "/exit" {
@@ -1551,5 +1551,40 @@ func TestResetCommandAsksFirst(t *testing.T) {
 	a.key(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd := a.key(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")}); cmd == nil || c.confirm != "" {
 		t.Fatal("y should run the reset")
+	}
+}
+
+func TestKillAbortsEvenWhenIdle(t *testing.T) {
+	// Busy is false when the run was started before this client connected;
+	// /kill must still reach the server.
+	a, c := busyChat(t)
+	c.state.Busy = false
+	c.outbox = []queued{{"1", "follow-up"}}
+	c.ta.SetValue("/kill")
+	if cmd := a.key(tea.KeyMsg{Type: tea.KeyEnter}); cmd == nil {
+		t.Fatal("/kill should issue the abort regardless of Busy")
+	}
+	if len(c.outbox) != 0 || c.ta.Value() != "" {
+		t.Fatalf("outbox=%d input=%q", len(c.outbox), c.ta.Value())
+	}
+	c.state.Busy = true
+	c.Update(killedMsg{c.gen})
+	if c.state.Busy || c.state.Notice != "agent killed" {
+		t.Fatalf("busy=%v notice=%q", c.state.Busy, c.state.Notice)
+	}
+}
+
+func TestKillTopBarButton(t *testing.T) {
+	_, c := busyChat(t)
+	c.key(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k"), Alt: true})
+	if c.state.Notice == "killing…" {
+		t.Fatal("alt+k should do nothing unless kill is on the top bar")
+	}
+	c.station.TopBarActions = []string{"kill"}
+	if !strings.Contains(plainRow(c.topBar()), "kill ⌥k") {
+		t.Fatalf("top bar should show the kill button:\n%s", plainRow(c.topBar()))
+	}
+	if cmd := c.key(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k"), Alt: true}); cmd == nil {
+		t.Fatal("alt+k should kill once enabled")
 	}
 }

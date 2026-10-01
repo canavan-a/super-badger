@@ -7,7 +7,7 @@ export type StationStatus = 'idle' | 'active' | 'error';
 // StationSettingsScreen) — "data" isn't included since that's always shown,
 // it's the only way to reach this config. "tokens" is a badge (a
 // label:value pill, like a data point) rather than a button.
-export type TopBarActionKey = 'compact' | 'reset' | 'delete' | 'tokens';
+export type TopBarActionKey = 'compact' | 'kill' | 'reset' | 'delete' | 'tokens';
 
 export interface Station {
   id: number;

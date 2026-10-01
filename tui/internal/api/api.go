@@ -15,7 +15,7 @@ import (
 
 var StationColors = []string{"#4C8BF5", "#34C759", "#FF9500", "#FF3B30", "#AF52DE", "#8E8E93"}
 
-var TopBarActionKeys = []string{"compact", "reset", "delete", "tokens"}
+var TopBarActionKeys = []string{"compact", "kill", "reset", "delete", "tokens"}
 
 type Station struct {
 	ID                uint     `json:"id"`

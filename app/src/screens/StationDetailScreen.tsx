@@ -60,6 +60,7 @@ export function StationDetailScreen({
     outbox,
     send: sendWs,
     reset: resetChat,
+    forceIdle,
     reconnect,
     replyPermission,
     replyQuestion,
@@ -130,6 +131,18 @@ export function StationDetailScreen({
       setError(String(err));
     } finally {
       setAborting(false);
+    }
+  };
+
+  // Force stop: same server abort, but not gated on chat.busy. busy only
+  // turns on for prompts this client sent, so a run started before opening
+  // the station (or from another client) left the stop button hidden.
+  const doKill = async () => {
+    try {
+      await abortStation(stationId);
+      forceIdle();
+    } catch (err) {
+      setError(String(err));
     }
   };
 
@@ -245,6 +258,7 @@ export function StationDetailScreen({
     // (see StationSettingsScreen's Top bar section).
     const optionalActions = [
       {key: 'compact' as const, label: compactLabel, onPress: doCompact},
+      {key: 'kill' as const, label: 'Kill', onPress: doKill, destructive: true},
       {key: 'reset' as const, label: 'Reset', onPress: confirmReset},
       {key: 'delete' as const, label: 'Delete', onPress: confirmDelete, destructive: true},
     ].filter(a => station.top_bar_actions.includes(a.key));
@@ -392,6 +406,15 @@ export function StationDetailScreen({
                 doCompact();
               }}>
               <Text style={[styles.menuRowText, compacting && styles.menuRowTextDisabled]}>{compactLabel}</Text>
+            </Pressable>
+            <View style={styles.menuDivider} />
+            <Pressable
+              style={styles.menuRow}
+              onPress={() => {
+                setMenuOpen(false);
+                doKill();
+              }}>
+              <Text style={[styles.menuRowText, styles.menuRowTextDestructive]}>Kill agent</Text>
             </Pressable>
             <View style={styles.menuDivider} />
             <Pressable

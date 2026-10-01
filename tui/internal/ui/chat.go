@@ -59,6 +59,8 @@ type (
 		gen  int
 		text string
 	}
+	// killedMsg reports that a force stop landed on the server.
+	killedMsg struct{ gen int }
 	// Asks the root to change screens / stations.
 	deletedMsg struct{ id uint }
 )
@@ -270,6 +272,12 @@ func (m *chatModel) Update(msg tea.Msg) tea.Cmd {
 		m.state.Notice = msg.text
 		m.compacting = false
 		m.dirty = true
+	case killedMsg:
+		// Don't wait on opencode's turn-finished event: a force stop is for
+		// when this client's idea of the run can't be trusted.
+		m.state.Busy = false
+		m.state.Notice = "agent killed"
+		m.dirty = true
 
 	case tea.MouseMsg:
 		var cmd tea.Cmd
@@ -405,6 +413,10 @@ func (m *chatModel) key(k tea.KeyMsg) tea.Cmd {
 			m.confirm = "reset"
 			return nil
 		}
+	case "alt+k":
+		if m.station.HasAction("kill") {
+			return m.kill()
+		}
 	case "alt+d":
 		if m.station.HasAction("delete") {
 			m.confirm = "delete"
@@ -460,7 +472,7 @@ func (m *chatModel) key(k tea.KeyMsg) tea.Cmd {
 
 var menuItems = []struct{ key, label string }{
 	{"compact", "Compact context"},
-	{"abort", "Abort current reply"},
+	{"kill", "Kill agent (force stop)"},
 	{"reset", "Reset session (clears history)"},
 	{"delete", "Delete station"},
 }
@@ -480,9 +492,22 @@ func (m *chatModel) menuKey(s string) tea.Cmd {
 			m.confirm = what
 			return nil
 		}
+		if what == "kill" {
+			return m.kill()
+		}
 		return m.runAction(what)
 	}
 	return nil
+}
+
+// kill force-stops the station's agent. Unlike /stop it doesn't check Busy:
+// Busy only turns on for replies this client sent, so a run started before
+// connecting (or from another client) would otherwise be unstoppable.
+func (m *chatModel) kill() tea.Cmd {
+	m.outbox = nil
+	m.state.Notice = "killing…"
+	m.dirty = true
+	return m.runAction("kill")
 }
 
 func (m *chatModel) runAction(what string) tea.Cmd {
@@ -495,6 +520,13 @@ func (m *chatModel) runAction(what string) tea.Cmd {
 				return fail(err)
 			}
 			return nil
+		}
+	case "kill":
+		return func() tea.Msg {
+			if err := c.AbortStation(id); err != nil {
+				return fail(err)
+			}
+			return killedMsg{gen}
 		}
 	case "compact":
 		if m.compacting {
@@ -702,6 +734,9 @@ func (m *chatModel) topBar() string {
 	}
 	if len(acts) > 0 {
 		row2 = append(row2, s.Soft.Render(strings.Join(acts, "  ")))
+	}
+	if m.station.HasAction("kill") {
+		row2 = append(row2, s.Danger.Render("kill ⌥k"))
 	}
 	if m.station.HasAction("delete") {
 		row2 = append(row2, s.Danger.Render("delete ⌥d"))
@@ -1044,9 +1079,11 @@ func (m *chatModel) localCommand(text string) (cmd tea.Cmd, ok bool) {
 		case queued > 0:
 			m.state.Notice = "cleared the queued messages"
 		default:
-			m.state.Notice = "nothing to stop"
+			m.state.Notice = "nothing to stop (/kill force-stops the agent anyway)"
 		}
 		return nil, true
+	case "/kill":
+		return m.kill(), true
 	}
 	return nil, false
 }
@@ -1056,6 +1093,7 @@ func (m *chatModel) localCommand(text string) (cmd tea.Cmd, ok bool) {
 var commandHelp = []struct{ cmd, desc string }{
 	{"/help", "show this list"},
 	{"/stop", "cancel the running reply (and drop messages queued behind it)"},
+	{"/kill", "force-stop the agent, even if this client didn't start the run"},
 	{"/compact", "summarize older messages to free up context"},
 	{"/show", "hide or show the model's thinking (shown by default)"},
 	{"/reset", "clear this station's session and start fresh"},

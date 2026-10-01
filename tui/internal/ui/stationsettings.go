@@ -52,8 +52,11 @@ func (m *stationSettingsModel) rebuild() {
 	}
 	for _, a := range api.TopBarActionKeys {
 		note := "button"
-		if a == "tokens" {
+		switch a {
+		case "tokens":
 			note = "context token count"
+		case "kill":
+			note = "button (force-stops the agent)"
 		}
 		fields = append(fields, field{key: "act:" + a, label: a, kind: fToggle, on: m.station.HasAction(a), note: note})
 	}

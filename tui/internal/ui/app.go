@@ -334,6 +334,8 @@ func chatOwns(msg tea.Msg, gen int) bool {
 		return m.gen == gen
 	case chatNoticeMsg:
 		return m.gen == gen
+	case killedMsg:
+		return m.gen == gen
 	}
 	return false
 }

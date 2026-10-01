@@ -182,6 +182,7 @@ var stationColors = map[string]bool{
 // "things the owner chose to show on the top bar".
 var topBarActionKeys = map[string]bool{
 	"compact": true,
+	"kill":    true,
 	"reset":   true,
 	"delete":  true,
 	"tokens":  true,

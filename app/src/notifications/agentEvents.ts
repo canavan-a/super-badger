@@ -8,7 +8,7 @@
 import notifee from '@notifee/react-native';
 
 import {formatDataPointValue} from '../api';
-import {CH_ALERTS} from './channels';
+import {CH_ALERTS, PRESS_ACTION} from './channels';
 
 export interface NotificationMsg {
   type: 'agent_idle' | 'permission_requested' | 'question_requested' | 'datapoint_threshold';
@@ -78,7 +78,7 @@ export async function handleNotificationMsg(msg: NotificationMsg): Promise<void>
         android: {
           channelId: CH_ALERTS,
           smallIcon: 'ic_notification',
-          pressAction: {id: 'default'},
+          pressAction: PRESS_ACTION,
           timestamp: Date.now(),
           showTimestamp: true,
           color: msg.station_color,
@@ -94,7 +94,7 @@ export async function handleNotificationMsg(msg: NotificationMsg): Promise<void>
         android: {
           channelId: CH_ALERTS,
           smallIcon: 'ic_notification',
-          pressAction: {id: 'default'},
+          pressAction: PRESS_ACTION,
           timestamp: Date.now(),
           showTimestamp: true,
           color: msg.station_color,
@@ -110,7 +110,7 @@ export async function handleNotificationMsg(msg: NotificationMsg): Promise<void>
         android: {
           channelId: CH_ALERTS,
           smallIcon: 'ic_notification',
-          pressAction: {id: 'default'},
+          pressAction: PRESS_ACTION,
           timestamp: Date.now(),
           showTimestamp: true,
           color: msg.station_color,
@@ -128,7 +128,7 @@ export async function handleNotificationMsg(msg: NotificationMsg): Promise<void>
         android: {
           channelId: CH_ALERTS,
           smallIcon: 'ic_notification',
-          pressAction: {id: 'default'},
+          pressAction: PRESS_ACTION,
           timestamp: Date.now(),
           showTimestamp: true,
           color: msg.station_color,

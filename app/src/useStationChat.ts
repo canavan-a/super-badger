@@ -225,6 +225,17 @@ export function useStationChat(stationId: number) {
     setState(prev => (prev.error ? {...prev, error: null} : prev));
   }, []);
 
+  // After a force stop (kill): drop queued follow-ups and clear busy without
+  // waiting on opencode's turn-finished event, which may never come if this
+  // client never saw the run start.
+  const forceIdle = useCallback(() => {
+    outboxRef.current = [];
+    busyRef.current = false;
+    pendingLocalUserID.current = null;
+    setOutboxVersion(v => v + 1);
+    setState(prev => ({...prev, busy: false}));
+  }, []);
+
   const reset = useCallback(() => {
     pending.current = [];
     outboxRef.current = [];
@@ -251,6 +262,7 @@ export function useStationChat(stationId: number) {
     outbox,
     send,
     reset,
+    forceIdle,
     reconnect,
     replyPermission,
     replyQuestion,

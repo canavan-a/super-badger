@@ -36,10 +36,12 @@ three assumptions. super-badger is built around that:
 - **Stations, not sessions.** A *Station* is one model + one working directory +
   one persistent opencode session, with a name and a color. Keep one per
   project or per model, switch between them, and reset them when you need to.
-- **Lives on the inference box.** A single Go binary with SQLite (no cgo) and a
-  NixOS module that also runs opencode. It has token auth, can serve the web
-  client itself, and can optionally drive Mullvad so the box can be reached
-  remotely while LAN traffic to your models stays local.
+- **Runs wherever opencode does.** It doesn't need to be on the inference box:
+  any machine that can reach your model endpoints works. It's a single Go
+  binary with SQLite (no cgo) and a NixOS module that also runs opencode. It
+  has token auth, can serve the web client itself, and can optionally drive
+  Mullvad so the host can be reached remotely while LAN traffic to your models
+  stays local.
 
 ## Clients
 
@@ -55,7 +57,7 @@ All three talk only to the server's REST + WebSocket API.
 
 ```sh
 nix profile install github:canavan-a/super-badger#superbadger
-superbadger --server http://gpu-box:8080 --token <token>   # or set both in Settings
+superbadger --server http://badger-host:8080 --token <token>   # or set both in Settings
 ```
 
 ## Running it

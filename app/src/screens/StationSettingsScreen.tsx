@@ -462,6 +462,7 @@ const TOP_BAR_BADGE_OPTIONS: {key: TopBarActionKey; label: string}[] = [
 
 const TOP_BAR_ACTION_OPTIONS: {key: TopBarActionKey; label: string}[] = [
   {key: 'compact', label: 'Compact'},
+  {key: 'kill', label: 'Kill'},
   {key: 'reset', label: 'Reset'},
   {key: 'delete', label: 'Delete'},
 ];

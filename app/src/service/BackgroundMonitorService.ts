@@ -9,7 +9,7 @@
 import notifee, {AndroidForegroundServiceType} from '@notifee/react-native';
 
 import {handleNotificationMsg} from '../notifications/agentEvents';
-import {CH_SERVICE, ensureChannels, NID_FGS} from '../notifications/channels';
+import {CH_SERVICE, ensureChannels, NID_FGS, PRESS_ACTION} from '../notifications/channels';
 import {settingsStore} from '../settings';
 
 function notificationsWsURL(): string {
@@ -82,6 +82,11 @@ export async function startMonitoring(): Promise<void> {
     body: 'Watching for agent activity…',
     android: {
       channelId: CH_SERVICE,
+      // Required: Notifee's default is 'ic_launcher', which doesn't exist
+      // (launcher icons are per-theme, ic_launcher_<theme>), and Android
+      // kills the process over an icon-less foreground notification.
+      smallIcon: 'ic_notification',
+      pressAction: PRESS_ACTION,
       asForegroundService: true,
       foregroundServiceTypes: [AndroidForegroundServiceType.FOREGROUND_SERVICE_TYPE_DATA_SYNC],
       ongoing: true,
