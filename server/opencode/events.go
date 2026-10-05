@@ -76,16 +76,105 @@ func NewEventBroker(client *Client) *EventBroker {
 	}
 }
 
-// History returns a copy of the recent events cached for sessionID (empty if
-// none — including if the session was reset/cleared, which is deliberate:
-// stale history from a session that no longer exists should not be shown).
-func (b *EventBroker) History(sessionID string) []Event {
+// HistoryPage returns one page of sessionID's cached history, paged by
+// message rather than by raw event: the events belonging to the newest
+// limit messages strictly older than message `before` (or the newest limit
+// overall when before is ""), in their original order. A tool-heavy session
+// can cache several MB of part snapshots, so sending all of it on every
+// station open is what made restoring chat slow — clients now fetch the
+// tail first and pull older pages on scroll-up.
+//
+// cursor is the oldest message ID included (pass it back as before for the
+// next page); hasMore reports whether anything older is still cached. A
+// before that's no longer cached (evicted, or history cleared by a reset)
+// yields an empty page with hasMore false — eviction trims from the front,
+// so nothing older than it can still be there either.
+//
+// Unkeyed events (session.idle, permission.*, ...) are live state rather
+// than transcript, so only the first page carries them, and only those
+// recorded at or after its oldest message — older ones would just replay
+// long-stale state on top of the current one.
+func (b *EventBroker) HistoryPage(sessionID, before string, limit int) (events []Event, cursor string, hasMore bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	h := b.history[sessionID]
-	out := make([]Event, len(h))
-	copy(out, h)
-	return out
+
+	// Message IDs in order of first appearance — counting part events too,
+	// so a part whose message.updated was evicted still lands on a page.
+	order := []string{}
+	pos := map[string]int{}
+	owner := make([]string, len(h))
+	for i, evt := range h {
+		id := eventMessageID(evt)
+		owner[i] = id
+		if id == "" {
+			continue
+		}
+		if _, seen := pos[id]; !seen {
+			pos[id] = len(order)
+			order = append(order, id)
+		}
+	}
+
+	end := len(order)
+	if before != "" {
+		p, ok := pos[before]
+		if !ok {
+			return []Event{}, "", false
+		}
+		end = p
+	}
+	start := max(end-limit, 0)
+	if start >= end {
+		return []Event{}, "", false
+	}
+	want := make(map[string]bool, end-start)
+	for _, id := range order[start:end] {
+		want[id] = true
+	}
+
+	firstIdx := -1
+	out := []Event{}
+	for i, evt := range h {
+		if id := owner[i]; id != "" {
+			if want[id] {
+				if firstIdx < 0 {
+					firstIdx = i
+				}
+				out = append(out, evt)
+			}
+			continue
+		}
+		if before == "" && firstIdx >= 0 {
+			out = append(out, evt)
+		}
+	}
+	return out, order[start], start > 0
+}
+
+// eventMessageID is the message an event belongs to: info.id for
+// message.updated, part.messageID for message.part.updated, "" otherwise.
+func eventMessageID(evt Event) string {
+	switch evt.Type {
+	case "message.updated":
+		var p struct {
+			Info struct {
+				ID string `json:"id"`
+			} `json:"info"`
+		}
+		_ = json.Unmarshal(evt.Properties, &p)
+		return p.Info.ID
+	case "message.part.updated":
+		var p struct {
+			Part struct {
+				MessageID string `json:"messageID"`
+			} `json:"part"`
+		}
+		_ = json.Unmarshal(evt.Properties, &p)
+		return p.Part.MessageID
+	default:
+		return ""
+	}
 }
 
 // ClearHistory drops any cached events for sessionID — called when a Station

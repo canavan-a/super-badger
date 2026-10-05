@@ -328,19 +328,21 @@ func (s *Service) Delete(ctx context.Context, id uint) error {
 	return database.DeleteStation(s.db, id)
 }
 
-// History returns the small cached transcript for st's *current* session —
-// empty if the session has none yet, and deliberately empty (not stale data)
-// if the session was ever reset, since history is cleared together with the
-// old session in activate().
-func (s *Service) History(id uint) ([]opencode.Event, error) {
+// HistoryPage returns one page of the cached transcript for st's *current*
+// session (see opencode.EventBroker.HistoryPage) — empty if the session has
+// none yet, and deliberately empty (not stale data) if the session was ever
+// reset, since history is cleared together with the old session in
+// activate().
+func (s *Service) HistoryPage(id uint, before string, limit int) (events []opencode.Event, cursor string, hasMore bool, err error) {
 	st, err := database.GetStation(s.db, id)
 	if err != nil {
-		return nil, err
+		return nil, "", false, err
 	}
 	if st.OpencodeSessionID == "" {
-		return nil, nil
+		return []opencode.Event{}, "", false, nil
 	}
-	return s.broker.History(st.OpencodeSessionID), nil
+	events, cursor, hasMore = s.broker.HistoryPage(st.OpencodeSessionID, before, limit)
+	return events, cursor, hasMore, nil
 }
 
 // reachabilityTimeout bounds a single "is the model actually up" check so a

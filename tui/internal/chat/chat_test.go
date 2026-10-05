@@ -1,6 +1,10 @@
 package chat
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 func ev(t *testing.T, s string) Event {
 	t.Helper()
@@ -107,5 +111,26 @@ func TestStepFinishWithOnlyATotalStillWorks(t *testing.T) {
 	s.Apply(ev(t, `{"type":"message.part.updated","properties":{"part":{"id":"sf","messageID":"m","type":"step-finish","tokens":{"total":1234}}}}`))
 	if p := s.Turn("m").Parts["sf"]; p.Tokens != 1234 || p.Ctx != 0 {
 		t.Errorf("%+v", p)
+	}
+}
+
+func TestPrependPutsOlderPageAboveAndKeepsIndex(t *testing.T) {
+	s := New()
+	s.Apply(ev(t, `{"type":"message.updated","properties":{"info":{"id":"m3","role":"user"}}}`))
+	s.Prepend([]json.RawMessage{
+		json.RawMessage(`{"type":"message.updated","properties":{"info":{"id":"m1","role":"user"}}}`),
+		json.RawMessage(`{"type":"message.part.updated","properties":{"part":{"id":"p2","messageID":"m2","type":"text","text":"old"}}}`),
+	})
+	var ids []string
+	for _, tr := range s.Turns {
+		ids = append(ids, tr.MessageID)
+	}
+	if strings.Join(ids, ",") != "m1,m2,m3" {
+		t.Fatalf("order = %v", ids)
+	}
+	// Live events after a prepend still land on the right (shifted) turn.
+	s.Apply(ev(t, `{"type":"message.part.updated","properties":{"part":{"id":"p3","messageID":"m3","type":"text","text":"new"}}}`))
+	if s.Turn("m3").Text() != "new" || s.Turn("m2").Text() != "old" {
+		t.Fatal("turn index is stale after prepend")
 	}
 }

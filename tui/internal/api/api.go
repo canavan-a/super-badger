@@ -240,9 +240,23 @@ func (c *Client) Usage(id uint) (out TokenUsage, err error) {
 	return
 }
 
-// History returns raw opencode events, same shape as the WebSocket frames.
-func (c *Client) History(id uint) (out []json.RawMessage, err error) {
-	err = c.do("GET", fmt.Sprintf("/stations/%d/history", id), nil, &out)
+// HistoryPage is one page of a station's cached transcript: raw opencode
+// events (same shape as the WebSocket frames) for up to limit messages.
+// Cursor goes back in as before to fetch the page older than this one.
+type HistoryPage struct {
+	Events  []json.RawMessage `json:"events"`
+	Cursor  string            `json:"cursor"`
+	HasMore bool              `json:"hasMore"`
+}
+
+// History fetches the newest page of history (before == "") or the page
+// just older than cursor before.
+func (c *Client) History(id uint, before string, limit int) (out HistoryPage, err error) {
+	q := url.Values{"limit": {fmt.Sprint(limit)}}
+	if before != "" {
+		q.Set("before", before)
+	}
+	err = c.do("GET", fmt.Sprintf("/stations/%d/history?%s", id, q.Encode()), nil, &out)
 	return
 }
 

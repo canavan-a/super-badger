@@ -358,6 +358,29 @@ func (s *State) Seed(events []json.RawMessage) {
 	}
 }
 
+// Prepend puts an older page of history above the turns already shown. Seed
+// can't do this: Apply appends any turn it hasn't seen, which would land
+// older messages below newer ones. Turns already present are skipped (pages
+// are disjoint by message, so that's only ever a defensive no-op).
+func (s *State) Prepend(events []json.RawMessage) {
+	page := New()
+	page.Seed(events)
+	var older []*Turn
+	for _, t := range page.Turns {
+		if _, ok := s.turnIndex[t.MessageID]; !ok {
+			older = append(older, t)
+		}
+	}
+	if len(older) == 0 {
+		return
+	}
+	s.Turns = append(older, s.Turns...)
+	s.turnIndex = make(map[string]int, len(s.Turns))
+	for i, t := range s.Turns {
+		s.turnIndex[t.MessageID] = i
+	}
+}
+
 // Text concatenates a turn's text parts (used for plain rendering/tests).
 func (t *Turn) Text() string {
 	var b strings.Builder

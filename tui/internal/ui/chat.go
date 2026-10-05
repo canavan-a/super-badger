@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -36,8 +35,10 @@ type (
 	flushMsg   struct{ gen int }
 	pollMsg    struct{ gen int }
 	historyMsg struct {
-		gen    int
-		events []json.RawMessage
+		gen   int
+		page  api.HistoryPage
+		older bool // a scroll-up page, to go above what's shown
+		err   error
 	}
 	dpMsg struct {
 		gen int
@@ -94,6 +95,13 @@ type chatModel struct {
 	usage      api.TokenUsage
 	compacting bool
 
+	// History paging: only the newest page is fetched on open; older pages
+	// come in as the transcript is scrolled to its top (see loadOlder).
+	histCursor   string
+	histMore     bool
+	loadingOlder bool
+	anchor       bool // keep the view put across the next prepend
+
 	menu bool
 	help bool // the /help command list is showing
 
@@ -149,7 +157,7 @@ func newChat(c *api.Client, st Styles, s api.Station, idx, total int) *chatModel
 }
 
 func (m *chatModel) Init() tea.Cmd {
-	return tea.Batch(m.waitFrame(), m.flushTick(), m.pollTick(), m.fetchHistory(), m.fetchTop(), textarea.Blink)
+	return tea.Batch(m.waitFrame(), m.flushTick(), m.pollTick(), m.fetchHistory(""), m.fetchTop(), textarea.Blink)
 }
 
 func (m *chatModel) Close() { m.conn.Close() }
@@ -175,15 +183,27 @@ func (m *chatModel) pollTick() tea.Cmd {
 	return tea.Tick(pollInterval, func(time.Time) tea.Msg { return pollMsg{gen} })
 }
 
-func (m *chatModel) fetchHistory() tea.Cmd {
+// historyPageSize is how many messages one history fetch carries. The whole
+// server cache can be several MB of tool output, so opening a station only
+// pulls the newest page; older ones follow on scroll-up (see loadOlder).
+const historyPageSize = 20
+
+func (m *chatModel) fetchHistory(before string) tea.Cmd {
 	c, id, gen := m.client, m.station.ID, m.gen
 	return func() tea.Msg {
-		ev, err := c.History(id)
-		if err != nil || len(ev) == 0 {
-			return nil // no history yet is not an error worth surfacing
-		}
-		return historyMsg{gen, ev}
+		p, err := c.History(id, before, historyPageSize)
+		return historyMsg{gen: gen, page: p, older: before != "", err: err}
 	}
+}
+
+// loadOlder fetches the next older page once the transcript is scrolled to
+// its very top and the server still has more. Called after every scroll.
+func (m *chatModel) loadOlder() tea.Cmd {
+	if !m.vp.AtTop() || !m.histMore || m.loadingOlder || m.histCursor == "" {
+		return nil
+	}
+	m.loadingOlder = true
+	return m.fetchHistory(m.histCursor)
 }
 
 // fetchTop refreshes everything the top bar shows: station, data points, usage.
@@ -251,7 +271,19 @@ func (m *chatModel) Update(msg tea.Msg) tea.Cmd {
 		return tea.Batch(m.pollTick(), m.fetchTop())
 
 	case historyMsg:
-		m.state.Seed(msg.events)
+		if msg.older {
+			m.loadingOlder = false
+		}
+		if msg.err != nil {
+			return nil // no history yet is not an error worth surfacing
+		}
+		m.histCursor, m.histMore = msg.page.Cursor, msg.page.HasMore
+		if msg.older {
+			m.state.Prepend(msg.page.Events)
+			m.anchor = !m.stick
+		} else {
+			m.state.Seed(msg.page.Events)
+		}
 		m.dirty = true
 	case dpMsg:
 		sort.SliceStable(msg.dps, func(i, j int) bool {
@@ -283,7 +315,7 @@ func (m *chatModel) Update(msg tea.Msg) tea.Cmd {
 		var cmd tea.Cmd
 		m.vp, cmd = m.vp.Update(msg)
 		m.stick = m.vp.AtBottom()
-		return cmd
+		return tea.Batch(cmd, m.loadOlder())
 
 	case tea.KeyMsg:
 		return m.key(msg)
@@ -451,7 +483,7 @@ func (m *chatModel) key(k tea.KeyMsg) tea.Cmd {
 			m.vp.GotoBottom()
 		}
 		m.stick = m.vp.AtBottom()
-		return nil
+		return m.loadOlder()
 	case "pgup", "pgdown", "ctrl+u", "ctrl+d":
 		var cmd tea.Cmd
 		switch s {
@@ -463,7 +495,7 @@ func (m *chatModel) key(k tea.KeyMsg) tea.Cmd {
 			m.vp, cmd = m.vp.Update(k)
 		}
 		m.stick = m.vp.AtBottom()
-		return cmd
+		return tea.Batch(cmd, m.loadOlder())
 	}
 	var cmd tea.Cmd
 	m.ta, cmd = m.ta.Update(k)
@@ -569,6 +601,7 @@ func (m *chatModel) afterReset(s api.Station) {
 	m.station = s
 	m.state = chat.New()
 	m.pending, m.outbox, m.pendingLocal = nil, nil, ""
+	m.histCursor, m.histMore, m.anchor = "", false, false
 	m.usage = api.TokenUsage{}
 	m.dirty, m.stick = true, true
 	m.conn.Reconnect()
@@ -1022,8 +1055,16 @@ func (m *chatModel) View() string {
 	m.vp.Width = m.w
 	m.vp.Height = max(1, m.h-lipgloss.Height(top)-lipgloss.Height(bottom))
 	if m.dirty {
+		// After an older page is prepended, shift the offset by however many
+		// lines it added so the lines being read stay put instead of the view
+		// jumping to the new top.
+		before, off := m.vp.TotalLineCount(), m.vp.YOffset
 		m.vp.SetContent(m.transcript())
 		m.dirty = false
+		if m.anchor {
+			m.anchor = false
+			m.vp.SetYOffset(off + m.vp.TotalLineCount() - before)
+		}
 		if m.stick {
 			m.vp.GotoBottom()
 		}

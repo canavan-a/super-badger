@@ -4,6 +4,8 @@
 package api
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -363,26 +365,70 @@ func stationUsage(svc *station.Service) gin.HandlerFunc {
 	}
 }
 
-// stationHistory returns the small cached transcript for a Station's current
-// session (empty array if none, including after a reset — see
-// station.Service.History), so a client that navigates away and back can
-// restore recent chat instead of starting blank.
+// historyPageDefault/historyPageMax bound how many messages one
+// /history page carries — a single tool-heavy message can be tens of KB of
+// part snapshots, so the page size is what keeps a station open fast.
+const (
+	historyPageDefault = 20
+	historyPageMax     = 100
+)
+
+type historyPage struct {
+	Events  []opencode.Event `json:"events"`
+	Cursor  string           `json:"cursor"`
+	HasMore bool             `json:"hasMore"`
+}
+
+// stationHistory returns one page of the cached transcript for a Station's
+// current session (empty if none, including after a reset — see
+// station.Service.HistoryPage), so a client that navigates away and back can
+// restore recent chat instead of starting blank. ?limit= is in messages;
+// ?before=<cursor from the previous page> walks further back.
+//
+// gzipped when the client accepts it (both the app's fetch and the TUI's
+// net/http do, transparently): this is mostly JSON-escaped prose and tool
+// output, which compresses several times over.
 func stationHistory(svc *station.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, ok := parseID(c)
 		if !ok {
 			return
 		}
-		events, err := svc.History(id)
+		limit := historyPageDefault
+		if v := c.Query("limit"); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 1 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "limit must be a positive integer"})
+				return
+			}
+			limit = min(n, historyPageMax)
+		}
+		events, cursor, hasMore, err := svc.HistoryPage(id, c.Query("before"), limit)
 		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			return
 		}
-		if events == nil {
-			events = []opencode.Event{}
-		}
-		c.JSON(http.StatusOK, events)
+		writeJSONMaybeGzip(c, http.StatusOK, historyPage{Events: events, Cursor: cursor, HasMore: hasMore})
 	}
+}
+
+func writeJSONMaybeGzip(c *gin.Context, status int, v any) {
+	body, err := json.Marshal(v)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.Header("Vary", "Accept-Encoding")
+	if !strings.Contains(c.GetHeader("Accept-Encoding"), "gzip") {
+		c.Data(status, "application/json", body)
+		return
+	}
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	_, _ = zw.Write(body)
+	_ = zw.Close()
+	c.Header("Content-Encoding", "gzip")
+	c.Data(status, "application/json", buf.Bytes())
 }
 
 func listProviders(oc *opencode.Client) gin.HandlerFunc {

@@ -1,7 +1,15 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 
 import {getStationHistory} from './api';
-import {addLocalUserTurn, applyEvent, ChatState, emptyChatState, reconcileLocalUserTurn, seedFromHistory} from './chat';
+import {
+  addLocalUserTurn,
+  applyEvent,
+  ChatState,
+  emptyChatState,
+  prependHistory,
+  reconcileLocalUserTurn,
+  seedFromHistory,
+} from './chat';
 import {settingsStore} from './settings';
 
 function wsURL(stationId: number): string {
@@ -88,20 +96,31 @@ export function useStationChat(stationId: number) {
     };
   }, []);
 
-  // Restores a bit of recent transcript (server-side ring buffer, see
+  // Restores recent transcript (server-side ring buffer, see
   // server/opencode/events.go) when landing on a station — otherwise
-  // navigating away and back always starts blank. Order-independent versus
-  // the live WS connection below (seedFromHistory/applyEvent are idempotent
-  // upserts), so it's fine that this resolves whenever it resolves. If the
-  // session was reset, the server's history for it is gone too (cleared
-  // together — see station.Service.activate), so this naturally comes back
-  // empty rather than showing stale, no-longer-real history.
+  // navigating away and back always starts blank. Only the newest page is
+  // fetched here; older pages come in via loadOlder as the user scrolls up,
+  // since the whole cache can be several MB of tool output. Order-independent
+  // versus the live WS connection below (seedFromHistory/applyEvent are
+  // idempotent upserts), so it's fine that this resolves whenever it
+  // resolves. If the session was reset, the server's history for it is gone
+  // too (cleared together — see station.Service.activate), so this naturally
+  // comes back empty rather than showing stale, no-longer-real history.
+  const historyCursor = useRef('');
+  const loadingOlderRef = useRef(false);
+  const [hasMoreHistory, setHasMoreHistory] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+
   useEffect(() => {
     let cancelled = false;
+    historyCursor.current = '';
+    setHasMoreHistory(false);
     getStationHistory(stationId)
-      .then(events => {
-        if (cancelled || events.length === 0) return;
-        setState(prev => seedFromHistory(prev, events));
+      .then(page => {
+        if (cancelled) return;
+        historyCursor.current = page.cursor;
+        setHasMoreHistory(page.hasMore);
+        if (page.events.length > 0) setState(prev => seedFromHistory(prev, page.events));
       })
       .catch(() => {
         // No history yet (or fetch failed) — starting blank is correct here,
@@ -110,6 +129,30 @@ export function useStationChat(stationId: number) {
     return () => {
       cancelled = true;
     };
+  }, [stationId]);
+
+  // Fetches the page of history just older than what's shown and puts it
+  // above the current turns (see chat.ts's prependHistory). A no-op while a
+  // fetch is already in flight, so a scroll handler can call it freely.
+  const loadOlder = useCallback(() => {
+    if (loadingOlderRef.current || !historyCursor.current) return;
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+    const requestedFor = stationId;
+    getStationHistory(stationId, historyCursor.current)
+      .then(page => {
+        if (requestedFor !== stationId) return;
+        historyCursor.current = page.cursor;
+        setHasMoreHistory(page.hasMore);
+        if (page.events.length > 0) setState(prev => prependHistory(prev, page.events));
+      })
+      .catch(() => {
+        // Leave hasMore as-is so the next scroll to the top retries.
+      })
+      .finally(() => {
+        loadingOlderRef.current = false;
+        setLoadingOlder(false);
+      });
   }, [stationId]);
 
   useEffect(() => {
@@ -241,6 +284,8 @@ export function useStationChat(stationId: number) {
     outboxRef.current = [];
     busyRef.current = false;
     pendingLocalUserID.current = null;
+    historyCursor.current = '';
+    setHasMoreHistory(false);
     setOutboxVersion(v => v + 1);
     setState(emptyChatState);
   }, []);
@@ -268,5 +313,8 @@ export function useStationChat(stationId: number) {
     replyQuestion,
     rejectQuestion,
     dismissError,
+    hasMoreHistory,
+    loadingOlder,
+    loadOlder,
   };
 }

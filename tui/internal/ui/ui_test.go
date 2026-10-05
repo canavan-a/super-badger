@@ -1588,3 +1588,54 @@ func TestKillTopBarButton(t *testing.T) {
 		t.Fatal("alt+k should kill once enabled")
 	}
 }
+
+// An older history page lands above the transcript without moving the lines
+// being read, and is requested only once the view reaches the top.
+func TestOlderHistoryPrependsAndKeepsViewAnchored(t *testing.T) {
+	st := NewStyles("burrow")
+	m := newChat(api.New("http://127.0.0.1:1", ""), st, api.Station{ID: 1, Name: "alpha", Reachable: true}, 0, 1)
+	defer m.Close()
+	m.resize(70, 20)
+
+	page := func(from, to int) api.HistoryPage {
+		var p api.HistoryPage
+		for i := from; i < to; i++ {
+			p.Events = append(p.Events,
+				[]byte(fmt.Sprintf(`{"type":"message.updated","properties":{"info":{"id":"m%02d","role":"assistant"}}}`, i)),
+				[]byte(fmt.Sprintf(`{"type":"message.part.updated","properties":{"part":{"id":"p%02d","messageID":"m%02d","type":"text","text":"line %02d"}}}`, i, i, i)))
+		}
+		p.Cursor = fmt.Sprintf("m%02d", from)
+		p.HasMore = from > 0
+		return p
+	}
+
+	m.Update(historyMsg{gen: m.gen, page: page(10, 20)})
+	m.View()
+	if m.loadOlder() != nil {
+		t.Fatal("must not page while pinned to the bottom")
+	}
+	m.vp.GotoTop()
+	m.stick = false
+	if m.loadOlder() == nil || !m.loadingOlder {
+		t.Fatal("reaching the top with more history should fetch a page")
+	}
+	topLine := func() string {
+		return strings.TrimSpace(ansi.ReplaceAllString(strings.Split(m.vp.View(), "\n")[0], ""))
+	}
+	before := topLine()
+	if before == "" {
+		t.Fatal("expected visible transcript at the top")
+	}
+
+	m.Update(historyMsg{gen: m.gen, page: page(0, 10), older: true})
+	m.View()
+	if m.state.Turns[0].MessageID != "m00" || len(m.state.Turns) != 20 {
+		t.Fatalf("older page not prepended: first=%s n=%d", m.state.Turns[0].MessageID, len(m.state.Turns))
+	}
+	if got := topLine(); got != before {
+		t.Fatalf("view jumped: top line %q, was %q", got, before)
+	}
+	if m.histMore || m.loadingOlder {
+		t.Fatal("last page should clear hasMore and the in-flight flag")
+	}
+}

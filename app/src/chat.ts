@@ -340,6 +340,25 @@ export function seedFromHistory(state: ChatState, events: EventMsg[]): ChatState
   return events.reduce(applyEvent, state);
 }
 
+// Puts an older page of history (see api.getStationHistory's `before`)
+// *above* the turns already shown. seedFromHistory can't do this: applyEvent
+// appends any turn it hasn't seen, which would land older messages below
+// newer ones. So the page is built on its own and its turns spliced in
+// front; turns already present are skipped (pages are disjoint by message,
+// so that's only ever a defensive no-op).
+export function prependHistory(state: ChatState, events: EventMsg[]): ChatState {
+  const older = seedFromHistory(emptyChatState, events).turns.filter(
+    t => state.turnIndex[t.messageID] === undefined,
+  );
+  if (older.length === 0) return state;
+  const turns = [...older, ...state.turns];
+  const turnIndex: Record<string, number> = {};
+  turns.forEach((t, i) => {
+    turnIndex[t.messageID] = i;
+  });
+  return {...state, turns, turnIndex};
+}
+
 // All turns from restored history, in original order, both roles — history
 // has no optimistic local echo to duplicate against.
 export function allTurns(state: ChatState): Turn[] {

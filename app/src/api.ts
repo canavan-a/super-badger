@@ -167,8 +167,18 @@ export function promptStation(id: number, text: string): Promise<unknown> {
 // The history endpoint returns raw opencode events verbatim (see
 // server/opencode/events.go's Event) — same shape as what streams over the
 // station WebSocket, so both feed chat.ts's applyEvent/seedFromHistory.
-export function getStationHistory(id: number): Promise<EventMsg[]> {
-  return request<EventMsg[]>(`/stations/${id}/history`);
+// Paged by message, newest first: pass a page's `cursor` back as `before`
+// to fetch the page older than it (see server/api/api.go stationHistory).
+export interface HistoryPage {
+  events: EventMsg[];
+  cursor: string;
+  hasMore: boolean;
+}
+
+export function getStationHistory(id: number, before?: string, limit = 20): Promise<HistoryPage> {
+  const q = new URLSearchParams({limit: String(limit)});
+  if (before) q.set('before', before);
+  return request<HistoryPage>(`/stations/${id}/history?${q.toString()}`);
 }
 
 export function listProviders(): Promise<OpencodeProvidersResponse> {

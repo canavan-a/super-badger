@@ -66,6 +66,9 @@ export function StationDetailScreen({
     replyQuestion,
     rejectQuestion,
     dismissError,
+    hasMoreHistory,
+    loadingOlder,
+    loadOlder,
   } = useStationChat(stationId);
 
   // Token/cost usage — same figures the opencode CLI's status line shows.
@@ -331,7 +334,16 @@ export function StationDetailScreen({
         />
       )}
 
-      <ChatList chat={chat} outbox={outbox} compacting={compacting} styles={styles} theme={theme} />
+      <ChatList
+        chat={chat}
+        outbox={outbox}
+        compacting={compacting}
+        hasMoreHistory={hasMoreHistory}
+        loadingOlder={loadingOlder}
+        onLoadOlder={loadOlder}
+        styles={styles}
+        theme={theme}
+      />
 
       {outbox.length > 0 && (
         <Text style={styles.queueBanner}>
@@ -456,12 +468,18 @@ function ChatList({
   chat,
   outbox,
   compacting,
+  hasMoreHistory,
+  loadingOlder,
+  onLoadOlder,
   styles,
   theme,
 }: {
   chat: ChatState;
   outbox: QueuedMessage[];
   compacting: boolean;
+  hasMoreHistory: boolean;
+  loadingOlder: boolean;
+  onLoadOlder: () => void;
   styles: Styles;
   theme: Theme;
 }): React.JSX.Element {
@@ -549,6 +567,14 @@ function ChatList({
     } else if (hasMoreAbove && !loadingMoreRef.current) {
       loadingMoreRef.current = true;
       setVisibleCount(v => v + CHAT_PAGE_SIZE);
+    } else if (!hasMoreAbove && hasMoreHistory && !loadingMoreRef.current) {
+      // Every turn already in memory is mounted — the rest only exists
+      // server-side (history is fetched a page at a time; see
+      // useStationChat's loadOlder). The window is widened up front so the
+      // fetched page is mounted the moment it lands above the current turns.
+      loadingMoreRef.current = true;
+      setVisibleCount(v => v + CHAT_PAGE_SIZE);
+      onLoadOlder();
     }
   };
 
@@ -635,6 +661,9 @@ function ChatList({
           followBottom();
         }}
         onLayout={() => followBottom()}
+        ListHeaderComponent={
+          loadingOlder ? <ActivityIndicator style={styles.olderSpinner} size="small" color={theme.textMuted} /> : null
+        }
         ListFooterComponent={
           outbox.length > 0 ? (
             <View style={styles.queueList}>
@@ -1367,6 +1396,9 @@ function makeStyles(theme: Theme) {
       color: theme.primaryText,
       fontSize: 13,
       fontWeight: '700',
+    },
+    olderSpinner: {
+      paddingVertical: 8,
     },
     chatContent: {
       padding: 16,
