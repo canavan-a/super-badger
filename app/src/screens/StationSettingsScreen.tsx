@@ -27,6 +27,7 @@ import {
 } from '../api';
 import {DataPointChart} from '../components/DataPointChart';
 import {Icon} from '../components/Icon';
+import {moveItem} from '../components/StationLayoutSettings';
 import {platformConfirm} from '../platformConfirm';
 import {Route} from '../routes';
 import {STATION_COLORS} from '../stationColors';
@@ -55,6 +56,13 @@ export function StationSettingsScreen({
   const [error, setError] = useState<string | null>(null);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [aliasDraft, setAliasDraft] = useState('');
+  // Top bar list drag: the held point's key and how far it's been dragged.
+  // Mirrored into refs for the PanResponder callbacks (see TopBarRow).
+  const [topBarDrag, setTopBarDrag] = useState<{key: string; dy: number} | null>(null);
+  const topBarDragRef = useRef(topBarDrag);
+  topBarDragRef.current = topBarDrag;
+  const pointsRef = useRef(points);
+  pointsRef.current = points;
 
   const refresh = useCallback(() => {
     Promise.all([getStation(stationId), getStationDataPoints(stationId)])
@@ -149,6 +157,48 @@ export function StationSettingsScreen({
     });
   };
 
+  // Reorders only the top bar points among themselves: they keep the slots
+  // they already occupy in the full list, so points that aren't on the top
+  // bar don't move.
+  const reorderTopBar = (from: number, to: number) => {
+    const current = pointsRef.current;
+    const slots = current.flatMap((p, i) => (p.show_on_top_bar ? [i] : []));
+    const reordered = moveItem(
+      slots.map(i => current[i]),
+      from,
+      to,
+    );
+    const next = current.slice();
+    slots.forEach((slot, i) => {
+      next[slot] = reordered[i];
+    });
+    setPoints(next);
+    reorderStationDataPoints(stationId, next.map(p => p.key)).catch(err => {
+      setError(`Couldn't save: ${String(err)}`);
+      setPoints(current);
+    });
+  };
+
+  const topBarTarget = (from: number, dy: number, count: number) =>
+    Math.max(0, Math.min(count - 1, from + Math.round(dy / TOP_BAR_ROW_HEIGHT)));
+
+  const endTopBarDrag = () => {
+    const d = topBarDragRef.current;
+    setTopBarDrag(null);
+    if (!d) {
+      return;
+    }
+    const list = pointsRef.current.filter(p => p.show_on_top_bar);
+    const from = list.findIndex(p => p.key === d.key);
+    if (from < 0) {
+      return;
+    }
+    const to = topBarTarget(from, d.dy, list.length);
+    if (to !== from) {
+      reorderTopBar(from, to);
+    }
+  };
+
   // Merges `updates` into the point and saves it in one step (rather than a
   // separate patch-then-save) so a rapid patch immediately followed by a
   // save (e.g. tapping the decimals stepper) always persists the value just
@@ -192,9 +242,28 @@ export function StationSettingsScreen({
   }
 
   const topBarPoints = points.filter(p => p.show_on_top_bar);
+  const dragFrom = topBarDrag ? topBarPoints.findIndex(p => p.key === topBarDrag.key) : -1;
+  const dragTarget = topBarDrag && dragFrom >= 0 ? topBarTarget(dragFrom, topBarDrag.dy, topBarPoints.length) : -1;
+  // Rows between the held one and its drop slot slide over to open a gap,
+  // previewing the drop (same as StationLayoutSettings).
+  const topBarShift = (index: number) => {
+    if (dragFrom < 0 || index === dragFrom) {
+      return 0;
+    }
+    if (dragFrom < dragTarget && index > dragFrom && index <= dragTarget) {
+      return -TOP_BAR_ROW_HEIGHT;
+    }
+    if (dragFrom > dragTarget && index >= dragTarget && index < dragFrom) {
+      return TOP_BAR_ROW_HEIGHT;
+    }
+    return 0;
+  };
 
   return (
-    <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
+    <ScrollView
+      style={styles.scroll}
+      contentContainerStyle={styles.container}
+      scrollEnabled={topBarDrag === null}>
       {error && <Text style={styles.error}>{error}</Text>}
 
       <View style={styles.card}>
@@ -242,19 +311,23 @@ export function StationSettingsScreen({
           <Text style={styles.hint}>Nothing shown on the top bar yet.</Text>
         ) : (
           <View style={styles.topBarList}>
-            {topBarPoints.map(p => (
-              <Pressable
+            {topBarPoints.map((p, index) => (
+              <TopBarRow
                 key={p.key}
-                style={styles.topBarRow}
-                onPress={() => patchAndSave(p.key, {show_on_top_bar: false})}>
-                <Text style={styles.topBarRowLabel}>{p.label || p.key}</Text>
-                <Text style={styles.topBarRowValue}>{formatDataPointValue(p.value, p.decimals)}</Text>
-                <Icon name="close" size={13} color={theme.textMuted} strokeWidth={2.5} />
-              </Pressable>
+                point={p}
+                dragging={index === dragFrom}
+                translateY={index === dragFrom ? topBarDrag!.dy : topBarShift(index)}
+                onStart={() => setTopBarDrag({key: p.key, dy: 0})}
+                onMove={dy => setTopBarDrag(d => (d ? {...d, dy} : d))}
+                onEnd={endTopBarDrag}
+                onRemove={() => patchAndSave(p.key, {show_on_top_bar: false})}
+                styles={styles}
+                theme={theme}
+              />
             ))}
           </View>
         )}
-        <Text style={styles.hint}>Tap a button above to remove it from the top bar.</Text>
+        <Text style={styles.hint}>Drag by the handle to reorder, or tap ✕ to remove from the top bar.</Text>
 
         <View style={styles.divider} />
 
@@ -316,6 +389,67 @@ export function StationSettingsScreen({
 }
 
 const ROW_HEIGHT_ESTIMATE = 90;
+
+// Every top bar row is this tall (margin included), so a drag's distance maps
+// straight to a target slot without measuring rows.
+const TOP_BAR_ROW_HEIGHT = 44;
+
+function TopBarRow({
+  point,
+  dragging,
+  translateY,
+  onStart,
+  onMove,
+  onEnd,
+  onRemove,
+  styles,
+  theme,
+}: {
+  point: StationDataPoint;
+  dragging: boolean;
+  translateY: number;
+  onStart: () => void;
+  onMove: (dy: number) => void;
+  onEnd: () => void;
+  onRemove: () => void;
+  styles: ReturnType<typeof makeStyles>;
+  theme: Theme;
+}): React.JSX.Element {
+  // The responder is created once, so it calls through a ref to always reach
+  // the latest callbacks rather than the ones from the first render.
+  const handlers = useRef({onStart, onMove, onEnd});
+  handlers.current = {onStart, onMove, onEnd};
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => handlers.current.onStart(),
+      onPanResponderMove: (_evt, gesture) => handlers.current.onMove(gesture.dy),
+      onPanResponderRelease: () => handlers.current.onEnd(),
+      onPanResponderTerminate: () => handlers.current.onEnd(),
+      onPanResponderTerminationRequest: () => false,
+    }),
+  ).current;
+
+  return (
+    <View style={[styles.topBarRow, {transform: [{translateY}]}, dragging && styles.topBarRowDragging]}>
+      <View
+        {...panResponder.panHandlers}
+        style={styles.topBarHandle}
+        accessibilityLabel={`Drag ${point.label || point.key}`}>
+        <Icon name="drag-handle" size={16} color={theme.textMuted} />
+      </View>
+      <Text style={styles.topBarRowLabel} numberOfLines={1}>
+        {point.label || point.key}
+      </Text>
+      <Text style={styles.topBarRowValue}>{formatDataPointValue(point.value, point.decimals)}</Text>
+      <Pressable style={styles.topBarRemove} onPress={onRemove} accessibilityLabel="Remove from top bar">
+        <Icon name="close" size={13} color={theme.textMuted} strokeWidth={2.5} />
+      </Pressable>
+    </View>
+  );
+}
 
 function PointCard({
   point,
@@ -637,17 +771,36 @@ function makeStyles(theme: Theme) {
     dragHandle: {
       padding: 4,
     },
-    topBarList: {
-      gap: 6,
-    },
+    topBarList: {},
     topBarRow: {
+      height: TOP_BAR_ROW_HEIGHT - 6,
+      marginBottom: 6,
       flexDirection: 'row',
       alignItems: 'center',
       gap: 8,
-      paddingHorizontal: 10,
-      paddingVertical: 8,
+      paddingRight: 4,
       borderRadius: 6,
+      borderWidth: 1,
+      borderColor: 'transparent',
       backgroundColor: theme.surfaceAlt,
+    },
+    topBarRowDragging: {
+      zIndex: 10,
+      elevation: 6,
+      shadowColor: '#000',
+      shadowOpacity: 0.25,
+      shadowRadius: 6,
+      shadowOffset: {width: 0, height: 2},
+      borderColor: theme.primary,
+    },
+    topBarHandle: {
+      width: 36,
+      height: '100%',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    topBarRemove: {
+      padding: 8,
     },
     topBarRowLabel: {
       flex: 1,
