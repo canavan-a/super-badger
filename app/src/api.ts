@@ -191,9 +191,12 @@ export interface HistoryPage {
 }
 
 export function getStationHistory(id: number, before?: string, limit = 5): Promise<HistoryPage> {
-  const q = new URLSearchParams({limit: String(limit)});
-  if (before) q.set('before', before);
-  return request<HistoryPage>(`/stations/${id}/history?${q.toString()}`);
+  // Built by hand, not with URLSearchParams: React Native's (Hermes on
+  // Android) is only a partial stub — .set() throws "not implemented", which
+  // crashed the app the first time it fetched an older page.
+  let q = `limit=${limit}`;
+  if (before) q += `&before=${encodeURIComponent(before)}`;
+  return request<HistoryPage>(`/stations/${id}/history?${q}`);
 }
 
 export function listProviders(): Promise<OpencodeProvidersResponse> {

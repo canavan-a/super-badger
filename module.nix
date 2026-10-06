@@ -129,7 +129,7 @@ in
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
-        ExecStart = "${pkgs.mullvad-vpn}/bin/mullvad lan set ${if cfg.mullvad.allowLan then "allow" else "block"}";
+        ExecStart = "${config.services.mullvad-vpn.package}/bin/mullvad lan set ${if cfg.mullvad.allowLan then "allow" else "block"}";
         # after/wants above only order this against mullvad-daemon.service's
         # own start, not against its RPC socket actually being ready —
         # `mullvad lan set` can still lose that race and fail with "transport
@@ -229,7 +229,7 @@ in
         SUPERBADGER_METRICS_URL = cfg.metrics.url;
         SUPERBADGER_METRICS_INTERVAL = cfg.metrics.interval;
       } // lib.optionalAttrs cfg.mullvad.enable {
-        SUPERBADGER_MULLVAD_BIN = "${pkgs.mullvad-vpn}/bin/mullvad";
+        SUPERBADGER_MULLVAD_BIN = "${config.services.mullvad-vpn.package}/bin/mullvad";
       } // lib.optionalAttrs cfg.web.enable {
         SUPERBADGER_STATIC_DIR = webDir;
         SUPERBADGER_STATIC_LISTEN_ADDR = cfg.web.listenAddr;
