@@ -32,6 +32,11 @@ export interface Station {
   // unlike status, this reflects whether the model is answering *right now*,
   // not whether a session was created at some point in the past.
   reachable: boolean;
+  // Set from Settings → Stations: hidden stations stay configured but are
+  // left off the home list, drawer and swipe rotation; `position` is the
+  // owner's chosen order (the server already returns stations sorted by it).
+  hidden: boolean;
+  position: number;
   created_at: string;
   updated_at: string;
 }
@@ -78,6 +83,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function listStations(): Promise<Station[]> {
   return request<Station[]>('/stations');
+}
+
+// Saves Settings → Stations in one call: `active` in display/rotation order,
+// then `hidden` (still configured, just off the home list, drawer and swipe
+// rotation). See server/database's UpdateStationLayout.
+export function updateStationLayout(active: number[], hidden: number[]): Promise<void> {
+  return request<void>('/stations/layout', {
+    method: 'PUT',
+    body: JSON.stringify({active, hidden}),
+  });
 }
 
 // Checks superbadger itself, not opencode or any station's model — a plain
@@ -175,7 +190,7 @@ export interface HistoryPage {
   hasMore: boolean;
 }
 
-export function getStationHistory(id: number, before?: string, limit = 20): Promise<HistoryPage> {
+export function getStationHistory(id: number, before?: string, limit = 5): Promise<HistoryPage> {
   const q = new URLSearchParams({limit: String(limit)});
   if (before) q.set('before', before);
   return request<HistoryPage>(`/stations/${id}/history?${q.toString()}`);

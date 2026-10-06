@@ -186,7 +186,7 @@ func (m *chatModel) pollTick() tea.Cmd {
 // historyPageSize is how many messages one history fetch carries. The whole
 // server cache can be several MB of tool output, so opening a station only
 // pulls the newest page; older ones follow on scroll-up (see loadOlder).
-const historyPageSize = 20
+const historyPageSize = 5
 
 func (m *chatModel) fetchHistory(before string) tea.Cmd {
 	c, id, gen := m.client, m.station.ID, m.gen
@@ -285,6 +285,13 @@ func (m *chatModel) Update(msg tea.Msg) tea.Cmd {
 			m.state.Seed(msg.page.Events)
 		}
 		m.dirty = true
+		// Pages are small, so one may not fill the screen — then there's
+		// nothing to scroll and loadOlder's scroll trigger is unreachable.
+		// Keep pulling pages until the transcript overflows or runs out.
+		if m.histMore && !m.loadingOlder && lipgloss.Height(m.transcript()) <= m.vp.Height {
+			m.loadingOlder = true
+			return m.fetchHistory(m.histCursor)
+		}
 	case dpMsg:
 		sort.SliceStable(msg.dps, func(i, j int) bool {
 			if msg.dps[i].Order != msg.dps[j].Order {

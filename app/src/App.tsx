@@ -80,6 +80,9 @@ function AppInner(): React.JSX.Element {
   // null = "haven't checked yet" — deliberately distinct from false, so the
   // banner doesn't flash on for an instant on every fresh load.
   const [serverOnline, setServerOnline] = useState<boolean | null>(null);
+  // Hidden stations (Settings → Stations) stay configured but are left off
+  // the home list, the drawer and swipe rotation.
+  const visibleStations = useMemo(() => stations.filter(s => !s.hidden), [stations]);
   const [headerInfo, setHeaderInfo] = useState<HeaderInfo | null>(null);
 
   const refreshStations = useCallback(() => {
@@ -231,7 +234,10 @@ function AppInner(): React.JSX.Element {
   // react-native-gesture-handler/reanimated — those need native
   // linking/rebuild, which is a lot of new surface for one gesture when the
   // built-in APIs already cover it.
-  const orderedStations = useMemo(() => [...stations].sort((a, b) => a.id - b.id), [stations]);
+  //
+  // Rotation follows the owner's order from Settings → Stations (the server
+  // returns stations already sorted by it) and skips hidden stations.
+  const orderedStations = visibleStations;
   const currentStationIndex =
     route.name === 'stationDetail' ? orderedStations.findIndex(s => s.id === route.id) : -1;
   const screenWidth = Dimensions.get('window').width;
@@ -427,7 +433,7 @@ function AppInner(): React.JSX.Element {
         style={[styles.body, {transform: [{translateX: swipeX}]}]}
         {...panResponder.panHandlers}>
         {route.name === 'stations' && (
-          <StationsHomeScreen stations={stations} loading={loading} onNavigate={navigate} />
+          <StationsHomeScreen stations={visibleStations} loading={loading} onNavigate={navigate} />
         )}
         {route.name === 'stationDetail' && (
           // Keyed by stationId so navigating from one station's chat straight
@@ -455,7 +461,7 @@ function AppInner(): React.JSX.Element {
       </Animated.View>
 
       <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)}>
-        <StationsDrawerContent stations={stations} loading={loading} onNavigate={navigate} />
+        <StationsDrawerContent stations={visibleStations} loading={loading} onNavigate={navigate} />
       </Drawer>
     </SafeAreaView>
   );

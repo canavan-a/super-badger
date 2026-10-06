@@ -493,6 +493,7 @@ function ChatList({
   // Tracking the actual measured height here and scrolling straight to that
   // offset (not "end") avoids depending on that internal state at all.
   const contentHeight = useRef(0);
+  const listHeight = useRef(0);
   // Mirrors isNearBottom into render state (only on actual crossings, not
   // every onScroll tick) so the floating "Jump to bottom" button can appear.
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
@@ -603,6 +604,19 @@ function ChatList({
     });
   };
 
+  // History pages are small (a handful of messages), so the first one can
+  // be shorter than the screen — then there's nothing to scroll, onScroll
+  // never fires, and handleScroll's load-older trigger could never be
+  // reached. Keep pulling older pages until the list overflows or the
+  // server runs out. useStationChat's loadOlder ignores calls while a
+  // fetch is in flight, so firing this on every size/layout change is safe.
+  const fillViewport = () => {
+    if (!hasMoreHistory || loadingOlder || hasMoreAbove) return;
+    if (listHeight.current === 0 || contentHeight.current > listHeight.current) return;
+    setVisibleCount(v => v + CHAT_PAGE_SIZE);
+    onLoadOlder();
+  };
+
   const jumpToBottom = () => {
     isNearBottom.current = true;
     setShowJumpToBottom(false);
@@ -659,8 +673,13 @@ function ChatList({
         onContentSizeChange={(_w, h) => {
           contentHeight.current = h;
           followBottom();
+          fillViewport();
         }}
-        onLayout={() => followBottom()}
+        onLayout={e => {
+          listHeight.current = e.nativeEvent.layout.height;
+          followBottom();
+          fillViewport();
+        }}
         ListHeaderComponent={
           loadingOlder ? <ActivityIndicator style={styles.olderSpinner} size="small" color={theme.textMuted} /> : null
         }

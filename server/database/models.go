@@ -41,8 +41,14 @@ type Station struct {
 	Agent             string        `gorm:"not null" json:"agent"`
 	OpencodeSessionID string        `json:"opencode_session_id"`
 	Status            StationStatus `gorm:"not null;default:idle" json:"status"`
-	CreatedAt         time.Time     `json:"created_at"`
-	UpdatedAt         time.Time     `json:"updated_at"`
+	// Hidden keeps a Station configured but off the app's home list, drawer
+	// and swipe rotation; Position is its owner-chosen order in those. Both
+	// are set together from the app's Settings → Stations tab (see
+	// UpdateStationLayout).
+	Hidden    bool      `gorm:"not null;default:false" json:"hidden"`
+	Position  int       `gorm:"not null;default:0" json:"position"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // MetricSource is one external "Super Badger Station Standard API" endpoint
@@ -110,14 +116,48 @@ type DataPointSetting struct {
 	HiddenSinceUpdatedAt *time.Time `json:"-"`
 }
 
+// CreateStation appends s after every existing Station in display order.
 func CreateStation(db *gorm.DB, s *Station) error {
+	var maxPos int
+	if err := db.Model(&Station{}).Select("COALESCE(MAX(position), 0)").Scan(&maxPos).Error; err != nil {
+		return err
+	}
+	s.Position = maxPos + 1
 	return db.Create(s).Error
 }
 
+// ListStations returns every Station, hidden ones included, in the owner's
+// chosen order (id breaks ties, e.g. between rows that predate ordering).
 func ListStations(db *gorm.DB) ([]Station, error) {
 	var stations []Station
-	err := db.Order("name").Find(&stations).Error
+	err := db.Order("position, id").Find(&stations).Error
 	return stations, err
+}
+
+// UpdateStationLayout sets the display order and hidden flag of every listed
+// Station in one transaction: active IDs come first in the given order, then
+// hidden IDs in theirs. Stations not listed keep their current values, so a
+// client working from a slightly stale list can't drop a just-created one.
+func UpdateStationLayout(db *gorm.DB, active, hidden []uint) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		pos := 0
+		for _, group := range []struct {
+			ids    []uint
+			hidden bool
+		}{{active, false}, {hidden, true}} {
+			for _, id := range group.ids {
+				pos++
+				err := tx.Model(&Station{}).Where("id = ?", id).Updates(map[string]any{
+					"position": pos,
+					"hidden":   group.hidden,
+				}).Error
+				if err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
 }
 
 func GetStation(db *gorm.DB, id uint) (Station, error) {

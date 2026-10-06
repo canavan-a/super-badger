@@ -173,8 +173,9 @@ func (a *App) openStation(id uint) tea.Cmd {
 	return a.chat.Init()
 }
 
-// swap moves to the next/previous station by ascending id, wrapping — the
-// same order the app's edge-swipe uses.
+// swap moves to the next/previous station in the owner's order (hidden ones
+// are already filtered out), wrapping — the same order the app's edge-swipe
+// uses.
 func (a *App) swap(dir int) tea.Cmd {
 	if a.chat == nil || len(a.stations) < 2 {
 		return nil
@@ -460,7 +461,7 @@ func (a *App) onStations(m stationsMsg) tea.Cmd {
 		return nil
 	}
 	a.loadErr = ""
-	a.stations = sortedByID(m.list)
+	a.stations = m.list
 	if p, ok := a.sub.(*pickerModel); ok {
 		p.setStations(m.list)
 		p.err = ""

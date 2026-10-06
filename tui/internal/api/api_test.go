@@ -98,3 +98,17 @@ func TestCompactOutlastsTheNormalRequestTimeout(t *testing.T) {
 		t.Fatalf("compact must not use the ordinary timeout: %v", err)
 	}
 }
+
+func TestListStationsSkipsHiddenAndKeepsServerOrder(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, `[{"id":3,"name":"c"},{"id":1,"name":"a","hidden":true},{"id":2,"name":"b","hidden":false}]`)
+	}))
+	defer srv.Close()
+	got, err := New(srv.URL, "").ListStations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].ID != 3 || got[1].ID != 2 {
+		t.Fatalf("got %+v, want visible stations 3,2 in server order", got)
+	}
+}

@@ -30,6 +30,7 @@ type Station struct {
 	OpencodeSessionID string   `json:"opencode_session_id"`
 	Status            string   `json:"status"`
 	Reachable         bool     `json:"reachable"`
+	Hidden            bool     `json:"hidden"`
 }
 
 func (s Station) HasAction(a string) bool {
@@ -198,9 +199,22 @@ func esc(s string) string { return url.PathEscape(s) }
 
 func (c *Client) Health() bool { return c.do("GET", "/health", nil, nil) == nil }
 
-func (c *Client) ListStations() (out []Station, err error) {
-	err = c.do("GET", "/stations", nil, &out)
-	return
+// ListStations returns the visible stations in the owner's order (set from
+// the app's Settings → Station settings; the server sorts by it). Hidden
+// stations stay configured server-side but the TUI never lists, opens or
+// rotates through them, matching the app.
+func (c *Client) ListStations() ([]Station, error) {
+	var all []Station
+	if err := c.do("GET", "/stations", nil, &all); err != nil {
+		return nil, err
+	}
+	out := make([]Station, 0, len(all))
+	for _, s := range all {
+		if !s.Hidden {
+			out = append(out, s)
+		}
+	}
+	return out, nil
 }
 
 func (c *Client) GetStation(id uint) (out Station, err error) {

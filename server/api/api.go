@@ -45,6 +45,7 @@ func NewRouter(svc *station.Service, oc *opencode.Client, mv *mullvad.Client, br
 
 	r.POST("/stations", createStation(svc))
 	r.GET("/stations", listStations(svc))
+	r.PUT("/stations/layout", updateStationLayout(db))
 	r.GET("/stations/:id", getStation(svc))
 	r.PATCH("/stations/:id", updateStation(svc))
 	r.DELETE("/stations/:id", deleteStation(svc))
@@ -369,7 +370,7 @@ func stationUsage(svc *station.Service) gin.HandlerFunc {
 // /history page carries — a single tool-heavy message can be tens of KB of
 // part snapshots, so the page size is what keeps a station open fast.
 const (
-	historyPageDefault = 20
+	historyPageDefault = 5
 	historyPageMax     = 100
 )
 
@@ -568,5 +569,26 @@ func mullvadSetLAN(mv *mullvad.Client) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{"output": out})
+	}
+}
+
+// updateStationLayout saves the app's Settings → Stations tab in one call:
+// the active list's order (home list, drawer, swipe rotation) and which
+// Stations are hidden from all of those — see database.UpdateStationLayout.
+func updateStationLayout(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var body struct {
+			Active []uint `json:"active"`
+			Hidden []uint `json:"hidden"`
+		}
+		if err := c.ShouldBindJSON(&body); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := database.UpdateStationLayout(db, body.Active, body.Hidden); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.Status(http.StatusNoContent)
 	}
 }

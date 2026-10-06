@@ -23,15 +23,28 @@ import {
   runUpdate,
 } from '../appUpdater';
 import {MetricSourcesSettings} from '../components/MetricSourcesSettings';
+import {StationLayoutSettings} from '../components/StationLayoutSettings';
 import {VpnSettings} from '../components/VpnSettings';
 import {settingsStore} from '../settings';
 import {THEME_OPTIONS, Theme, useThemeSetting} from '../theme';
+
+type SettingsTab = 'general' | 'stations';
+
+const SETTINGS_TABS: {key: SettingsTab; label: string}[] = [
+  {key: 'general', label: 'General settings'},
+  {key: 'stations', label: 'Station settings'},
+];
 
 type TestState = {status: 'idle'} | {status: 'testing'} | {status: 'ok'} | {status: 'error'; message: string};
 
 export function SettingsScreen(): React.JSX.Element {
   const {theme, themeName, setThemeName} = useThemeSetting();
   const styles = makeStyles(theme);
+
+  const [tab, setTab] = useState<SettingsTab>('general');
+  // Off while a station row is being dragged on the Stations tab, so the drag
+  // isn't fought over by (or turned into) a scroll.
+  const [scrollEnabled, setScrollEnabled] = useState(true);
 
   const [serverUrl, setServerUrl] = useState('');
   const [authToken, setAuthToken] = useState('');
@@ -221,183 +234,202 @@ export function SettingsScreen(): React.JSX.Element {
   };
 
   return (
-    <ScrollView style={styles.scroll} contentContainerStyle={styles.container}>
+    <ScrollView style={styles.scroll} contentContainerStyle={styles.container} scrollEnabled={scrollEnabled}>
       <Text style={styles.title}>Settings</Text>
 
-      <Text style={styles.title2}>Appearance</Text>
-      <View style={styles.themeRow}>
-        {THEME_OPTIONS.map(opt => (
+      <View style={styles.tabBar}>
+        {SETTINGS_TABS.map(t => (
           <Pressable
-            key={opt.name}
-            style={[styles.themeSwatch, themeName === opt.name && styles.themeSwatchActive]}
-            onPress={() => setThemeName(opt.name)}>
-            <View style={styles.themeSwatchColors}>
-              <View style={[styles.themeSwatchDot, {backgroundColor: THEME_PREVIEW[opt.name].bg}]} />
-              <View style={[styles.themeSwatchDot, {backgroundColor: THEME_PREVIEW[opt.name].primary}]} />
-            </View>
-            <Text style={styles.themeSwatchLabel}>{opt.label}</Text>
+            key={t.key}
+            style={[styles.tab, tab === t.key && styles.tabActive]}
+            onPress={() => setTab(t.key)}
+            accessibilityRole="tab"
+            accessibilityState={{selected: tab === t.key}}>
+            <Text style={[styles.tabText, tab === t.key && styles.tabTextActive]}>{t.label}</Text>
           </Pressable>
         ))}
       </View>
 
-      <View style={styles.rowBetween}>
-        <View style={styles.rowBetweenText}>
-          <Text style={styles.label}>Launch animation</Text>
-          <Text style={styles.hint}>
-            The animated logo shown when the app opens. Takes effect next launch.
-            {splashAutoDisabled
-              ? ' It was turned off automatically because it didn\'t finish on two launches in a row — turn it back on to try again.'
-              : ''}
-          </Text>
-        </View>
-        <Switch value={launchSplash} onValueChange={toggleLaunchSplash} />
-      </View>
-
-      {Platform.OS === 'android' && (
-        <View style={styles.rowBetween}>
-          <View style={styles.rowBetweenText}>
-            <Text style={styles.label}>Match app icon to theme</Text>
-            <Text style={styles.hint}>
-              Changes the launcher icon to the one for your theme. It switches when you leave the app,
-              and some launchers take a moment to refresh (or briefly drop a home-screen shortcut) —
-              turn this off if yours does.
-            </Text>
-          </View>
-          <Switch value={themedIcon} onValueChange={toggleThemedIcon} />
-        </View>
-      )}
-
-      <View style={styles.divider} />
-
-      <View style={styles.field}>
-        <Text style={styles.label}>Server origin</Text>
-        <TextInput
-          style={styles.input}
-          value={serverUrl}
-          onChangeText={setServerUrl}
-          placeholder="http://localhost:8080"
-          placeholderTextColor={theme.textMuted}
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
-        <Text style={styles.hint}>
-          Base URL for the superbadger API. Android emulators can't reach
-          "localhost" on the host — use 10.0.2.2 there, or the host's LAN IP
-          for a physical device.
-        </Text>
-
-        <View style={styles.testRow}>
-          <Pressable
-            style={styles.testButton}
-            onPress={() => testConnection(serverUrl)}
-            disabled={testState.status === 'testing'}>
-            {testState.status === 'testing' ? (
-              <ActivityIndicator size="small" color={theme.text} />
-            ) : (
-              <Text style={styles.testButtonText}>Test Connection</Text>
-            )}
-          </Pressable>
-          {testState.status === 'ok' && <Text style={styles.testOk}>✓ Reachable</Text>}
-          {testState.status === 'error' && (
-            <Text style={styles.testError} numberOfLines={1}>
-              ✗ {testState.message}
-            </Text>
-          )}
-        </View>
-      </View>
-
-      <View style={styles.field}>
-        <Text style={styles.label}>Auth token</Text>
-        <TextInput
-          style={styles.input}
-          value={authToken}
-          onChangeText={setAuthToken}
-          placeholder="(none yet — server has no auth)"
-          placeholderTextColor={theme.textMuted}
-          autoCapitalize="none"
-          autoCorrect={false}
-          secureTextEntry
-        />
-        <Text style={styles.hint}>
-          Sent as "Authorization: Bearer …" once the server supports it — safe
-          to leave blank for now.
-        </Text>
-      </View>
-
-      <Pressable style={styles.button} onPress={save}>
-        <Text style={styles.buttonText}>{saved ? 'Saved' : 'Save'}</Text>
-      </Pressable>
-
-      {Platform.OS === 'android' && (
+      {tab === 'stations' ? (
+        <StationLayoutSettings onDragChange={dragging => setScrollEnabled(!dragging)} />
+      ) : (
         <>
-          <View style={styles.divider} />
-          <Text style={styles.title2}>App updates</Text>
+          <Text style={styles.title2}>Appearance</Text>
+          <View style={styles.themeRow}>
+            {THEME_OPTIONS.map(opt => (
+              <Pressable
+                key={opt.name}
+                style={[styles.themeSwatch, themeName === opt.name && styles.themeSwatchActive]}
+                onPress={() => setThemeName(opt.name)}>
+                <View style={styles.themeSwatchColors}>
+                  <View style={[styles.themeSwatchDot, {backgroundColor: THEME_PREVIEW[opt.name].bg}]} />
+                  <View style={[styles.themeSwatchDot, {backgroundColor: THEME_PREVIEW[opt.name].primary}]} />
+                </View>
+                <Text style={styles.themeSwatchLabel}>{opt.label}</Text>
+              </Pressable>
+            ))}
+          </View>
 
-          <Pressable onPress={checkForUpdates} disabled={checkingUpdates}>
-            <Text style={styles.hint}>
-              {checkingUpdates
-                ? 'Checking…'
-                : latestRelease
-                ? updateAvailable
-                  ? `Update available: v${latestRelease.version}`
-                  : `Up to date (v${latestRelease.version})`
-                : `Current version: ${version ?? '…'}`}
-            </Text>
-          </Pressable>
-
-          {latestRelease && (
-            <Pressable
-              style={[styles.button, updateBusy && styles.buttonDisabled]}
-              disabled={updateBusy}
-              onPress={installUpdate}>
-              <Text style={styles.buttonText}>
-                {updateBusy ? 'Working…' : updateAvailable ? `Update to v${latestRelease.version}` : 'Reinstall current version'}
-              </Text>
-            </Pressable>
-          )}
-
-          {updateStatus && <Text style={styles.hint}>{updateStatus}</Text>}
-
-          <View style={styles.divider} />
-          <Text style={styles.title2}>Background notifications</Text>
           <View style={styles.rowBetween}>
             <View style={styles.rowBetweenText}>
-              <Text style={styles.label}>Notify on agent idle / permission requests</Text>
+              <Text style={styles.label}>Launch animation</Text>
               <Text style={styles.hint}>
-                Keeps a background connection open (a persistent notification while active) so you're
-                notified when an agent finishes responding or needs a permission decision, even with
-                the app closed.
+                The animated logo shown when the app opens. Takes effect next launch.
+                {splashAutoDisabled
+                  ? ' It was turned off automatically because it didn\'t finish on two launches in a row — turn it back on to try again.'
+                  : ''}
               </Text>
             </View>
-            <Switch value={bgNotifications} onValueChange={toggleBgNotifications} disabled={bgNotifBusy} />
+            <Switch value={launchSplash} onValueChange={toggleLaunchSplash} />
           </View>
 
-          <View style={styles.testRow}>
-            <Pressable style={styles.testButton} onPress={recheckPermission} disabled={permBusy}>
-              {permBusy ? (
-                <ActivityIndicator size="small" color={theme.text} />
-              ) : (
-                <Text style={styles.testButtonText}>Re-check notification permission</Text>
+          {Platform.OS === 'android' && (
+            <View style={styles.rowBetween}>
+              <View style={styles.rowBetweenText}>
+                <Text style={styles.label}>Match app icon to theme</Text>
+                <Text style={styles.hint}>
+                  Changes the launcher icon to the one for your theme. It switches when you leave the app,
+                  and some launchers take a moment to refresh (or briefly drop a home-screen shortcut) —
+                  turn this off if yours does.
+                </Text>
+              </View>
+              <Switch value={themedIcon} onValueChange={toggleThemedIcon} />
+            </View>
+          )}
+
+          <View style={styles.divider} />
+
+          <View style={styles.field}>
+            <Text style={styles.label}>Server origin</Text>
+            <TextInput
+              style={styles.input}
+              value={serverUrl}
+              onChangeText={setServerUrl}
+              placeholder="http://localhost:8080"
+              placeholderTextColor={theme.textMuted}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <Text style={styles.hint}>
+              Base URL for the superbadger API. Android emulators can't reach
+              "localhost" on the host — use 10.0.2.2 there, or the host's LAN IP
+              for a physical device.
+            </Text>
+
+            <View style={styles.testRow}>
+              <Pressable
+                style={styles.testButton}
+                onPress={() => testConnection(serverUrl)}
+                disabled={testState.status === 'testing'}>
+                {testState.status === 'testing' ? (
+                  <ActivityIndicator size="small" color={theme.text} />
+                ) : (
+                  <Text style={styles.testButtonText}>Test Connection</Text>
+                )}
+              </Pressable>
+              {testState.status === 'ok' && <Text style={styles.testOk}>✓ Reachable</Text>}
+              {testState.status === 'error' && (
+                <Text style={styles.testError} numberOfLines={1}>
+                  ✗ {testState.message}
+                </Text>
               )}
-            </Pressable>
-            {permStatus === 'Allowed' && <Text style={styles.testOk}>✓ {permStatus}</Text>}
-            {permStatus && permStatus !== 'Allowed' && <Text style={styles.testError}>✗ {permStatus}</Text>}
+            </View>
           </View>
 
-          <Pressable style={styles.testButton} onPress={() => Linking.openSettings()}>
-            <Text style={styles.testButtonText}>Battery optimization settings</Text>
+          <View style={styles.field}>
+            <Text style={styles.label}>Auth token</Text>
+            <TextInput
+              style={styles.input}
+              value={authToken}
+              onChangeText={setAuthToken}
+              placeholder="(none yet — server has no auth)"
+              placeholderTextColor={theme.textMuted}
+              autoCapitalize="none"
+              autoCorrect={false}
+              secureTextEntry
+            />
+            <Text style={styles.hint}>
+              Sent as "Authorization: Bearer …" once the server supports it — safe
+              to leave blank for now.
+            </Text>
+          </View>
+
+          <Pressable style={styles.button} onPress={save}>
+            <Text style={styles.buttonText}>{saved ? 'Saved' : 'Save'}</Text>
           </Pressable>
+
+          {Platform.OS === 'android' && (
+            <>
+              <View style={styles.divider} />
+              <Text style={styles.title2}>App updates</Text>
+
+              <Pressable onPress={checkForUpdates} disabled={checkingUpdates}>
+                <Text style={styles.hint}>
+                  {checkingUpdates
+                    ? 'Checking…'
+                    : latestRelease
+                    ? updateAvailable
+                      ? `Update available: v${latestRelease.version}`
+                      : `Up to date (v${latestRelease.version})`
+                    : `Current version: ${version ?? '…'}`}
+                </Text>
+              </Pressable>
+
+              {latestRelease && (
+                <Pressable
+                  style={[styles.button, updateBusy && styles.buttonDisabled]}
+                  disabled={updateBusy}
+                  onPress={installUpdate}>
+                  <Text style={styles.buttonText}>
+                    {updateBusy ? 'Working…' : updateAvailable ? `Update to v${latestRelease.version}` : 'Reinstall current version'}
+                  </Text>
+                </Pressable>
+              )}
+
+              {updateStatus && <Text style={styles.hint}>{updateStatus}</Text>}
+
+              <View style={styles.divider} />
+              <Text style={styles.title2}>Background notifications</Text>
+              <View style={styles.rowBetween}>
+                <View style={styles.rowBetweenText}>
+                  <Text style={styles.label}>Notify on agent idle / permission requests</Text>
+                  <Text style={styles.hint}>
+                    Keeps a background connection open (a persistent notification while active) so you're
+                    notified when an agent finishes responding or needs a permission decision, even with
+                    the app closed.
+                  </Text>
+                </View>
+                <Switch value={bgNotifications} onValueChange={toggleBgNotifications} disabled={bgNotifBusy} />
+              </View>
+
+              <View style={styles.testRow}>
+                <Pressable style={styles.testButton} onPress={recheckPermission} disabled={permBusy}>
+                  {permBusy ? (
+                    <ActivityIndicator size="small" color={theme.text} />
+                  ) : (
+                    <Text style={styles.testButtonText}>Re-check notification permission</Text>
+                  )}
+                </Pressable>
+                {permStatus === 'Allowed' && <Text style={styles.testOk}>✓ {permStatus}</Text>}
+                {permStatus && permStatus !== 'Allowed' && <Text style={styles.testError}>✗ {permStatus}</Text>}
+              </View>
+
+              <Pressable style={styles.testButton} onPress={() => Linking.openSettings()}>
+                <Text style={styles.testButtonText}>Battery optimization settings</Text>
+              </Pressable>
+            </>
+          )}
+
+          <View style={styles.divider} />
+
+          <Text style={styles.title2}>Super Badger API sources</Text>
+          <MetricSourcesSettings />
+
+          <View style={styles.divider} />
+
+          <VpnSettings />
         </>
       )}
-
-      <View style={styles.divider} />
-
-      <Text style={styles.title2}>Super Badger API sources</Text>
-      <MetricSourcesSettings />
-
-      <View style={styles.divider} />
-
-      <VpnSettings />
     </ScrollView>
   );
 }
@@ -434,6 +466,31 @@ function makeStyles(theme: Theme) {
       fontSize: 15,
       fontWeight: '700',
       marginBottom: 10,
+      color: theme.text,
+    },
+    tabBar: {
+      flexDirection: 'row',
+      gap: 6,
+      padding: 4,
+      borderRadius: 10,
+      backgroundColor: theme.surfaceAlt,
+      marginBottom: 20,
+    },
+    tab: {
+      flex: 1,
+      alignItems: 'center',
+      paddingVertical: 8,
+      borderRadius: 8,
+    },
+    tabActive: {
+      backgroundColor: theme.surface,
+    },
+    tabText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: theme.textMuted,
+    },
+    tabTextActive: {
       color: theme.text,
     },
     themeRow: {

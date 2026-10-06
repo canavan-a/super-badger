@@ -37,12 +37,6 @@ type (
 	}
 )
 
-func sortedByID(in []api.Station) []api.Station {
-	out := append([]api.Station(nil), in...)
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out
-}
-
 type pickerModel struct {
 	client   *api.Client
 	st       Styles
@@ -70,8 +64,7 @@ func newPicker(c *api.Client, st Styles, stations []api.Station, current uint) *
 }
 
 func (p *pickerModel) setStations(list []api.Station) {
-	p.stations = list
-	sort.Slice(p.stations, func(i, j int) bool { return p.stations[i].Name < p.stations[j].Name })
+	p.stations = list // already in the owner's order, hidden ones excluded
 	for i, s := range p.stations {
 		if s.ID == p.current {
 			p.cursor = i
