@@ -6,5 +6,6 @@ export type Route =
   | {name: 'stations'}
   | {name: 'stationDetail'; id: number}
   | {name: 'stationSettings'; id: number}
+  | {name: 'commands'}
   | {name: 'addStation'}
   | {name: 'settings'};

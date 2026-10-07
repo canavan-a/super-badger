@@ -399,3 +399,32 @@ export function updateMetricSource(
 export function deleteMetricSource(id: number): Promise<void> {
   return request<void>(`/metric-sources/${id}`, {method: 'DELETE'});
 }
+
+// Commands ride inside each metric endpoint's per-station JSON object
+// (the `commands` section — see docs/command-spec.md). They're actions,
+// not measurements: the server POSTs to the resolved target and streams
+// the response back, so a slow command (model toggles run up to ~60s) can
+// report progress instead of looking like one opaque wait.
+export interface Command {
+  station_id: number;
+  station_name: string;
+  station_color: string;
+  path: string;
+  label: string;
+  url: string;
+}
+
+export function listCommands(): Promise<Command[]> {
+  return request<Command[]>('/commands');
+}
+
+// invokeCommand asks the server to POST to the command's resolved URL.
+// While a call is in flight the button stays disabled — a second tap
+// mid-flight would double-fire the underlying action (e.g. toggling a
+// model that's already toggling).
+export function invokeCommand(stationId: number, path: string): Promise<unknown> {
+  return request<unknown>('/commands/invoke', {
+    method: 'POST',
+    body: JSON.stringify({station_id: stationId, path}),
+  });
+}
