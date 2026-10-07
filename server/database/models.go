@@ -414,3 +414,25 @@ func QueryDataPointHistoryBuckets(db *gorm.DB, stationID uint, key string, since
 func PruneDataPointHistory(db *gorm.DB, cutoffUnix int64) error {
 	return db.Where("recorded_at < ?", cutoffUnix).Delete(&StationDataPointHistory{}).Error
 }
+
+// StationCommand is one action a MetricSource advertises for a Station (the
+// `commands` section — see docs/command-spec.md). One row per (station,
+// path); the poller rewrites a station's rows wholesale each tick, so
+// commands an endpoint stops advertising disappear.
+type StationCommand struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	StationID uint      `gorm:"uniqueIndex:idx_commands_station_path;not null" json:"station_id"`
+	SourceID  *uint     `json:"source_id,omitempty"`
+	Path      string    `gorm:"uniqueIndex:idx_commands_station_path;not null" json:"path"`
+	Label     string    `gorm:"not null;default:''" json:"label"`
+	URL       string    `gorm:"not null" json:"url"`
+	UpdatedAt time.Time `gorm:"not null" json:"updated_at"`
+}
+
+func (StationCommand) TableName() string { return "commands" }
+
+func ListStationCommands(db *gorm.DB) ([]StationCommand, error) {
+	var cmds []StationCommand
+	err := db.Order("station_id, path").Find(&cmds).Error
+	return cmds, err
+}
