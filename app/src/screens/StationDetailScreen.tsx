@@ -28,6 +28,7 @@ import {
   TokenUsage,
 } from '../api';
 import {allTurns, ChatState, Part, PendingPermission, PendingQuestion, Turn} from '../chat';
+import {DiggingSpinner} from '../components/DiggingSpinner';
 import {Icon} from '../components/Icon';
 import {CodeBlockSegment, parseMarkdown} from '../markdown';
 import {platformConfirm} from '../platformConfirm';
@@ -923,18 +924,20 @@ const TurnView = React.memo(function TurnView({
       {turn.partOrder.map(id => (
         <PartView key={id} part={turn.parts[id]} styles={styles} theme={theme} />
       ))}
-      {turn.partOrder.length === 0 &&
-        (isCompactionReply ? (
-          // Compact (button, or opencode auto-compacting on its own) creates
-          // its own empty turn pair on the wire with no parts ever streamed
-          // into it — so without this it rendered as an indefinite bare
-          // spinner with nothing to explain it ("a blank dot chat"). A
-          // normal in-flight reply's spinner (real content on the way) is
-          // unaffected by this check.
-          <Text style={styles.chip}>⚙ Compaction triggered</Text>
-        ) : (
-          !turn.done && <ActivityIndicator size="small" color={theme.textMuted} />
-        ))}
+      {isCompactionReply ? (
+        // Compact (button, or opencode auto-compacting on its own) creates
+        // its own empty turn pair on the wire with no parts ever streamed
+        // into it — so without this it rendered as an indefinite bare
+        // spinner with nothing to explain it ("a blank dot chat"). A
+        // normal in-flight reply's spinner (real content on the way) is
+        // unaffected by this check.
+        <Text style={styles.chip}>⚙ Compaction triggered</Text>
+      ) : (
+        // Stays at the tail of the bubble for the whole reply, not just
+        // before the first part — so it's still visible under a long
+        // streamed Thinking block.
+        !turn.done && <DiggingSpinner />
+      )}
     </View>
   );
 });

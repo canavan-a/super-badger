@@ -1,6 +1,7 @@
 package database
 
 import (
+	"encoding/json"
 	"strconv"
 	"time"
 
@@ -198,8 +199,15 @@ func UpdateMetricSource(db *gorm.DB, id uint, updates map[string]any) error {
 	return db.Model(&MetricSource{}).Where("id = ?", id).Updates(updates).Error
 }
 
+// DeleteMetricSource also drops the source's commands — they're only
+// reachable through the source, so they'd otherwise linger as dead buttons.
 func DeleteMetricSource(db *gorm.DB, id uint) error {
-	return db.Delete(&MetricSource{}, id).Error
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("source_id = ?", id).Delete(&Command{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&MetricSource{}, id).Error
+	})
 }
 
 // UpsertStationDataPoint writes the latest value for one (station, key) pair,
@@ -413,4 +421,65 @@ func QueryDataPointHistoryBuckets(db *gorm.DB, stationID uint, key string, since
 // TimescaleDB's drop_chunks() retention policy (see the migration's comment).
 func PruneDataPointHistory(db *gorm.DB, cutoffUnix int64) error {
 	return db.Where("recorded_at < ?", cutoffUnix).Delete(&StationDataPointHistory{}).Error
+}
+
+// Command is one action a MetricSource advertises on its commands endpoint
+// (see docs/command-spec.md). Commands belong to the source — the badger
+// API box as a whole — not to any one Station. One row per (source, path);
+// the poller rewrites a source's rows wholesale each tick (see
+// ReplaceSourceCommands), so commands an endpoint stops advertising
+// disappear. Position keeps the endpoint's own ordering; Group, Active,
+// Confirm and Options are the spec's display hints, with Options stored as
+// the JSON array of {value,label,active} a picker command offers.
+type Command struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	SourceID  uint      `gorm:"uniqueIndex:idx_commands_source_path;not null" json:"source_id"`
+	Path      string    `gorm:"uniqueIndex:idx_commands_source_path;not null" json:"path"`
+	Label     string    `gorm:"not null;default:''" json:"label"`
+	URL       string    `gorm:"not null" json:"url"`
+	Position  int       `gorm:"not null;default:0" json:"position"`
+	Group     string    `gorm:"column:group_name;not null;default:''" json:"group"`
+	Active    bool      `gorm:"not null;default:false" json:"active"`
+	Confirm   string    `gorm:"not null;default:''" json:"confirm"`
+	Options   *string   `json:"-"`
+	UpdatedAt time.Time `gorm:"not null" json:"updated_at"`
+}
+
+// CommandOption is one choice of a picker command (see Command.Options).
+type CommandOption struct {
+	Value  string `json:"value"`
+	Label  string `json:"label"`
+	Active bool   `json:"active"`
+}
+
+// OptionList decodes Options; nil for a plain (non-picker) command.
+func (c Command) OptionList() []CommandOption {
+	if c.Options == nil {
+		return nil
+	}
+	var opts []CommandOption
+	if err := json.Unmarshal([]byte(*c.Options), &opts); err != nil {
+		return nil
+	}
+	return opts
+}
+
+func ListCommands(db *gorm.DB) ([]Command, error) {
+	var cmds []Command
+	err := db.Order("source_id, position").Find(&cmds).Error
+	return cmds, err
+}
+
+// ReplaceSourceCommands swaps a source's whole command list for cmds in one
+// transaction, so a reader never sees a half-written list.
+func ReplaceSourceCommands(db *gorm.DB, sourceID uint, cmds []Command) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("source_id = ?", sourceID).Delete(&Command{}).Error; err != nil {
+			return err
+		}
+		if len(cmds) == 0 {
+			return nil
+		}
+		return tx.Create(&cmds).Error
+	})
 }

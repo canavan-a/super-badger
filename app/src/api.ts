@@ -399,3 +399,119 @@ export function updateMetricSource(
 export function deleteMetricSource(id: number): Promise<void> {
   return request<void>(`/metric-sources/${id}`, {method: 'DELETE'});
 }
+
+// Commands come from each metric source's sibling commands endpoint (see
+// docs/command-spec.md) and belong to the source as a whole, not to any
+// station. They're actions, not measurements: the server POSTs to the
+// command's URL and streams the response back, so a slow command (model
+// toggles run up to ~60s) can report progress instead of looking like one
+// opaque wait.
+export interface CommandOption {
+  value: string;
+  label: string;
+  active: boolean;
+}
+
+export interface Command {
+  source_id: number;
+  source_name: string;
+  path: string;
+  label: string;
+  url: string;
+  // Display hints from the spec: a section heading, the "current state"
+  // marker, a confirmation prompt, and a picker's choices.
+  group: string;
+  active: boolean;
+  confirm: string;
+  options?: CommandOption[];
+}
+
+export function listCommands(): Promise<Command[]> {
+  return request<Command[]>('/commands');
+}
+
+// The final outcome of a command run (the spec's closing NDJSON event, or
+// the HTTP status when the endpoint doesn't send one).
+export interface CommandResult {
+  ok: boolean;
+  message: string;
+}
+
+// runCommand asks the server to POST to the command's URL and follows the
+// streamed response. Uses XMLHttpRequest, not fetch: React Native's fetch
+// only hands over the body once it's complete, while XHR's onprogress sees
+// each chunk as it lands — that's what lets a minutes-long command (double
+// mode loading ~50 GB of experts) show live progress. Each NDJSON
+// `{"log": ...}` line goes to onLog; a non-JSON line is passed through as a
+// log line too. While a call is in flight the button stays disabled — a
+// second tap would double-fire the underlying action.
+export function runCommand(
+  sourceId: number,
+  path: string,
+  option: string | undefined,
+  onLog: (line: string) => void,
+): Promise<CommandResult> {
+  const {serverUrl, authToken} = settingsStore.get();
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    let consumed = 0;
+    let final: CommandResult | null = null;
+    let lastLine = '';
+
+    const handleLine = (line: string) => {
+      if (!line.trim()) {
+        return;
+      }
+      lastLine = line;
+      try {
+        const ev = JSON.parse(line);
+        if (ev && typeof ev.ok === 'boolean') {
+          final = {ok: ev.ok, message: String(ev.message ?? '')};
+          return;
+        }
+        if (ev && typeof ev.log === 'string') {
+          onLog(ev.log);
+          return;
+        }
+      } catch {
+        // not JSON: shown as a plain log line below
+      }
+      onLog(line);
+    };
+    // Complete lines only; a partial trailing line waits for the next chunk
+    // (or the end of the response, via flushAll).
+    const drain = (flushAll: boolean) => {
+      const text = xhr.responseText ?? '';
+      const end = flushAll ? text.length : text.lastIndexOf('\n') + 1;
+      if (end <= consumed) {
+        return;
+      }
+      text.slice(consumed, end).split('\n').forEach(handleLine);
+      consumed = end;
+    };
+
+    xhr.open('POST', `${serverUrl}/commands/invoke`);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    if (authToken) {
+      xhr.setRequestHeader('Authorization', `Bearer ${authToken}`);
+    }
+    xhr.onprogress = () => drain(false);
+    xhr.onload = () => {
+      if (xhr.status < 200 || xhr.status >= 300) {
+        // Errors come back as one JSON body ({"error": ...}) from either
+        // the server or the endpoint, not as a stream.
+        let message = xhr.responseText;
+        try {
+          const body = JSON.parse(xhr.responseText);
+          message = body.error ?? body.message ?? message;
+        } catch {}
+        resolve({ok: false, message: message || `HTTP ${xhr.status}`});
+        return;
+      }
+      drain(true);
+      resolve(final ?? {ok: true, message: lastLine.startsWith('{') ? '' : lastLine});
+    };
+    xhr.onerror = () => reject(new Error('command request failed'));
+    xhr.send(JSON.stringify({source_id: sourceId, path, option}));
+  });
+}

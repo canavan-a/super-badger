@@ -1,16 +1,18 @@
 import React from 'react';
 import {ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View} from 'react-native';
 
-import {Station} from '../api';
+import {Command, Station} from '../api';
 import {Route} from '../routes';
 import {Theme, useTheme} from '../theme';
 
 export function StationsDrawerContent({
   stations,
+  commands,
   loading,
   onNavigate,
 }: {
   stations: Station[];
+  commands: Command[];
   loading: boolean;
   onNavigate: (route: Route) => void;
 }): React.JSX.Element {
@@ -50,6 +52,18 @@ export function StationsDrawerContent({
           )
         }
       />
+
+      {/* Only present when the metric endpoints actually advertise commands —
+          a source without a commands endpoint (or an older server that
+          doesn't know about /commands at all) contributes nothing here, so
+          the button disappears instead of opening an empty screen. */}
+      {commands.length > 0 && (
+        <Pressable
+          style={styles.commandsButton}
+          onPress={() => onNavigate({name: 'commands'})}>
+          <Text style={styles.commandsButtonText}>Commands</Text>
+        </Pressable>
+      )}
 
       <Pressable
         style={styles.addButton}
@@ -123,6 +137,19 @@ function makeStyles(theme: Theme) {
     },
     loadingSpinner: {
       padding: 24,
+    },
+    commandsButton: {
+      marginTop: 12,
+      marginHorizontal: 12,
+      marginBottom: 0,
+      paddingVertical: 12,
+      borderRadius: 8,
+      backgroundColor: theme.surfaceAlt,
+      alignItems: 'center',
+    },
+    commandsButtonText: {
+      color: theme.text,
+      fontWeight: '600',
     },
     addButton: {
       margin: 12,

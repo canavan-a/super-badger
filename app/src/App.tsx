@@ -12,13 +12,14 @@ import {
   View,
 } from 'react-native';
 
-import {checkServerHealth, listStations, Station} from './api';
+import {checkServerHealth, listStations, listCommands, Command, Station} from './api';
 import {Drawer} from './components/Drawer';
 import {Icon, IconName} from './components/Icon';
 import {StationsDrawerContent} from './components/StationsDrawerContent';
 import {pendingNav} from './notifications/pendingNav';
 import {Route} from './routes';
 import {AddStationScreen} from './screens/AddStationScreen';
+import {CommandsScreen} from './screens/CommandsScreen';
 import {SettingsScreen} from './screens/SettingsScreen';
 import {StationDetailScreen} from './screens/StationDetailScreen';
 import {StationSettingsScreen} from './screens/StationSettingsScreen';
@@ -32,6 +33,7 @@ const TITLES: Record<Route['name'], string> = {
   stations: 'Super Badger',
   stationDetail: 'Station',
   stationSettings: 'Data Points',
+  commands: 'Commands',
   addStation: 'Add Station',
   settings: 'Settings',
 };
@@ -77,6 +79,13 @@ function AppInner(): React.JSX.Element {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [stations, setStations] = useState<Station[]>([]);
   const [loading, setLoading] = useState(true);
+  // Commands advertised by the metric sources' commands endpoints — global
+  // to each source, not tied to a station (see docs/command-spec.md).
+  // Fetched alongside the
+  // station list so the drawer's Commands button reflects the latest poll
+  // the moment the drawer opens; an endpoint that stops advertising
+  // commands makes the button vanish within a poll.
+  const [commands, setCommands] = useState<Command[]>([]);
   // null = "haven't checked yet" — deliberately distinct from false, so the
   // banner doesn't flash on for an instant on every fresh load.
   const [serverOnline, setServerOnline] = useState<boolean | null>(null);
@@ -93,6 +102,14 @@ function AppInner(): React.JSX.Element {
       .finally(() => setLoading(false));
   }, []);
 
+  // Commands ride alongside the station list (the server polls both from
+  // the same metric sources on the same ticker), so they refresh on the same
+  // triggers. A failed fetch yields an empty list — the drawer's Commands
+  // button hides rather than pretending there's something to run.
+  const refreshCommands = useCallback(() => {
+    listCommands().then(setCommands).catch(() => setCommands([]));
+  }, []);
+
   // Settings (including a possibly-customized server URL) load
   // asynchronously from storage. The route-change effect below also wants to
   // refresh on the initial route, and a refresh fired before settings finish
@@ -106,8 +123,9 @@ function AppInner(): React.JSX.Element {
     settingsStore.load().then(() => {
       settingsReady.current = true;
       refreshStations();
+      refreshCommands();
     });
-  }, [refreshStations]);
+  }, [refreshStations, refreshCommands]);
 
   // Station list changes (create/delete) happen from other screens; a fresh
   // fetch whenever we land back on a route that shows the list keeps the
@@ -116,8 +134,9 @@ function AppInner(): React.JSX.Element {
     if (!settingsReady.current) return;
     if (route.name === 'stations' || route.name === 'stationDetail') {
       refreshStations();
+      refreshCommands();
     }
-  }, [route, refreshStations]);
+  }, [route, refreshStations, refreshCommands]);
 
   // Polls superbadger's own health, independent of anything station-related
   // — a wrong/unreachable server address in Settings, or the server process
@@ -365,6 +384,7 @@ function AppInner(): React.JSX.Element {
             // it directly matches what the user expects ("open the menu,
             // see current data") instead of depending on load-order timing.
             refreshStations();
+            refreshCommands();
             setDrawerOpen(true);
           }}>
           <Icon name="menu" size={20} color={theme.text} />
@@ -456,12 +476,18 @@ function AppInner(): React.JSX.Element {
             onNavigate={navigate}
           />
         )}
+        {route.name === 'commands' && <CommandsScreen />}
         {route.name === 'addStation' && <AddStationScreen onNavigate={navigate} />}
         {route.name === 'settings' && <SettingsScreen />}
       </Animated.View>
 
       <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)}>
-        <StationsDrawerContent stations={visibleStations} loading={loading} onNavigate={navigate} />
+        <StationsDrawerContent
+          stations={visibleStations}
+          commands={commands}
+          loading={loading}
+          onNavigate={navigate}
+        />
       </Drawer>
     </SafeAreaView>
   );
