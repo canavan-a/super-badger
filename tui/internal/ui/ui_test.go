@@ -1640,15 +1640,36 @@ func TestOlderHistoryPrependsAndKeepsViewAnchored(t *testing.T) {
 	}
 }
 
-func TestToolRunningHidesDiggingLine(t *testing.T) {
-	turn := func(status string) *chat.Turn {
-		return &chat.Turn{Role: "assistant", PartOrder: []string{"p"},
-			Parts: map[string]*chat.Part{"p": {Kind: chat.KindTool, ID: "p", Tool: "bash", Status: status}}}
+func TestDiggingLineOnlyWhileThinking(t *testing.T) {
+	reply := func(done bool, parts ...*chat.Part) *chat.Turn {
+		t := &chat.Turn{Role: "assistant", Done: done, Parts: map[string]*chat.Part{}}
+		for _, p := range parts {
+			t.PartOrder = append(t.PartOrder, p.ID)
+			t.Parts[p.ID] = p
+		}
+		return t
 	}
-	if !toolRunning([]*chat.Turn{turn("running")}) {
-		t.Fatal("a running tool should count")
+	think := &chat.Part{Kind: chat.KindReasoning, ID: "r"}
+	text := &chat.Part{Kind: chat.KindText, ID: "x"}
+	tool := &chat.Part{Kind: chat.KindTool, ID: "t", Status: "running"}
+	user := &chat.Turn{Role: "user"}
+	cases := []struct {
+		name  string
+		turns []*chat.Turn
+		busy  bool
+		want  bool
+	}{
+		{"sent, nothing back yet", []*chat.Turn{user}, true, true},
+		{"thinking", []*chat.Turn{user, reply(false, think)}, true, true},
+		{"thinking, reopened (not busy)", []*chat.Turn{user, reply(false, think)}, false, true},
+		{"text output", []*chat.Turn{user, reply(false, think, text)}, true, false},
+		{"tool call hanging", []*chat.Turn{user, reply(false, think, tool)}, true, false},
+		{"finished reply", []*chat.Turn{user, reply(true, think)}, false, false},
+		{"idle", []*chat.Turn{user}, false, false},
 	}
-	if toolRunning([]*chat.Turn{turn("running"), turn("completed")}) {
-		t.Fatal("only the latest assistant turn should count")
+	for _, c := range cases {
+		if got := thinking(c.turns, c.busy); got != c.want {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
 	}
 }

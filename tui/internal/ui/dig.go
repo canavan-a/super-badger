@@ -32,21 +32,30 @@ func digDots(now time.Time) string {
 	return strings.Repeat("▪", int(now.UnixMilli()/400%5))
 }
 
-// toolRunning reports whether the latest assistant turn has a tool call in
-// flight — its own ◔ status already says something is happening, so the
-// digging line steps aside until the model is generating again.
-func toolRunning(turns []*chat.Turn) bool {
-	for i := len(turns) - 1; i >= 0; i-- {
-		t := turns[i]
-		if t.Role != "assistant" {
-			continue
-		}
-		for _, id := range t.PartOrder {
-			if p := t.Parts[id]; p != nil && p.Kind == chat.KindTool && (p.Status == "pending" || p.Status == "running") {
-				return true
-			}
-		}
+// thinking reports whether the digging line should show: only while the
+// model is thinking — the in-flight reply's latest part is reasoning, or
+// nothing has streamed yet — never during plain text output or while a tool
+// call hangs. The reply counts as in flight when this chat view is Busy or
+// the latest turn is an unfinished assistant message; Busy only turns on for
+// replies this view sent, so the latter catches a reply still running when
+// the station was reopened (or started from another client).
+func thinking(turns []*chat.Turn, busy bool) bool {
+	if len(turns) == 0 {
+		return busy
+	}
+	t := turns[len(turns)-1]
+	if t.Role != "assistant" {
+		return busy
+	}
+	if t.Done && !busy {
 		return false
 	}
-	return false
+	for i := len(t.PartOrder) - 1; i >= 0; i-- {
+		p := t.Parts[t.PartOrder[i]]
+		if p == nil || p.Kind == chat.KindStepFinish {
+			continue
+		}
+		return p.Kind == chat.KindReasoning
+	}
+	return true
 }
