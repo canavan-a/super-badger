@@ -31,9 +31,10 @@ func dirtFrame(now time.Time) string {
 	return dirtFrames[int(now.UnixMilli()/flushInterval.Milliseconds()%int64(len(dirtFrames)))]
 }
 
-// digDots counts 0–3 dots on the compacting line's 400ms beat, padded to a
-// fixed width so the dirt beside it doesn't shift.
+// digDots piles up 0–3 dirt clods (in place of "...") on the compacting
+// line's 400ms beat, padded to a fixed width so the specks beside them
+// don't shift.
 func digDots(now time.Time) string {
 	n := int(now.UnixMilli() / 400 % 4)
-	return strings.Repeat(".", n) + strings.Repeat(" ", 3-n)
+	return strings.Repeat("▪", n) + strings.Repeat(" ", 3-n)
 }

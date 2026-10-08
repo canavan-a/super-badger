@@ -831,8 +831,8 @@ func (m *chatModel) transcript() string {
 	}
 	if m.state.Busy {
 		now := time.Now()
-		dirt := lipgloss.NewStyle().Foreground(lipgloss.Color("#8B5A2B")).Render(dirtFrame(now))
-		b.WriteString(" " + m.st.Primary.Render("◆ ") + m.st.Muted.Italic(true).Render(digWord(now)+digDots(now)) + " " + dirt + m.st.Muted.Render("  /stop to abort") + "\n")
+		dirt := lipgloss.NewStyle().Foreground(lipgloss.Color("#8B5A2B")).Render(digDots(now) + " " + dirtFrame(now))
+		b.WriteString(" " + m.st.Primary.Render("◆ ") + m.st.Muted.Italic(true).Render(digWord(now)) + " " + dirt + m.st.Muted.Render("  /stop to abort") + "\n")
 	}
 	if m.compacting {
 		dots := strings.Repeat(".", int(time.Now().UnixMilli()/400%4))
@@ -898,6 +898,23 @@ func (m *chatModel) renderPart(p *chat.Part, wrap lipgloss.Style) string {
 		}
 		head := st.Render(icon+" "+p.Tool) + " " + m.st.Muted.Render(p.Title)
 		out := truncate(head, tw)
+		// A bash call's title is only its description, so show the command
+		// itself too, whether or not tool output is shown.
+		if in, _ := p.Input.(map[string]any); p.Tool == "bash" && in != nil {
+			if cmd, _ := in["command"].(string); cmd != "" {
+				lines := strings.Split(strings.TrimRight(cmd, "\n"), "\n")
+				if len(lines) > 4 {
+					lines = append(lines[:4], fmt.Sprintf("… %d more lines", len(lines)-4))
+				}
+				for i, l := range lines {
+					prefix := "  "
+					if i == 0 {
+						prefix = "$ "
+					}
+					out += "\n  " + m.st.Text.Render(truncate(prefix+l, tw-2))
+				}
+			}
+		}
 		if !m.showTools {
 			return out
 		}

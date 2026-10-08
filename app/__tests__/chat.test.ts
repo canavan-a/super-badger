@@ -43,3 +43,18 @@ test('prependHistory puts an older page above the turns already shown', () => {
   state = applyEvent(state, part('m3', 'p3b', 'more'));
   expect(state.turns[2].partOrder).toEqual(['p3', 'p3b']);
 });
+
+test('a step that ends in tool calls keeps the reply busy until the final step', () => {
+  let state = {...emptyChatState, busy: true};
+  state = applyEvent(state, {
+    type: 'message.updated',
+    properties: {info: {id: 'm1', role: 'assistant', finish: 'tool-calls', time: {completed: 1}}},
+  });
+  expect(state.busy).toBe(true);
+  expect(getTurn(state, 'm1')?.done).toBe(true);
+  state = applyEvent(state, {
+    type: 'message.updated',
+    properties: {info: {id: 'm2', role: 'assistant', finish: 'stop', time: {completed: 2}}},
+  });
+  expect(state.busy).toBe(false);
+});

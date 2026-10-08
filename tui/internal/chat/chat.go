@@ -213,8 +213,10 @@ func (s *State) Apply(e Event) {
 		if obj(info, "time")["completed"] != nil {
 			t.Done = true
 			// A completed assistant message is as good a "reply finished"
-			// signal as session.idle, which isn't reliably delivered.
-			if str(info, "role") == "assistant" {
+			// signal as session.idle, which isn't reliably delivered — but
+			// opencode completes one message per step, and a step that ended
+			// in tool calls is followed by another, so only a final step counts.
+			if str(info, "role") == "assistant" && !stepContinues(str(info, "finish")) {
 				s.Busy = false
 			}
 		}
@@ -393,3 +395,9 @@ func (t *Turn) Text() string {
 }
 
 func (p Part) String() string { return fmt.Sprintf("%s:%s", p.Kind, p.ID) }
+
+// stepContinues reports whether an assistant message's finish reason means
+// opencode's loop runs another step after it (its own loop-exit check).
+func stepContinues(finish string) bool {
+	return finish == "tool-calls" || finish == "unknown"
+}

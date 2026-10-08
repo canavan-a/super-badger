@@ -44,6 +44,19 @@ func TestCompletedAssistantMessageClearsBusy(t *testing.T) {
 	}
 }
 
+func TestToolCallStepKeepsBusy(t *testing.T) {
+	s := New()
+	s.Busy = true
+	s.Apply(ev(t, `{"type":"message.updated","properties":{"info":{"id":"m1","role":"assistant","finish":"tool-calls","time":{"completed":1}}}}`))
+	if !s.Busy || !s.Turn("m1").Done {
+		t.Fatal("a tool-calls step should finish its turn but keep the reply busy")
+	}
+	s.Apply(ev(t, `{"type":"message.updated","properties":{"info":{"id":"m2","role":"assistant","finish":"stop","time":{"completed":2}}}}`))
+	if s.Busy {
+		t.Fatal("the final step should clear busy")
+	}
+}
+
 func TestReconcileLocalUserTurn(t *testing.T) {
 	s := New()
 	s.AddLocalUserTurn("local-1", "hi")

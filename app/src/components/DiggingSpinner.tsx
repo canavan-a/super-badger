@@ -141,10 +141,11 @@ export function DiggingSpinner(): React.JSX.Element {
     <View style={styles.row}>
       <ActivityIndicator size="small" color={theme.textMuted} />
       <Text style={[styles.word, {color: theme.textMuted}]}>
-        {word}
-        {'.'.repeat(dots)}
-        {/* Invisible remainder keeps the width fixed so the dirt doesn't shift. */}
-        <Text style={styles.hiddenDots}>{'.'.repeat(3 - dots)}</Text>
+        {word}{' '}
+        {/* Dirt clods pile up in place of "..."; the invisible remainder keeps
+            the width fixed so the particles don't shift. */}
+        <Text style={{color: DIRT_COLORS[0]}}>{'▪'.repeat(dots)}</Text>
+        <Text style={styles.hiddenDots}>{'▪'.repeat(3 - dots)}</Text>
       </Text>
       {!reduceMotion && (
         <View style={styles.burst} pointerEvents="none">

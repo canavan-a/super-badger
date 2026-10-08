@@ -175,8 +175,10 @@ export function applyEvent(state: ChatState, evt: EventMsg): ChatState {
         // reconnect's history replay) — a completed assistant message is
         // just as good a "the reply is finished" signal and is what was
         // actually leaving the send button stuck showing its busy spinner
-        // indefinitely when session.idle didn't arrive.
-        if (info.role === 'assistant') {
+        // indefinitely when session.idle didn't arrive. But opencode
+        // completes one message per step, and a step that ended in tool
+        // calls is followed by another, so only a final step counts.
+        if (info.role === 'assistant' && info.finish !== 'tool-calls' && info.finish !== 'unknown') {
           next = {...next, busy: false};
         }
       }
