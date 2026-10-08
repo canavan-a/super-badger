@@ -829,10 +829,10 @@ func (m *chatModel) transcript() string {
 	for _, q := range m.outbox {
 		b.WriteString(m.userBlock(q.text, wrap, true) + "\n\n")
 	}
-	if m.state.Busy {
+	if m.state.Busy && !toolRunning(m.state.Turns) {
 		now := time.Now()
-		dirt := lipgloss.NewStyle().Foreground(lipgloss.Color("#8B5A2B")).Render(digDots(now) + " " + dirtFrame(now))
-		b.WriteString(" " + m.st.Primary.Render("◆ ") + m.st.Muted.Italic(true).Render(digWord(now)) + " " + dirt + m.st.Muted.Render("  /stop to abort") + "\n")
+		dirt := lipgloss.NewStyle().Foreground(lipgloss.Color("#8B5A2B")).Render(digDots(now))
+		b.WriteString(" " + m.st.Primary.Render("◆ ") + m.st.Muted.Italic(true).Render(digWord(now)) + " " + dirt + "\n")
 	}
 	if m.compacting {
 		dots := strings.Repeat(".", int(time.Now().UnixMilli()/400%4))

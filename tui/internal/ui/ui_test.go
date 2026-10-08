@@ -1639,3 +1639,16 @@ func TestOlderHistoryPrependsAndKeepsViewAnchored(t *testing.T) {
 		t.Fatal("last page should clear hasMore and the in-flight flag")
 	}
 }
+
+func TestToolRunningHidesDiggingLine(t *testing.T) {
+	turn := func(status string) *chat.Turn {
+		return &chat.Turn{Role: "assistant", PartOrder: []string{"p"},
+			Parts: map[string]*chat.Part{"p": {Kind: chat.KindTool, ID: "p", Tool: "bash", Status: status}}}
+	}
+	if !toolRunning([]*chat.Turn{turn("running")}) {
+		t.Fatal("a running tool should count")
+	}
+	if toolRunning([]*chat.Turn{turn("running"), turn("completed")}) {
+		t.Fatal("only the latest assistant turn should count")
+	}
+}
