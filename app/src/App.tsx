@@ -79,8 +79,9 @@ function AppInner(): React.JSX.Element {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [stations, setStations] = useState<Station[]>([]);
   const [loading, setLoading] = useState(true);
-  // Commands advertised by the metric endpoints (the `commands` section of
-  // the metric JSON — see docs/command-spec.md). Fetched alongside the
+  // Commands advertised by the metric sources' commands endpoints — global
+  // to each source, not tied to a station (see docs/command-spec.md).
+  // Fetched alongside the
   // station list so the drawer's Commands button reflects the latest poll
   // the moment the drawer opens; an endpoint that stops advertising
   // commands makes the button vanish within a poll.
@@ -101,8 +102,8 @@ function AppInner(): React.JSX.Element {
       .finally(() => setLoading(false));
   }, []);
 
-  // Commands ride alongside the station list (both are served from the
-  // same poll of the metric endpoints), so they refresh on the same
+  // Commands ride alongside the station list (the server polls both from
+  // the same metric sources on the same ticker), so they refresh on the same
   // triggers. A failed fetch yields an empty list — the drawer's Commands
   // button hides rather than pretending there's something to run.
   const refreshCommands = useCallback(() => {

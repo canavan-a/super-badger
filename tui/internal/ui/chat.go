@@ -261,7 +261,8 @@ func (m *chatModel) Update(msg tea.Msg) tea.Cmd {
 		return m.waitFrame()
 
 	case flushMsg:
-		if m.compacting {
+		// Re-render each tick while either animated status line is up.
+		if m.compacting || m.state.Busy {
 			m.dirty = true
 		}
 		cmd := m.flush()
@@ -829,7 +830,9 @@ func (m *chatModel) transcript() string {
 		b.WriteString(m.userBlock(q.text, wrap, true) + "\n\n")
 	}
 	if m.state.Busy {
-		b.WriteString(" " + m.st.Primary.Render("◆ ") + m.st.Muted.Render("working…  /stop to abort") + "\n")
+		now := time.Now()
+		dirt := lipgloss.NewStyle().Foreground(lipgloss.Color("#8B5A2B")).Render(dirtFrame(now))
+		b.WriteString(" " + m.st.Primary.Render("◆ ") + m.st.Muted.Italic(true).Render(digWord(now)+digDots(now)) + " " + dirt + m.st.Muted.Render("  /stop to abort") + "\n")
 	}
 	if m.compacting {
 		dots := strings.Repeat(".", int(time.Now().UnixMilli()/400%4))

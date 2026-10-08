@@ -54,7 +54,7 @@ export function StationsDrawerContent({
       />
 
       {/* Only present when the metric endpoints actually advertise commands —
-          an endpoint without a `commands` section (or an older server that
+          a source without a commands endpoint (or an older server that
           doesn't know about /commands at all) contributes nothing here, so
           the button disappears instead of opening an empty screen. */}
       {commands.length > 0 && (

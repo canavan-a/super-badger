@@ -68,10 +68,10 @@ func NewRouter(svc *station.Service, oc *opencode.Client, mv *mullvad.Client, br
 	r.PUT("/metric-sources/:id", updateMetricSource(db, mm))
 	r.DELETE("/metric-sources/:id", deleteMetricSource(db, mm))
 
-	// Commands ride inside each metric endpoint's per-station JSON object
-	// (the `commands` section — see docs/command-spec.md). listCommands
-	// returns what the latest poll captured; invokeCommand streams a POST
-	// through to the resolved target.
+	// Commands come from each metric source's sibling commands endpoint and
+	// belong to the source, not any station (see docs/command-spec.md).
+	// listCommands returns what the latest polls captured; invokeCommand
+	// streams a POST through to the command's URL.
 	r.GET("/commands", listCommands(db))
 	r.POST("/commands/invoke", invokeCommand(db))
 

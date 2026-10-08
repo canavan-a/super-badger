@@ -1,21 +1,26 @@
 -- +goose Up
 --
--- commands: the `commands` section a metric endpoint reports inside each
--- station's JSON object (see docs/command-spec.md). Commands are actions,
--- not measurements — invoking one performs work on the endpoint's machine
--- (e.g. toggling models on/off, which can take up to a minute) rather than
--- reporting a number. Rewritten wholesale on every poll, so commands an
--- endpoint stops advertising disappear within a tick. One row per
--- (station, path), mirroring station_data_points.
+-- commands: what a metric source advertises on its commands endpoint (see
+-- docs/command-spec.md). Commands are actions, not measurements — invoking
+-- one performs work on the endpoint's machine (e.g. toggling models on/off,
+-- which can take minutes) — and they belong to the source as a whole, not
+-- to any station. Rewritten wholesale on every poll, so commands an
+-- endpoint stops advertising disappear within a tick. group_name/active/
+-- confirm/options are display hints; options is a JSON array of
+-- {value,label,active} for a picker command.
 CREATE TABLE `commands` (
     `id` integer NOT NULL PRIMARY KEY AUTOINCREMENT,
-    `station_id` integer NOT NULL,
-    `source_id` integer,
+    `source_id` integer NOT NULL,
     `path` text NOT NULL,
     `label` text NOT NULL DEFAULT '',
     `url` text NOT NULL,
+    `position` integer NOT NULL DEFAULT 0,
+    `group_name` text NOT NULL DEFAULT '',
+    `active` integer NOT NULL DEFAULT 0,
+    `confirm` text NOT NULL DEFAULT '',
+    `options` text,
     `updated_at` datetime NOT NULL,
-    CONSTRAINT `idx_commands_station_path` UNIQUE (`station_id`, `path`)
+    CONSTRAINT `idx_commands_source_path` UNIQUE (`source_id`, `path`)
 );
 
 -- +goose Down

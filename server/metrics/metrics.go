@@ -5,14 +5,20 @@
 // database.StationDataPoint), and an optional threshold per (station, key)
 // can trigger a notification when the value crosses it (see
 // database.DataPointSetting and Notifier).
+//
+// Each source may also serve a sibling commands endpoint (see
+// docs/command-spec.md and PollCommands) listing actions that belong to the
+// source as a whole rather than to any station.
 package metrics
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"sync"
 	"time"
@@ -180,8 +186,146 @@ func RunSource(ctx context.Context, db *gorm.DB, source database.MetricSource, n
 			return
 		case <-ticker.C:
 			poll(ctx, db, source.ID, src, notifier)
+			pollCommands(ctx, db, source.ID, src)
 		}
 	}
+}
+
+// errNoCommands means the source has no commands endpoint (HTTP 404) — a
+// normal state for a source that only reports metrics, unlike a transport
+// failure.
+var errNoCommands = errors.New("source has no commands endpoint")
+
+// CommandsURL is the sibling "commands" path next to the metrics URL:
+// http://box:9000/metrics → http://box:9000/commands, http://box:9000/ →
+// http://box:9000/commands, http://box:9000/api/ → http://box:9000/api/commands.
+func (h *HTTPSource) CommandsURL() (*url.URL, error) {
+	base, err := url.Parse(h.URL)
+	if err != nil {
+		return nil, err
+	}
+	if base.Path == "" {
+		base.Path = "/"
+	}
+	return base.ResolveReference(&url.URL{Path: "commands"}), nil
+}
+
+// PollCommands fetches the source's command list. Each command's url may be
+// relative; it's resolved against the commands URL so the stored URL is
+// always absolute. Entries missing a path or url, or repeating a path, are
+// dropped rather than failing the whole list.
+func (h *HTTPSource) PollCommands(ctx context.Context) ([]database.Command, error) {
+	cu, err := h.CommandsURL()
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", cu.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	if h.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+h.APIKey)
+	}
+	resp, err := h.c.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, errNoCommands
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("commands for %q: HTTP %d", h.Name, resp.StatusCode)
+	}
+
+	var raw []struct {
+		Path    string                   `json:"path"`
+		Label   string                   `json:"label"`
+		URL     string                   `json:"url"`
+		Group   string                   `json:"group"`
+		Active  bool                     `json:"active"`
+		Confirm string                   `json:"confirm"`
+		Options []database.CommandOption `json:"options"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return nil, err
+	}
+
+	out := make([]database.Command, 0, len(raw))
+	seen := make(map[string]bool, len(raw))
+	for _, r := range raw {
+		if r.Path == "" || r.URL == "" || seen[r.Path] {
+			continue
+		}
+		ref, err := url.Parse(r.URL)
+		if err != nil {
+			continue
+		}
+		seen[r.Path] = true
+		out = append(out, database.Command{
+			Path:     r.Path,
+			Label:    r.Label,
+			URL:      cu.ResolveReference(ref).String(),
+			Position: len(out),
+			Group:    r.Group,
+			Active:   r.Active,
+			Confirm:  r.Confirm,
+			Options:  encodeOptions(r.Options),
+		})
+	}
+	return out, nil
+}
+
+// encodeOptions keeps a picker's options that have a value, first occurrence
+// winning, and stores them as JSON. nil (a plain command) when none survive
+// or none were sent.
+func encodeOptions(opts []database.CommandOption) *string {
+	kept := make([]database.CommandOption, 0, len(opts))
+	seen := make(map[string]bool, len(opts))
+	for _, o := range opts {
+		if o.Value == "" || seen[o.Value] {
+			continue
+		}
+		seen[o.Value] = true
+		kept = append(kept, o)
+	}
+	if len(kept) == 0 {
+		return nil
+	}
+	b, _ := json.Marshal(kept)
+	s := string(b)
+	return &s
+}
+
+// pollCommands refreshes a source's stored command list. A 404 clears it (the
+// source stopped serving commands); any other failure leaves the last known
+// list in place, the same way a failed metrics poll leaves stale values.
+func pollCommands(ctx context.Context, db *gorm.DB, sourceID uint, src *HTTPSource) {
+	cmds, err := src.PollCommands(ctx)
+	if errors.Is(err, errNoCommands) {
+		cmds, err = nil, nil
+	}
+	if err != nil {
+		return
+	}
+	now := time.Now()
+	for i := range cmds {
+		cmds[i].SourceID = sourceID
+		cmds[i].UpdatedAt = now
+	}
+	_ = database.ReplaceSourceCommands(db, sourceID, cmds)
+}
+
+// RefreshCommands re-polls one source's command list right away, outside its
+// ticker — called after a command runs, since running one usually changes
+// what the source advertises (e.g. which mode is active).
+func RefreshCommands(ctx context.Context, db *gorm.DB, source database.MetricSource) {
+	apiKey := ""
+	if source.APIKey != nil {
+		apiKey = *source.APIKey
+	}
+	pollCommands(ctx, db, source.ID, NewHTTPSource(source.Name, source.URL, apiKey))
 }
 
 func poll(ctx context.Context, db *gorm.DB, sourceID uint, src *HTTPSource, notifier Notifier) {

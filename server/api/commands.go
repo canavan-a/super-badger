@@ -1,22 +1,27 @@
-// Command handlers for the Super Badger Station Standard API's `commands`
-// section (see docs/command-spec.md). GET /commands returns the command
-// list captured by the most recent poll, joined with the owning station's
-// display identity; POST /commands/invoke proxies a POST to the resolved
-// target and streams the response through chunk-by-chunk. Streaming
-// matters because commands are actions, not reads — toggling a model on or
-// off can take up to a minute, and an endpoint that reports progress (or
-// just takes its time) shouldn't have to look like one opaque wait.
+// Command handlers for the commands each metric source serves on its
+// sibling commands endpoint (see docs/command-spec.md). Commands belong to
+// the source as a whole, not to any station. GET /commands returns the
+// lists captured by the most recent polls, joined with each source's name;
+// POST /commands/invoke proxies a POST to the command's URL and streams the
+// response through chunk-by-chunk. Streaming matters because commands are
+// actions, not reads — toggling a model on or off can take up to a minute,
+// and an endpoint that reports progress (or just takes its time) shouldn't
+// have to look like one opaque wait.
 package api
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/url"
-	"sort"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
 	"main/database"
+	"main/metrics"
 )
 
 // commandClient has no timeout of its own beyond the request context:
@@ -24,68 +29,74 @@ import (
 // context cancels the upstream call if the client disconnects.
 var commandClient = &http.Client{}
 
-// commandOut is one command row joined with its station's display identity
-// (name/color, and the owner's ordering) so the app can render the
-// Commands screen without a second round trip.
+// commandOut is one command row joined with its source's name so the app
+// can group and label the Commands screen without a second round trip.
 type commandOut struct {
-	StationID    uint   `json:"station_id"`
-	StationName  string `json:"station_name"`
-	StationColor string `json:"station_color"`
-	Path         string `json:"path"`
-	Label        string `json:"label"`
-	URL          string `json:"url"`
+	SourceID   uint                     `json:"source_id"`
+	SourceName string                   `json:"source_name"`
+	Path       string                   `json:"path"`
+	Label      string                   `json:"label"`
+	URL        string                   `json:"url"`
+	Group      string                   `json:"group"`
+	Active     bool                     `json:"active"`
+	Confirm    string                   `json:"confirm"`
+	Options    []database.CommandOption `json:"options,omitempty"`
+}
+
+// enabledSources maps id → source for every enabled metric source.
+// Commands from a disabled source are hidden: its poller is stopped, so its
+// list is stale and the owner has switched it off anyway.
+func enabledSources(db *gorm.DB) (map[uint]database.MetricSource, error) {
+	srcs, err := database.ListMetricSources(db)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[uint]database.MetricSource, len(srcs))
+	for _, s := range srcs {
+		if s.Enabled {
+			out[s.ID] = s
+		}
+	}
+	return out, nil
 }
 
 func listCommands(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		stations, err := database.ListStations(db)
+		sources, err := enabledSources(db)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		commands, err := database.ListStationCommands(db)
+		// Already ordered by source, then the endpoint's own order.
+		commands, err := database.ListCommands(db)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
-		// Same ordering as the drawer's station list (position, then id),
-		// then by path within a station.
-		rank := make(map[uint]int, len(stations))
-		info := make(map[uint]database.Station, len(stations))
-		for i, st := range stations {
-			rank[st.ID] = i
-			info[st.ID] = st
-		}
-
-		type entry = commandOut
-		out := make([]entry, 0, len(commands))
+		out := make([]commandOut, 0, len(commands))
 		for _, cmd := range commands {
-			st, ok := info[cmd.StationID]
-			if !ok || st.Hidden {
-				continue // hidden stations are off the drawer, so their
-				// commands shouldn't surface either
+			src, ok := sources[cmd.SourceID]
+			if !ok {
+				continue
 			}
-			out = append(out, entry{
-				StationID:    cmd.StationID,
-				StationName:  st.Name,
-				StationColor: st.Color,
-				Path:         cmd.Path,
-				Label:        cmd.Label,
-				URL:          cmd.URL,
+			out = append(out, commandOut{
+				SourceID:   cmd.SourceID,
+				SourceName: src.Name,
+				Path:       cmd.Path,
+				Label:      cmd.Label,
+				URL:        cmd.URL,
+				Group:      cmd.Group,
+				Active:     cmd.Active,
+				Confirm:    cmd.Confirm,
+				Options:    cmd.OptionList(),
 			})
 		}
-		sort.SliceStable(out, func(i, j int) bool {
-			if rank[out[i].StationID] != rank[out[j].StationID] {
-				return rank[out[i].StationID] < rank[out[j].StationID]
-			}
-			return out[i].Path < out[j].Path
-		})
 		c.JSON(http.StatusOK, out)
 	}
 }
 
-// invokeCommand proxies one POST to a station's advertised command URL.
+// invokeCommand proxies one POST to a source's advertised command URL.
 // The upstream response is streamed through rather than buffered, so a
 // slow command (model toggles run up to ~60s) can stream progress events
 // that the client sees as they happen; a plain JSON response passes
@@ -93,41 +104,82 @@ func listCommands(db *gorm.DB) gin.HandlerFunc {
 func invokeCommand(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var body struct {
-			StationID uint   `json:"station_id" binding:"required"`
-			Path      string `json:"path" binding:"required"`
+			SourceID uint   `json:"source_id" binding:"required"`
+			Path     string `json:"path" binding:"required"`
+			// Option is the chosen value of a picker command; empty for a
+			// plain one.
+			Option string `json:"option"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 
-		commands, err := database.ListStationCommands(db)
+		sources, err := enabledSources(db)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		var target *database.StationCommand
+		src, ok := sources[body.SourceID]
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "no such metric source"})
+			return
+		}
+
+		commands, err := database.ListCommands(db)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		var target *database.Command
 		for i := range commands {
-			if commands[i].StationID == body.StationID && commands[i].Path == body.Path {
+			if commands[i].SourceID == body.SourceID && commands[i].Path == body.Path {
 				target = &commands[i]
 				break
 			}
 		}
 		if target == nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "no such command for this station"})
+			c.JSON(http.StatusNotFound, gin.H{"error": "no such command for this source"})
 			return
 		}
 
-		req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, target.URL, nil)
+		// A picker command must be run with one of its own options, and a
+		// plain command with none, so the endpoint never sees a value it
+		// didn't offer.
+		var reqBody io.Reader
+		if opts := target.OptionList(); len(opts) > 0 {
+			valid := false
+			for _, o := range opts {
+				if o.Value == body.Option {
+					valid = true
+					break
+				}
+			}
+			if !valid {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "option must be one of the command's options"})
+				return
+			}
+			b, _ := json.Marshal(gin.H{"option": body.Option})
+			reqBody = bytes.NewReader(b)
+		} else if body.Option != "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "this command takes no option"})
+			return
+		}
+
+		req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, target.URL, reqBody)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		// Re-attach the metric source's API key when the command URL shares
-		// its origin — the client authenticates to *this* server, and this
-		// server authenticates onward.
-		if key := metricAPIKeyForOrigin(db, target.URL); key != "" {
-			req.Header.Set("Authorization", "Bearer "+key)
+		if reqBody != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		// The client authenticates to *this* server, and this server
+		// authenticates onward with the source's key — but only when the
+		// command URL is on the source's own origin, so an endpoint can't
+		// steer its key to some other host.
+		if src.APIKey != nil && *src.APIKey != "" && sameOrigin(src.URL, target.URL) {
+			req.Header.Set("Authorization", "Bearer "+*src.APIKey)
 		}
 
 		upstream, err := commandClient.Do(req)
@@ -136,6 +188,12 @@ func invokeCommand(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 		defer upstream.Body.Close()
+		// Once the command's output ends, re-read the source's command list
+		// before the response completes: the app reloads the list as soon as
+		// its request finishes, and should see the state the command just
+		// produced (e.g. the newly active mode), not the last tick's.
+		// Background context: still worth doing if the app hung up.
+		defer metrics.RefreshCommands(context.Background(), db, src)
 
 		w := c.Writer
 		if ct := upstream.Header.Get("Content-Type"); ct != "" {
@@ -166,29 +224,15 @@ func invokeCommand(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
-// metricAPIKeyForOrigin finds the API key of the enabled metric source
-// whose origin (scheme://host[:port]) matches the command URL, so an
-// invoke can authenticate to the target the same way the poller does.
-func metricAPIKeyForOrigin(db *gorm.DB, commandURL string) string {
-	srcs, err := database.ListMetricSources(db)
+// sameOrigin reports whether a and b share scheme://host[:port].
+func sameOrigin(a, b string) bool {
+	ua, err := url.Parse(a)
 	if err != nil {
-		return ""
+		return false
 	}
-	target, err := url.Parse(commandURL)
+	ub, err := url.Parse(b)
 	if err != nil {
-		return ""
+		return false
 	}
-	for _, s := range srcs {
-		if !s.Enabled || s.APIKey == nil {
-			continue
-		}
-		base, err := url.Parse(s.URL)
-		if err != nil {
-			continue
-		}
-		if base.Scheme == target.Scheme && base.Host == target.Host {
-			return *s.APIKey
-		}
-	}
-	return ""
+	return ua.Scheme == ub.Scheme && ua.Host == ub.Host
 }
