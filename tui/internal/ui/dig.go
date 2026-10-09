@@ -9,12 +9,9 @@ import (
 
 // digWords mirror the app's DiggingSpinner list (app/src/components/DiggingSpinner.tsx).
 var digWords = []string{
-	"Burrowing", "Tunneling", "Excavating", "Unearthing", "Delving",
-	"Spelunking", "Trenching", "Shoveling", "Scooping", "Rummaging",
-	"Digging", "Pawing", "Clawing", "Scraping", "Sifting",
-	"Tilling", "Churning", "Boring", "Drilling", "Mining",
-	"Quarrying", "Dredging", "Grubbing", "Rooting", "Prospecting",
-	"Spading", "Hollowing", "Undermining", "Subterraneaning", "Bedrocking",
+	"Digging", "Mining", "Grinding", "Drilling", "Tunneling", "Burrowing",
+	"Excavating", "Chiseling", "Quarrying", "Prospecting", "Unearthing", "Delving",
+	"Shoveling", "Boring", "Dredging", "Spelunking",
 }
 
 const digWordInterval = 2500 * time.Millisecond

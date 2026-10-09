@@ -20,6 +20,12 @@ let
   npmCache = "/var/cache/superbadger-npm";
   webDir = "/var/lib/superbadger/web";
 
+  # What the agent's bash tool can run: everything it runs inherits
+  # opencode-serve's PATH, and NixOS gives a service only
+  # coreutils/findutils/grep/sed/systemd by default.
+  agentPath = with pkgs; [ bash coreutils findutils gnugrep gnused gawk diffutils gnutar gzip which file procps git nix curl ]
+    ++ cfg.opencode.extraPackages;
+
   # System-wide `badger` command (e.g. `badger token generate`) — a thin
   # wrapper so an admin doesn't have to know/export SUPERBADGER_DB_PATH by
   # hand to point it at the same database the running service uses.
@@ -61,6 +67,28 @@ in
         type = lib.types.package;
         default = pkgs.opencode or (throw "pkgs.opencode not found; set services.superbadger.opencode.package");
         description = "opencode package providing the `opencode` binary.";
+      };
+
+      extraPackages = lib.mkOption {
+        type = lib.types.listOf lib.types.package;
+        default = [ ];
+        example = lib.literalExpression "[ pkgs.go pkgs.nodejs_22 pkgs.ripgrep ]";
+        description = ''
+          Extra packages put on the PATH the agent's shell commands run with,
+          on top of a basic toolset (bash, coreutils, git, nix, …) and, unless
+          inheritSystemPath is off, the system profile.
+        '';
+      };
+
+      inheritSystemPath = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = ''
+          Whether the agent's shell commands can also run everything installed
+          system-wide (environment.systemPackages). A systemd service otherwise
+          only gets a bare PATH, so commands the agent reaches for come back
+          "command not found" and it can loop retrying them.
+        '';
       };
     };
 
@@ -209,6 +237,12 @@ in
       description = "opencode headless server (managed by superbadger)";
       wantedBy = [ "multi-user.target" ];
       after = [ "network.target" ];
+      path = agentPath;
+      environment.PATH = lib.mkIf cfg.opencode.inheritSystemPath (lib.mkForce (lib.concatStringsSep ":" [
+        (lib.makeBinPath agentPath)
+        "/run/wrappers/bin"
+        "/run/current-system/sw/bin"
+      ]));
       serviceConfig = {
         ExecStart = "${cfg.opencode.package}/bin/opencode serve --port ${toString cfg.opencode.port} --hostname ${cfg.opencode.hostname}";
         Restart = "always";

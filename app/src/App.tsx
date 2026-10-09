@@ -1,6 +1,8 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   Animated,
+  AppState,
+  AppStateStatus,
   Dimensions,
   PanResponder,
   Platform,
@@ -237,6 +239,21 @@ function AppInner(): React.JSX.Element {
       unsubscribePending();
     };
   }, [openStation]);
+
+  // Tell the notification side which station's chat is on screen, so
+  // opening it (by tap, drawer, swipe or resuming the app onto it) clears
+  // its notifications. Backgrounding counts as not viewing.
+  const viewingId = route.name === 'stationDetail' ? route.id : null;
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const report = (state: AppStateStatus) => {
+      const id = state === 'active' ? viewingId : null;
+      import('./notifications/agentEvents').then(({setViewingStation}) => setViewingStation(id)).catch(() => {});
+    };
+    report(AppState.currentState);
+    const sub = AppState.addEventListener('change', report);
+    return () => sub.remove();
+  }, [viewingId]);
 
   const showingDetailHeader = (route.name === 'stationDetail' || route.name === 'stationSettings') && headerInfo;
   const styles = makeStyles(theme);

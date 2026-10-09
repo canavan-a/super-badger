@@ -4,6 +4,7 @@ import {
   Clipboard,
   FlatList,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -309,15 +310,6 @@ export function StationDetailScreen({
       )}
       {station.directory ? <Text style={styles.directory}>{station.directory}</Text> : null}
 
-      {chat.notice && <Text style={styles.chatNotice}>{chat.notice}</Text>}
-      {chat.error && (
-        <View style={styles.chatErrorRow}>
-          <Text style={styles.chatError}>{chat.error}</Text>
-          <Pressable onPress={dismissError} accessibilityLabel="Dismiss error" hitSlop={8}>
-            <Icon name="close" size={14} color={theme.danger} />
-          </Pressable>
-        </View>
-      )}
       {chat.pendingPermission && (
         <PermissionPrompt
           styles={styles}
@@ -335,16 +327,39 @@ export function StationDetailScreen({
         />
       )}
 
-      <ChatList
-        chat={chat}
-        outbox={outbox}
-        compacting={compacting}
-        hasMoreHistory={hasMoreHistory}
-        loadingOlder={loadingOlder}
-        onLoadOlder={loadOlder}
-        styles={styles}
-        theme={theme}
-      />
+      <View style={styles.chatArea}>
+        <ChatList
+          chat={chat}
+          outbox={outbox}
+          compacting={compacting}
+          hasMoreHistory={hasMoreHistory}
+          loadingOlder={loadingOlder}
+          onLoadOlder={loadOlder}
+          styles={styles}
+          theme={theme}
+        />
+        {
+          // Floated over the top of the chat rather than laid out above it:
+          // an in-flow banner resized the list every time it came or went,
+          // and the list's follow-the-bottom scroll reacting to each resize
+          // could set the screen flashing while an error was up.
+        }
+        {(chat.notice || chat.error) && (
+          <View style={styles.bannerOverlay}>
+            {chat.notice && <Text style={styles.chatNotice}>{chat.notice}</Text>}
+            {chat.error && (
+              <View style={styles.chatErrorRow}>
+                <Text style={styles.chatError} numberOfLines={4}>
+                  {chat.error}
+                </Text>
+                <Pressable onPress={dismissError} accessibilityLabel="Dismiss error" hitSlop={8}>
+                  <Icon name="close" size={14} color={theme.danger} />
+                </Pressable>
+              </View>
+            )}
+          </View>
+        )}
+      </View>
 
       {outbox.length > 0 && (
         <Text style={styles.queueBanner}>
@@ -547,14 +562,50 @@ function ChatList({
   // the next tick's corrected value before it ever renders.
   const scrollSettleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // True from the moment a finger touches the list until its fling settles.
+  // While streaming, every flush calls followBottom, so a user dragging up
+  // from the bottom used to get yanked back down before they ever cleared
+  // the 150px "near bottom" threshold — the list felt glued to the bottom.
+  // Now any upward move by the user unpins immediately, and re-pinning
+  // mid-gesture takes actually coming back to the very bottom.
+  const userScrolling = useRef(false);
+  const userScrollEndTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastOffsetY = useRef(0);
+  const beginUserScroll = () => {
+    if (userScrollEndTimer.current) clearTimeout(userScrollEndTimer.current);
+    userScrolling.current = true;
+  };
+  // A drag that ends without a fling never fires onMomentumScrollEnd, so
+  // the flag is dropped after a beat unless onMomentumScrollBegin claims it.
+  const endDrag = () => {
+    if (userScrollEndTimer.current) clearTimeout(userScrollEndTimer.current);
+    userScrollEndTimer.current = setTimeout(() => {
+      userScrolling.current = false;
+    }, 250);
+  };
+  const endMomentum = () => {
+    if (userScrollEndTimer.current) clearTimeout(userScrollEndTimer.current);
+    userScrolling.current = false;
+  };
+
   const handleScroll = (e: any) => {
     const {contentOffset, contentSize, layoutMeasurement} = e.nativeEvent;
     const distanceFromBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
+    // followBottom only ever scrolls down, so moving up is the user — a
+    // touch gesture, or the wheel/scrollbar on web (which has no drag events).
+    const movedUp = contentOffset.y < lastOffsetY.current - 1;
+    lastOffsetY.current = contentOffset.y;
+    const byUser = userScrolling.current || Platform.OS === 'web';
     // Keeps auto-follow (streaming replies pinning to the bottom) responsive
     // at a tight threshold — separate from the "Jump to bottom" button below,
     // which should only appear once you've actually scrolled away by a
     // decent amount, not the instant you nudge up a little.
-    const nearBottom = distanceFromBottom < 150;
+    let nearBottom = distanceFromBottom < 150;
+    if (movedUp && byUser) {
+      nearBottom = false;
+    } else if (userScrolling.current && !isNearBottom.current) {
+      nearBottom = distanceFromBottom < 24;
+    }
     isNearBottom.current = nearBottom;
     const scrolledUpAlot = distanceFromBottom > layoutMeasurement.height * 2;
 
@@ -664,6 +715,10 @@ function ChatList({
         renderItem={renderItem}
         contentContainerStyle={styles.chatContent}
         onScroll={handleScroll}
+        onScrollBeginDrag={beginUserScroll}
+        onScrollEndDrag={endDrag}
+        onMomentumScrollBegin={beginUserScroll}
+        onMomentumScrollEnd={endMomentum}
         scrollEventThrottle={16}
         // Keeps the viewport's visible content stable when older turns are
         // prepended by the pagination above, instead of the scroll position
@@ -882,6 +937,18 @@ function isEmptyUserTurn(t: Turn | undefined): boolean {
   );
 }
 
+// Mirrors the TUI's thinking() (tui/internal/ui/dig.go): an in-flight
+// reply is "thinking" while its latest part is reasoning, or before anything
+// has streamed at all.
+function isThinking(turn: Turn): boolean {
+  for (let i = turn.partOrder.length - 1; i >= 0; i--) {
+    const part = turn.parts[turn.partOrder[i]];
+    if (!part || part.kind === 'step-finish') continue;
+    return part.kind === 'reasoning';
+  }
+  return true;
+}
+
 // Memoized: without this, every mounted bubble re-renders on every 150ms WS
 // flush tick (see useStationChat's FLUSH_INTERVAL_MS comment) even though
 // only the actively-streaming turn's data actually changed — chat.ts's
@@ -933,10 +1000,10 @@ const TurnView = React.memo(function TurnView({
         // unaffected by this check.
         <Text style={styles.chip}>⚙ Compaction triggered</Text>
       ) : (
-        // Stays at the tail of the bubble for the whole reply, not just
-        // before the first part — so it's still visible under a long
-        // streamed Thinking block.
-        !turn.done && <DiggingSpinner />
+        // Sits on its own line at the tail of the bubble, but only while the
+        // model is thinking — not while it streams its answer or a tool runs,
+        // which show their own progress.
+        !turn.done && isThinking(turn) && <DiggingSpinner />
       )}
     </View>
   );
@@ -1291,6 +1358,17 @@ function makeStyles(theme: Theme) {
       paddingHorizontal: 16,
       paddingTop: 8,
     },
+    chatArea: {
+      flex: 1,
+    },
+    bannerOverlay: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      zIndex: 2,
+      elevation: 2,
+    },
     chatErrorRow: {
       flexDirection: 'row',
       alignItems: 'flex-start',
@@ -1298,6 +1376,10 @@ function makeStyles(theme: Theme) {
       gap: 8,
       paddingHorizontal: 16,
       paddingTop: 8,
+      paddingBottom: 8,
+      backgroundColor: theme.dangerBg,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.danger,
     },
     chatError: {
       flex: 1,
@@ -1309,6 +1391,8 @@ function makeStyles(theme: Theme) {
       color: theme.textMuted,
       paddingHorizontal: 16,
       paddingTop: 8,
+      paddingBottom: 8,
+      backgroundColor: theme.surface,
       fontSize: 13,
       fontStyle: 'italic',
     },

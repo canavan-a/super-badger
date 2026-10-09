@@ -1,59 +1,51 @@
-import React, {useEffect, useState} from 'react';
-import {AccessibilityInfo, ActivityIndicator, Animated, Easing, Platform, StyleSheet, Text, View} from 'react-native';
+import React, {useEffect, useMemo, useState} from 'react';
+import {AccessibilityInfo, Animated, Easing, Platform, StyleSheet, Text, View} from 'react-native';
 import {useTheme} from '../theme';
 
+// Mirrored by the TUI's digWords (tui/internal/ui/dig.go) — keep the two in
+// step. Its length must stay coprime with 7 (the TUI walks it with stride 7).
 export const DIG_WORDS = [
-  'Burrowing',
+  'Digging',
+  'Mining',
+  'Grinding',
+  'Drilling',
   'Tunneling',
+  'Burrowing',
   'Excavating',
+  'Chiseling',
+  'Quarrying',
+  'Prospecting',
   'Unearthing',
   'Delving',
-  'Spelunking',
-  'Trenching',
   'Shoveling',
-  'Scooping',
-  'Rummaging',
-  'Digging',
-  'Pawing',
-  'Clawing',
-  'Scraping',
-  'Sifting',
-  'Tilling',
-  'Churning',
   'Boring',
-  'Drilling',
-  'Mining',
-  'Quarrying',
   'Dredging',
-  'Grubbing',
-  'Rooting',
-  'Prospecting',
-  'Spading',
-  'Hollowing',
-  'Undermining',
-  'Subterraneaning',
-  'Bedrocking',
+  'Spelunking',
 ];
 
 const WORD_INTERVAL_MS = 2500;
-const DOTS_INTERVAL_MS = 400;
 
-// Minecraft-style dirt chunks kicked up beside the word: square, unrotated,
-// a few browns. Each particle loops its own arc (dx sideways, up by `peak`,
-// then falls past its start) on a staggered offset so they never move in
-// lockstep.
+// A 3x3 patch of Minecraft-style dirt blocks. One block at a time gets dug
+// out (dims, then slowly refills), walking the grid in a scattered order,
+// and each dig kicks a few chunks of dirt up off that block.
 const DIRT_COLORS = ['#8B5A2B', '#6B4423', '#A0522D', '#5C3A1E'];
-const PARTICLES = [
-  {dx: -10, peak: 9, size: 3, duration: 700, delay: 0},
-  {dx: 8, peak: 12, size: 4, duration: 800, delay: 120},
-  {dx: -4, peak: 14, size: 3, duration: 650, delay: 260},
-  {dx: 12, peak: 7, size: 2, duration: 600, delay: 380},
-  {dx: -13, peak: 5, size: 2, duration: 550, delay: 470},
-  {dx: 3, peak: 10, size: 4, duration: 750, delay: 560},
+const GRID = 3;
+const CELL = 4;
+const GAP = 1;
+const GRID_PX = GRID * CELL + (GRID - 1) * GAP;
+const DIG_ORDER = [4, 0, 7, 2, 5, 8, 1, 6, 3];
+const STEP_MS = 160;
+const PERIOD_MS = DIG_ORDER.length * STEP_MS;
+const DIG_MS = 90;
+const REFILL_MS = 520;
+const FLY_MS = 480;
+// Per dig: a couple of chunks thrown sideways (dx) and up (peak).
+const CHUNKS = [
+  {dx: -5, peak: 7, size: 2},
+  {dx: 4, peak: 9, size: 2},
 ];
-const BURST_W = 30;
-const BURST_H = 18;
-const FALL = 4;
+
+const useNative = Platform.OS !== 'web';
 
 function randomWord(exclude?: string): string {
   let word = exclude;
@@ -63,66 +55,97 @@ function randomWord(exclude?: string): string {
   return word!;
 }
 
-function DirtParticle({p, color}: {p: (typeof PARTICLES)[number]; color: string}): React.JSX.Element {
-  const [t] = useState(() => new Animated.Value(0));
+// The fraction of the cycle each phase of a dig takes, from the moment the
+// block is hit.
+const DUG = DIG_MS / PERIOD_MS;
+const REFILLED = (DIG_MS + REFILL_MS) / PERIOD_MS;
+const FLOWN = FLY_MS / PERIOD_MS;
 
-  useEffect(() => {
-    const anim = Animated.loop(
-      Animated.sequence([
-        Animated.delay(p.delay),
-        Animated.timing(t, {
-          toValue: 1,
-          duration: p.duration,
-          easing: Easing.linear,
-          useNativeDriver: Platform.OS !== 'web',
-        }),
-      ]),
-    );
-    anim.start();
-    return () => anim.stop();
-  }, [p, t]);
+// `clock` runs 0→1 once per cycle, shared by every block so they never drift
+// apart; each block shifts it so that its own dig lands at local time 0.
+function DirtBlock({
+  index,
+  slot,
+  clock,
+}: {
+  index: number;
+  slot: number;
+  clock: Animated.Value | null;
+}): React.JSX.Element {
+  const col = index % GRID;
+  const row = Math.floor(index / GRID);
+  const left = col * (CELL + GAP);
+  const top = row * (CELL + GAP);
+  const color = DIRT_COLORS[(index * 3) % DIRT_COLORS.length];
+  const t = useMemo(
+    () => (clock ? Animated.modulo(Animated.add(clock, 1 - slot / DIG_ORDER.length), 1) : null),
+    [clock, slot],
+  );
 
+  if (!t) return <View style={[styles.cell, {left, top, backgroundColor: color}]} />;
   return (
-    <Animated.View
-      style={[
-        styles.particle,
-        {
-          width: p.size,
-          height: p.size,
-          backgroundColor: color,
-          opacity: t.interpolate({inputRange: [0, 0.7, 1], outputRange: [1, 1, 0]}),
-          transform: [
-            {translateX: t.interpolate({inputRange: [0, 1], outputRange: [0, p.dx]})},
+    <>
+      <Animated.View
+        style={[
+          styles.cell,
+          {
+            left,
+            top,
+            backgroundColor: color,
+            opacity: t.interpolate({
+              inputRange: [0, DUG, REFILLED, 1],
+              outputRange: [1, 0.12, 1, 1],
+            }),
+          },
+        ]}
+      />
+      {CHUNKS.map((c, i) => (
+        <Animated.View
+          key={i}
+          style={[
+            styles.chunk,
             {
-              translateY: t.interpolate({
-                inputRange: [0, 0.4, 1],
-                outputRange: [0, -p.peak, FALL],
-                easing: Easing.out(Easing.quad),
+              left: left + (CELL - c.size) / 2,
+              top: top + (CELL - c.size) / 2,
+              width: c.size,
+              height: c.size,
+              backgroundColor: DIRT_COLORS[(index + i + 1) % DIRT_COLORS.length],
+              opacity: t.interpolate({
+                inputRange: [0, FLOWN * 0.7, FLOWN, 1],
+                outputRange: [1, 1, 0, 0],
               }),
+              transform: [
+                {
+                  translateX: t.interpolate({
+                    inputRange: [0, FLOWN, 1],
+                    outputRange: [0, c.dx, c.dx],
+                  }),
+                },
+                {
+                  translateY: t.interpolate({
+                    inputRange: [0, FLOWN * 0.4, FLOWN, 1],
+                    outputRange: [0, -c.peak, 2, 2],
+                  }),
+                },
+              ],
             },
-          ],
-        },
-      ]}
-    />
+          ]}
+        />
+      ))}
+    </>
   );
 }
 
-// Claude-style "busy" line: a spinner plus a rotating digging word, shown at
-// the tail of an in-flight assistant reply, with dirt flying off the end.
+// Shown at the tail of an in-flight reply while the model is thinking: a
+// little patch of dirt being dug out, and a rotating digging word.
 export function DiggingSpinner(): React.JSX.Element {
   const theme = useTheme();
   const [word, setWord] = useState(() => randomWord());
   const [reduceMotion, setReduceMotion] = useState(false);
-
-  const [dots, setDots] = useState(0);
+  const [clock] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
     const timer = setInterval(() => setWord(w => randomWord(w)), WORD_INTERVAL_MS);
-    return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    const timer = setInterval(() => setDots(d => (d + 1) % 4), DOTS_INTERVAL_MS);
     return () => clearInterval(timer);
   }, []);
 
@@ -137,23 +160,28 @@ export function DiggingSpinner(): React.JSX.Element {
     };
   }, []);
 
+  useEffect(() => {
+    if (reduceMotion) return;
+    const anim = Animated.loop(
+      Animated.timing(clock, {
+        toValue: 1,
+        duration: PERIOD_MS,
+        easing: Easing.linear,
+        useNativeDriver: useNative,
+      }),
+    );
+    anim.start();
+    return () => anim.stop();
+  }, [clock, reduceMotion]);
+
   return (
-    <View style={styles.row}>
-      <ActivityIndicator size="small" color={theme.textMuted} />
-      <Text style={[styles.word, {color: theme.textMuted}]}>
-        {word}{' '}
-        {/* Dirt clods pile up in place of "..."; the invisible remainder keeps
-            the width fixed so the particles don't shift. */}
-        <Text style={{color: DIRT_COLORS[0]}}>{'▪'.repeat(dots)}</Text>
-        <Text style={styles.hiddenDots}>{'▪'.repeat(3 - dots)}</Text>
-      </Text>
-      {!reduceMotion && (
-        <View style={styles.burst} pointerEvents="none">
-          {PARTICLES.map((p, i) => (
-            <DirtParticle key={i} p={p} color={DIRT_COLORS[i % DIRT_COLORS.length]} />
-          ))}
-        </View>
-      )}
+    <View style={styles.row} accessibilityLabel={word}>
+      <View style={styles.grid} pointerEvents="none">
+        {DIG_ORDER.map((cellIndex, slot) => (
+          <DirtBlock key={cellIndex} index={cellIndex} slot={slot} clock={reduceMotion ? null : clock} />
+        ))}
+      </View>
+      <Text style={[styles.word, {color: theme.textMuted}]}>{word}</Text>
     </View>
   );
 }
@@ -162,22 +190,23 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
+    paddingTop: 4,
+  },
+  grid: {
+    width: GRID_PX,
+    height: GRID_PX,
+  },
+  cell: {
+    position: 'absolute',
+    width: CELL,
+    height: CELL,
+  },
+  chunk: {
+    position: 'absolute',
   },
   word: {
     fontSize: 12,
     fontStyle: 'italic',
-  },
-  hiddenDots: {
-    opacity: 0,
-  },
-  burst: {
-    width: BURST_W,
-    height: BURST_H,
-  },
-  particle: {
-    position: 'absolute',
-    left: BURST_W / 2,
-    bottom: FALL,
   },
 });

@@ -8,6 +8,9 @@
 import notifee from '@notifee/react-native';
 
 import {formatDataPointValue} from '../api';
+import {rgbToHex, themeAccent} from '../logo/logoTheme';
+import {settingsStore} from '../settings';
+import {THEMES} from '../theme';
 import {CH_ALERTS, PRESS_ACTION} from './channels';
 
 export interface NotificationMsg {
@@ -46,7 +49,41 @@ async function clearChatNotifications(stationId: number): Promise<void> {
   );
 }
 
+// The tint for the status-bar icon and the notification's accent: the
+// station's own color when it has one, else the app theme's accent — the
+// same color the themed launcher icon's S is drawn in.
+export async function notificationColor(stationColor?: string): Promise<string> {
+  if (stationColor) return stationColor;
+  const {themeName} = await settingsStore.load();
+  return rgbToHex(themeAccent(THEMES[themeName] ?? THEMES.light));
+}
+
+// The station whose chat is on screen with the app in the foreground, or
+// null. Set by App.tsx. Its notifications are cleared the moment it's opened
+// (that *is* "coming to look"), and new chat pings for it are skipped — no
+// point buzzing about a conversation the owner is already watching.
+let viewingStation: number | null = null;
+
+export async function setViewingStation(stationId: number | null): Promise<void> {
+  viewingStation = stationId;
+  if (stationId !== null) await clearStationNotifications(stationId);
+}
+
+// Opening a station acknowledges everything it raised, threshold alerts
+// included — its datapoints are right there in the header.
+async function clearStationNotifications(stationId: number): Promise<void> {
+  const stationTag = String(stationId);
+  const displayed = await notifee.getDisplayedNotifications();
+  await Promise.all(
+    displayed
+      .filter(d => d.notification.data?.stationId === stationTag)
+      .map(d => notifee.cancelNotification(d.notification.id!)),
+  );
+}
+
 export async function handleNotificationMsg(msg: NotificationMsg): Promise<void> {
+  if (msg.station_id === viewingStation && msg.type !== 'datapoint_threshold') return;
+
   // Both kinds clear prior *chat* notifications for the station ("a data
   // notification overrides chat, but chat never clears data" — see above);
   // neither kind ever cancels an existing data notification.
@@ -67,6 +104,7 @@ export async function handleNotificationMsg(msg: NotificationMsg): Promise<void>
   }
 
   const data = (kind: NotificationKind) => ({stationId: String(msg.station_id), kind});
+  const color = await notificationColor(msg.station_color);
 
   switch (msg.type) {
     case 'agent_idle':
@@ -81,7 +119,7 @@ export async function handleNotificationMsg(msg: NotificationMsg): Promise<void>
           pressAction: PRESS_ACTION,
           timestamp: Date.now(),
           showTimestamp: true,
-          color: msg.station_color,
+          color,
         },
       });
       return;
@@ -97,7 +135,7 @@ export async function handleNotificationMsg(msg: NotificationMsg): Promise<void>
           pressAction: PRESS_ACTION,
           timestamp: Date.now(),
           showTimestamp: true,
-          color: msg.station_color,
+          color,
         },
       });
       return;
@@ -113,7 +151,7 @@ export async function handleNotificationMsg(msg: NotificationMsg): Promise<void>
           pressAction: PRESS_ACTION,
           timestamp: Date.now(),
           showTimestamp: true,
-          color: msg.station_color,
+          color,
         },
       });
       return;
@@ -131,7 +169,7 @@ export async function handleNotificationMsg(msg: NotificationMsg): Promise<void>
           pressAction: PRESS_ACTION,
           timestamp: Date.now(),
           showTimestamp: true,
-          color: msg.station_color,
+          color,
         },
       });
       return;
