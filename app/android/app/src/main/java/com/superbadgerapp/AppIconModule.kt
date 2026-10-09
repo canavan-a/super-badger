@@ -2,15 +2,10 @@ package com.superbadgerapp
 
 import android.content.ComponentName
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
-import android.graphics.Canvas
-import androidx.core.content.ContextCompat
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
-import java.io.File
-import java.io.FileOutputStream
 
 /**
  * Switches the launcher icon between the per-theme versions.
@@ -75,48 +70,7 @@ class AppIconModule(private val reactContext: ReactApplicationContext) :
     }
   }
 
-  /**
-   * Resolves with a file:// URI of [name]'s launcher icon rendered to a PNG,
-   * for a notification's large icon. Without one, a notification can only show
-   * the app's static <application android:icon>, which is always the light
-   * one whatever alias is enabled. Notifee loads large icons through Fresco,
-   * which can't decode the adaptive-icon XML mipmaps, hence the PNG. Rendered
-   * once per theme and cached.
-   */
-  @ReactMethod
-  fun notificationIconUri(name: String, promise: Promise) {
-    if (name !in themes) {
-      promise.reject("E_BAD_ICON", "Unknown icon: $name")
-      return
-    }
-    try {
-      val file = File(reactContext.cacheDir, "notif_icon_${name}_v$ICON_VERSION.png")
-      if (!file.exists()) {
-        val res =
-            reactContext.resources.getIdentifier(
-                "ic_launcher_$name", "mipmap", reactContext.packageName)
-        val drawable =
-            ContextCompat.getDrawable(reactContext, res)
-                ?: throw IllegalStateException("No launcher icon for $name")
-        val bitmap = Bitmap.createBitmap(ICON_PX, ICON_PX, Bitmap.Config.ARGB_8888)
-        drawable.setBounds(0, 0, ICON_PX, ICON_PX)
-        drawable.draw(Canvas(bitmap))
-        // Write then rename, so a half-written file is never picked up as cached.
-        val tmp = File(file.path + ".tmp")
-        FileOutputStream(tmp).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-        tmp.renameTo(file)
-      }
-      promise.resolve("file://" + file.absolutePath)
-    } catch (e: Exception) {
-      promise.reject("E_ICON_URI", e)
-    }
-  }
-
   companion object {
     private const val DEFAULT = "light"
-    private const val ICON_PX = 192
-    // Bump when the generated launcher art changes, so PNGs cached by an
-    // older build aren't reused.
-    private const val ICON_VERSION = 1
   }
 }

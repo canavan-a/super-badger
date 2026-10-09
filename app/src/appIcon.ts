@@ -17,7 +17,6 @@ export const DEFAULT_ICON: ThemeName = 'light';
 interface NativeAppIcon {
   setIcon(name: string): Promise<boolean>;
   getIcon(): Promise<string>;
-  notificationIconUri(name: string): Promise<string>;
 }
 
 function native(): NativeAppIcon | undefined {
@@ -47,22 +46,6 @@ export async function getAppIcon(): Promise<ThemeName | null> {
 /** The icon that should be showing, given the theme and the setting. */
 export function wantedIcon(theme: ThemeName, enabled: boolean): ThemeName {
   return enabled ? theme : DEFAULT_ICON;
-}
-
-/**
- * A file:// URI of the launcher icon matching the current theme (and the
- * themed-icon setting), for a notification's largeIcon — or undefined if it
- * can't be had, in which case the notification just goes without one.
- */
-export async function notificationIconUri(): Promise<string | undefined> {
-  const mod = native();
-  if (!mod) return undefined;
-  try {
-    const {themeName, themedIcon} = await settingsStore.load();
-    return await mod.notificationIconUri(wantedIcon(themeName, themedIcon));
-  } catch {
-    return undefined;
-  }
 }
 
 /**
