@@ -136,6 +136,19 @@ in
           /mullvad/lan API endpoint.
         '';
       };
+
+      lockdown = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = ''
+          Whether to block all network traffic whenever the Mullvad tunnel is
+          not connected, so nothing falls back to the regular network. This
+          is Mullvad's own "lockdown mode" (`mullvad lockdown-mode set on`),
+          applied once at activation. Local network traffic still gets
+          through while allowLan is set, so the host stays reachable on the
+          LAN.
+        '';
+      };
     };
   };
 
@@ -146,18 +159,21 @@ in
 
     # mullvad-daemon's control socket (/run/mullvad-vpn) is world read/write,
     # so the unprivileged superbadger user can drive the `mullvad` CLI
-    # without extra group wiring. Apply the LAN passthrough setting once at
-    # activation, after the daemon unit exists; the API can still change it
-    # at runtime.
-    systemd.services.superbadger-mullvad-lan = lib.mkIf cfg.mullvad.enable {
-      description = "Apply superbadger's configured Mullvad LAN sharing setting";
+    # without extra group wiring. Apply the LAN passthrough and lockdown
+    # settings once at activation, after the daemon unit exists; the API can
+    # still change LAN sharing at runtime.
+    systemd.services.superbadger-mullvad-settings = lib.mkIf cfg.mullvad.enable {
+      description = "Apply superbadger's configured Mullvad LAN sharing and lockdown settings";
       after = [ "mullvad-daemon.service" ];
       wants = [ "mullvad-daemon.service" ];
       wantedBy = [ "multi-user.target" ];
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
-        ExecStart = "${config.services.mullvad-vpn.package}/bin/mullvad lan set ${if cfg.mullvad.allowLan then "allow" else "block"}";
+        ExecStart = [
+          "${config.services.mullvad-vpn.package}/bin/mullvad lan set ${if cfg.mullvad.allowLan then "allow" else "block"}"
+          "${config.services.mullvad-vpn.package}/bin/mullvad lockdown-mode set ${if cfg.mullvad.lockdown then "on" else "off"}"
+        ];
         # after/wants above only order this against mullvad-daemon.service's
         # own start, not against its RPC socket actually being ready —
         # `mullvad lan set` can still lose that race and fail with "transport
