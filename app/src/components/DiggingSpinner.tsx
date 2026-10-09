@@ -25,24 +25,32 @@ export const DIG_WORDS = [
 
 const WORD_INTERVAL_MS = 2500;
 
-// A 3x3 patch of Minecraft-style dirt blocks. One block at a time gets dug
-// out (dims, then slowly refills), walking the grid in a scattered order,
-// and each dig kicks a few chunks of dirt up off that block.
+// A drill bit pointing down, drawn in the word's text color: the chuck on
+// top, a fluted bit whose flutes scroll upward so it reads as spinning, and
+// a point at the bottom that kicks chunks of dirt up and out to either side.
 const DIRT_COLORS = ['#8B5A2B', '#6B4423', '#A0522D', '#5C3A1E'];
-const GRID = 3;
-const CELL = 4;
-const GAP = 1;
-const GRID_PX = GRID * CELL + (GRID - 1) * GAP;
-const DIG_ORDER = [4, 0, 7, 2, 5, 8, 1, 6, 3];
-const STEP_MS = 160;
-const PERIOD_MS = DIG_ORDER.length * STEP_MS;
-const DIG_MS = 90;
-const REFILL_MS = 520;
-const FLY_MS = 480;
-// Per dig: a couple of chunks thrown sideways (dx) and up (peak).
+const BOX_W = 14;
+const BOX_H = 16;
+const CHUCK_W = 8;
+const CHUCK_H = 4;
+const BIT_W = 4;
+const BIT_H = 8;
+const TIP_H = 4;
+const BIT_LEFT = (BOX_W - BIT_W) / 2;
+// Flutes: diagonal stripes PITCH apart, scrolled up two pitches per cycle (a
+// whole number of pitches, so the loop is seamless).
+const PITCH = 3;
+const FLUTES = [-1, 0, 1, 2, 3, 4, 5].map(i => i * PITCH);
+const PERIOD_MS = 700;
+// The fraction of the cycle a chunk spends in the air.
+const FLY = 0.55;
+// Chunks thrown off the tip, each launched at its own point (`at`) in the
+// cycle: sideways (dx) and up (peak).
 const CHUNKS = [
-  {dx: -5, peak: 7, size: 2},
-  {dx: 4, peak: 9, size: 2},
+  {at: 0, dx: -6, peak: 7, size: 2},
+  {at: 0.25, dx: 5, peak: 9, size: 1.5},
+  {at: 0.5, dx: -4, peak: 10, size: 1.5},
+  {at: 0.75, dx: 6, peak: 6, size: 2},
 ];
 
 const useNative = Platform.OS !== 'web';
@@ -55,89 +63,83 @@ function randomWord(exclude?: string): string {
   return word!;
 }
 
-// The fraction of the cycle each phase of a dig takes, from the moment the
-// block is hit.
-const DUG = DIG_MS / PERIOD_MS;
-const REFILLED = (DIG_MS + REFILL_MS) / PERIOD_MS;
-const FLOWN = FLY_MS / PERIOD_MS;
-
-// `clock` runs 0→1 once per cycle, shared by every block so they never drift
-// apart; each block shifts it so that its own dig lands at local time 0.
-function DirtBlock({
+// `clock` runs 0→1 once per cycle, shared by every chunk so they never drift
+// apart; each chunk shifts it so that its own launch lands at local time 0.
+function Chunk({
+  chunk,
   index,
-  slot,
   clock,
 }: {
+  chunk: (typeof CHUNKS)[number];
   index: number;
-  slot: number;
-  clock: Animated.Value | null;
+  clock: Animated.Value;
 }): React.JSX.Element {
-  const col = index % GRID;
-  const row = Math.floor(index / GRID);
-  const left = col * (CELL + GAP);
-  const top = row * (CELL + GAP);
-  const color = DIRT_COLORS[(index * 3) % DIRT_COLORS.length];
-  const t = useMemo(
-    () => (clock ? Animated.modulo(Animated.add(clock, 1 - slot / DIG_ORDER.length), 1) : null),
-    [clock, slot],
-  );
-
-  if (!t) return <View style={[styles.cell, {left, top, backgroundColor: color}]} />;
+  const t = useMemo(() => Animated.modulo(Animated.add(clock, 1 - chunk.at), 1), [clock, chunk.at]);
   return (
-    <>
-      <Animated.View
-        style={[
-          styles.cell,
-          {
-            left,
-            top,
-            backgroundColor: color,
-            opacity: t.interpolate({
-              inputRange: [0, DUG, REFILLED, 1],
-              outputRange: [1, 0.12, 1, 1],
-            }),
-          },
-        ]}
-      />
-      {CHUNKS.map((c, i) => (
-        <Animated.View
-          key={i}
-          style={[
-            styles.chunk,
+    <Animated.View
+      style={[
+        styles.chunk,
+        {
+          left: (BOX_W - chunk.size) / 2,
+          top: BOX_H - chunk.size - 1,
+          width: chunk.size,
+          height: chunk.size,
+          backgroundColor: DIRT_COLORS[index % DIRT_COLORS.length],
+          opacity: t.interpolate({
+            inputRange: [0, FLY * 0.7, FLY, 1],
+            outputRange: [1, 1, 0, 0],
+          }),
+          transform: [
             {
-              left: left + (CELL - c.size) / 2,
-              top: top + (CELL - c.size) / 2,
-              width: c.size,
-              height: c.size,
-              backgroundColor: DIRT_COLORS[(index + i + 1) % DIRT_COLORS.length],
-              opacity: t.interpolate({
-                inputRange: [0, FLOWN * 0.7, FLOWN, 1],
-                outputRange: [1, 1, 0, 0],
+              translateX: t.interpolate({
+                inputRange: [0, FLY, 1],
+                outputRange: [0, chunk.dx, chunk.dx],
               }),
-              transform: [
-                {
-                  translateX: t.interpolate({
-                    inputRange: [0, FLOWN, 1],
-                    outputRange: [0, c.dx, c.dx],
-                  }),
-                },
-                {
-                  translateY: t.interpolate({
-                    inputRange: [0, FLOWN * 0.4, FLOWN, 1],
-                    outputRange: [0, -c.peak, 2, 2],
-                  }),
-                },
-              ],
             },
-          ]}
-        />
-      ))}
-    </>
+            {
+              translateY: t.interpolate({
+                inputRange: [0, FLY * 0.4, FLY, 1],
+                outputRange: [0, -chunk.peak, 1, 1],
+              }),
+            },
+          ],
+        },
+      ]}
+    />
+  );
+}
+
+function Drill({color, clock}: {color: string; clock: Animated.Value | null}): React.JSX.Element {
+  const scroll = useMemo(
+    () => (clock ? clock.interpolate({inputRange: [0, 1], outputRange: [0, -2 * PITCH]}) : 0),
+    [clock],
+  );
+  // A slight bob, as if bearing down into the ground.
+  const bob = useMemo(
+    () => (clock ? clock.interpolate({inputRange: [0, 0.5, 1], outputRange: [0, 0.75, 0]}) : 0),
+    [clock],
+  );
+  return (
+    <View style={styles.box} pointerEvents="none">
+      <Animated.View style={[StyleSheet.absoluteFill, {transform: [{translateY: bob}]}]}>
+        <View style={[styles.chuck, {backgroundColor: color}]} />
+        <View style={styles.bit}>
+          <View style={[styles.bitBody, {backgroundColor: color}]} />
+          <Animated.View style={[StyleSheet.absoluteFill, {transform: [{translateY: scroll}]}]}>
+            {FLUTES.map(y => (
+              <View key={y} style={[styles.flute, {top: y, backgroundColor: color}]} />
+            ))}
+          </Animated.View>
+        </View>
+        <View style={[styles.tip, {borderTopColor: color}]} />
+      </Animated.View>
+      {clock && CHUNKS.map((c, i) => <Chunk key={i} chunk={c} index={i} clock={clock} />)}
+    </View>
   );
 }
 
 // Shown at the tail of an in-flight reply while the model is thinking: a
-// little patch of dirt being dug out, and a rotating digging word.
+// little drill boring down, and a rotating digging word.
 export function DiggingSpinner(): React.JSX.Element {
   const theme = useTheme();
   const [word, setWord] = useState(() => randomWord());
@@ -176,11 +178,7 @@ export function DiggingSpinner(): React.JSX.Element {
 
   return (
     <View style={styles.row} accessibilityLabel={word}>
-      <View style={styles.grid} pointerEvents="none">
-        {DIG_ORDER.map((cellIndex, slot) => (
-          <DirtBlock key={cellIndex} index={cellIndex} slot={slot} clock={reduceMotion ? null : clock} />
-        ))}
-      </View>
+      <Drill color={theme.textMuted} clock={reduceMotion ? null : clock} />
       <Text style={[styles.word, {color: theme.textMuted}]}>{word}</Text>
     </View>
   );
@@ -193,14 +191,48 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingTop: 4,
   },
-  grid: {
-    width: GRID_PX,
-    height: GRID_PX,
+  box: {
+    width: BOX_W,
+    height: BOX_H,
   },
-  cell: {
+  chuck: {
     position: 'absolute',
-    width: CELL,
-    height: CELL,
+    left: (BOX_W - CHUCK_W) / 2,
+    top: 0,
+    width: CHUCK_W,
+    height: CHUCK_H,
+    borderRadius: 1,
+  },
+  bit: {
+    position: 'absolute',
+    left: BIT_LEFT,
+    top: CHUCK_H,
+    width: BIT_W,
+    height: BIT_H,
+    overflow: 'hidden',
+  },
+  bitBody: {
+    ...StyleSheet.absoluteFillObject,
+    opacity: 0.4,
+  },
+  flute: {
+    position: 'absolute',
+    left: -2,
+    width: BIT_W + 4,
+    height: 1.25,
+    transform: [{rotate: '-30deg'}],
+  },
+  tip: {
+    position: 'absolute',
+    left: BIT_LEFT,
+    top: CHUCK_H + BIT_H,
+    width: 0,
+    height: 0,
+    borderLeftWidth: BIT_W / 2,
+    borderRightWidth: BIT_W / 2,
+    borderTopWidth: TIP_H,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
   },
   chunk: {
     position: 'absolute',
