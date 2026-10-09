@@ -1,6 +1,7 @@
-import React, {useEffect, useMemo, useState} from 'react';
+import React, {useEffect, useId, useMemo, useState} from 'react';
 import {AccessibilityInfo, Animated, Easing, Platform, StyleSheet, Text, View} from 'react-native';
 import {useTheme} from '../theme';
+import Svg, {ClipPath, Defs, G, Line, Polygon, Rect} from 'react-native-svg';
 
 // Mirrored by the TUI's digWords (tui/internal/ui/dig.go) — keep the two in
 // step. Its length must stay coprime with 7 (the TUI walks it with stride 7).
@@ -25,32 +26,30 @@ export const DIG_WORDS = [
 
 const WORD_INTERVAL_MS = 2500;
 
-// A drill bit pointing down, drawn in the word's text color: the chuck on
-// top, a fluted bit whose flutes scroll upward so it reads as spinning, and
-// a point at the bottom that kicks chunks of dirt up and out to either side.
+// A cartoon drill pointing down, drawn in the word's text color: a shank and
+// collar on top, then a fat cone tapering to a point, wrapped in spiral
+// grooves. It spins by flipping through FRAMES copies of the cone with the
+// grooves shifted a fraction of a pitch each, and the point kicks chunks of
+// dirt up and out to either side.
 const DIRT_COLORS = ['#8B5A2B', '#6B4423', '#A0522D', '#5C3A1E'];
-const BOX_W = 14;
-const BOX_H = 16;
-const CHUCK_W = 8;
-const CHUCK_H = 4;
-const BIT_W = 4;
-const BIT_H = 8;
-const TIP_H = 4;
-const BIT_LEFT = (BOX_W - BIT_W) / 2;
-// Flutes: diagonal stripes PITCH apart, scrolled up two pitches per cycle (a
-// whole number of pitches, so the loop is seamless).
-const PITCH = 3;
-const FLUTES = [-1, 0, 1, 2, 3, 4, 5].map(i => i * PITCH);
+const BOX_W = 16;
+const BOX_H = 20;
+const CONE = '2,7 14,7 8,19.5';
+const PITCH = 4;
+const GROOVES = [-1, 0, 1, 2, 3, 4, 5];
+const FRAMES = 3;
+// Each cycle runs through the frames this many times.
+const SPINS = 2;
 const PERIOD_MS = 700;
 // The fraction of the cycle a chunk spends in the air.
 const FLY = 0.55;
 // Chunks thrown off the tip, each launched at its own point (`at`) in the
 // cycle: sideways (dx) and up (peak).
 const CHUNKS = [
-  {at: 0, dx: -6, peak: 7, size: 2},
-  {at: 0.25, dx: 5, peak: 9, size: 1.5},
-  {at: 0.5, dx: -4, peak: 10, size: 1.5},
-  {at: 0.75, dx: 6, peak: 6, size: 2},
+  {at: 0, dx: -7, peak: 8, size: 2},
+  {at: 0.25, dx: 6, peak: 10, size: 1.5},
+  {at: 0.5, dx: -5, peak: 11, size: 1.5},
+  {at: 0.75, dx: 7, peak: 7, size: 2},
 ];
 
 const useNative = Platform.OS !== 'web';
@@ -61,6 +60,20 @@ function randomWord(exclude?: string): string {
     word = DIG_WORDS[Math.floor(Math.random() * DIG_WORDS.length)];
   }
   return word!;
+}
+
+// Opacity keyframes that show `frame` only during its own steps of the cycle,
+// switching hard (no crossfade) between steps.
+function frameVisibility(frame: number): {inputRange: number[]; outputRange: number[]} {
+  const steps = FRAMES * SPINS;
+  const inputRange: number[] = [];
+  const outputRange: number[] = [];
+  for (let s = 0; s < steps; s++) {
+    const on = s % FRAMES === frame ? 1 : 0;
+    inputRange.push(s / steps, (s + 1) / steps - 0.0001);
+    outputRange.push(on, on);
+  }
+  return {inputRange, outputRange};
 }
 
 // `clock` runs 0→1 once per cycle, shared by every chunk so they never drift
@@ -109,9 +122,33 @@ function Chunk({
   );
 }
 
+function DrillFrame({color, frame, clipId}: {color: string; frame: number; clipId: string}): React.JSX.Element {
+  const shift = (frame * PITCH) / FRAMES;
+  return (
+    <Svg width={BOX_W} height={BOX_H} viewBox={`0 0 ${BOX_W} ${BOX_H}`}>
+      <Defs>
+        <ClipPath id={clipId}>
+          <Polygon points={CONE} />
+        </ClipPath>
+      </Defs>
+      <Rect x={5} y={0} width={6} height={3.5} rx={1} fill={color} />
+      <Rect x={1.5} y={3} width={13} height={3.5} rx={1.5} fill={color} />
+      <Polygon points={CONE} fill={color} fillOpacity={0.35} />
+      <G clipPath={`url(#${clipId})`}>
+        {GROOVES.map(k => {
+          const y = 7 + k * PITCH - shift;
+          return <Line key={k} x1={0} y1={y} x2={BOX_W} y2={y - 4} stroke={color} strokeWidth={1.8} />;
+        })}
+      </G>
+      <Polygon points={CONE} fill="none" stroke={color} strokeWidth={1} strokeLinejoin="round" />
+    </Svg>
+  );
+}
+
 function Drill({color, clock}: {color: string; clock: Animated.Value | null}): React.JSX.Element {
-  const scroll = useMemo(
-    () => (clock ? clock.interpolate({inputRange: [0, 1], outputRange: [0, -2 * PITCH]}) : 0),
+  const id = useId().replace(/[^a-zA-Z0-9_-]/g, '');
+  const visibility = useMemo(
+    () => (clock ? Array.from({length: FRAMES}, (_, f) => clock.interpolate(frameVisibility(f))) : null),
     [clock],
   );
   // A slight bob, as if bearing down into the ground.
@@ -122,16 +159,15 @@ function Drill({color, clock}: {color: string; clock: Animated.Value | null}): R
   return (
     <View style={styles.box} pointerEvents="none">
       <Animated.View style={[StyleSheet.absoluteFill, {transform: [{translateY: bob}]}]}>
-        <View style={[styles.chuck, {backgroundColor: color}]} />
-        <View style={styles.bit}>
-          <View style={[styles.bitBody, {backgroundColor: color}]} />
-          <Animated.View style={[StyleSheet.absoluteFill, {transform: [{translateY: scroll}]}]}>
-            {FLUTES.map(y => (
-              <View key={y} style={[styles.flute, {top: y, backgroundColor: color}]} />
-            ))}
-          </Animated.View>
-        </View>
-        <View style={[styles.tip, {borderTopColor: color}]} />
+        {visibility ? (
+          visibility.map((opacity, f) => (
+            <Animated.View key={f} style={[StyleSheet.absoluteFill, {opacity}]}>
+              <DrillFrame color={color} frame={f} clipId={`drill${id}f${f}`} />
+            </Animated.View>
+          ))
+        ) : (
+          <DrillFrame color={color} frame={0} clipId={`drill${id}`} />
+        )}
       </Animated.View>
       {clock && CHUNKS.map((c, i) => <Chunk key={i} chunk={c} index={i} clock={clock} />)}
     </View>
@@ -194,45 +230,6 @@ const styles = StyleSheet.create({
   box: {
     width: BOX_W,
     height: BOX_H,
-  },
-  chuck: {
-    position: 'absolute',
-    left: (BOX_W - CHUCK_W) / 2,
-    top: 0,
-    width: CHUCK_W,
-    height: CHUCK_H,
-    borderRadius: 1,
-  },
-  bit: {
-    position: 'absolute',
-    left: BIT_LEFT,
-    top: CHUCK_H,
-    width: BIT_W,
-    height: BIT_H,
-    overflow: 'hidden',
-  },
-  bitBody: {
-    ...StyleSheet.absoluteFillObject,
-    opacity: 0.4,
-  },
-  flute: {
-    position: 'absolute',
-    left: -2,
-    width: BIT_W + 4,
-    height: 1.25,
-    transform: [{rotate: '-30deg'}],
-  },
-  tip: {
-    position: 'absolute',
-    left: BIT_LEFT,
-    top: CHUCK_H + BIT_H,
-    width: 0,
-    height: 0,
-    borderLeftWidth: BIT_W / 2,
-    borderRightWidth: BIT_W / 2,
-    borderTopWidth: TIP_H,
-    borderLeftColor: 'transparent',
-    borderRightColor: 'transparent',
   },
   chunk: {
     position: 'absolute',
