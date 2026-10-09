@@ -800,6 +800,43 @@ func truncate(s string, w int) string {
 	return lipgloss.NewStyle().MaxWidth(w).Render(s)
 }
 
+// clip wraps s to w columns and keeps at most n lines, noting how many were
+// cut. For text of unbounded length (a bash command awaiting permission, a
+// server error) that would otherwise grow the bottom panel past the screen.
+func clip(s string, w, n int) string {
+	lines := strings.Split(lipgloss.NewStyle().Width(w).Render(clean(s)), "\n")
+	if len(lines) > n {
+		lines = append(lines[:n-1], fmt.Sprintf("… %d more lines", len(lines)-n+1))
+	}
+	for i, l := range lines {
+		lines[i] = strings.TrimRight(l, " ")
+	}
+	return strings.Join(lines, "\n")
+}
+
+// clean replaces the characters lipgloss.Width under-counts but a terminal
+// moves the cursor for: a tab jumps to the next tab stop and a carriage
+// return back to column 0, so either can push a line past the edge or
+// overwrite the rail.
+func clean(s string) string {
+	return strings.NewReplacer("\t", "    ", "\r", "").Replace(s)
+}
+
+// fit cuts a whole frame to w×h. Every part of the view is meant to size
+// itself already; this is the backstop, because a frame taller or wider than
+// the terminal makes it scroll, which tears the alt-screen layout and leaves
+// the shell behind it showing through.
+func fit(s string, w, h int) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) > h {
+		lines = lines[:h]
+	}
+	for i, l := range lines {
+		lines[i] = truncate(l, w)
+	}
+	return strings.Join(lines, "\n")
+}
+
 // panelLine renders one row of a raised panel: rail + text on the panel
 // background, padded to the full width. Each segment carries its own
 // background because a nested reset would otherwise punch holes in the fill.
@@ -902,7 +939,7 @@ func (m *chatModel) renderPart(p *chat.Part, wrap lipgloss.Style) string {
 		// itself too, whether or not tool output is shown.
 		if in, _ := p.Input.(map[string]any); p.Tool == "bash" && in != nil {
 			if cmd, _ := in["command"].(string); cmd != "" {
-				lines := strings.Split(strings.TrimRight(cmd, "\n"), "\n")
+				lines := strings.Split(strings.TrimRight(clean(cmd), "\n"), "\n")
 				if len(lines) > 4 {
 					lines = append(lines[:4], fmt.Sprintf("… %d more lines", len(lines)-4))
 				}
@@ -923,7 +960,7 @@ func (m *chatModel) renderPart(p *chat.Part, wrap lipgloss.Style) string {
 			body = p.Error
 		}
 		if body != "" {
-			lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
+			lines := strings.Split(strings.TrimRight(clean(body), "\n"), "\n")
 			if len(lines) > 8 {
 				lines = append(lines[:8], fmt.Sprintf("… %d more lines", len(lines)-8))
 			}
@@ -991,13 +1028,13 @@ func (m *chatModel) bottom() string {
 	s := m.st
 	var lines []string
 	if m.state.Notice != "" {
-		lines = append(lines, " "+s.Soft.Render(m.state.Notice))
+		lines = append(lines, s.Soft.PaddingLeft(1).Render(clip(m.state.Notice, m.w-2, 3)))
 	}
 	if e := m.state.Error; e != "" {
-		lines = append(lines, " "+s.Danger.Render("error: "+e))
+		lines = append(lines, s.Danger.PaddingLeft(1).Render(clip("error: "+e, m.w-2, 3)))
 	}
 	if m.localErr != "" {
-		lines = append(lines, " "+s.Danger.Render(m.localErr))
+		lines = append(lines, s.Danger.PaddingLeft(1).Render(clip(m.localErr, m.w-2, 3)))
 	}
 	iw := max(10, m.w-4)
 	wrap := lipgloss.NewStyle().Width(iw)
@@ -1031,7 +1068,7 @@ func (m *chatModel) bottom() string {
 		p := m.state.PendingPermission
 		panel = append(panel,
 			s.Danger.Bold(true).Render("permission requested  ")+s.Bold.Render(p.Permission),
-			s.Muted.Render(strings.Join(p.Patterns, ", ")),
+			s.Muted.Render(clip(strings.Join(p.Patterns, ", "), iw, 6)),
 			"",
 			s.Primary.Render("[o]")+" allow once   "+s.Primary.Render("[a]")+" always allow   "+s.Danger.Render("[r]")+" reject")
 	case m.state.PendingQuestion != nil:
@@ -1096,7 +1133,7 @@ func (m *chatModel) View() string {
 			m.vp.GotoBottom()
 		}
 	}
-	return top + "\n" + m.vp.View() + "\n" + bottom
+	return fit(top+"\n"+m.vp.View()+"\n"+bottom, m.w, m.h)
 }
 
 // slashCommands are typed into the message box and handled locally. Anything

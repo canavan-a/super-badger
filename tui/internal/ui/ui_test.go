@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"regexp"
@@ -1670,6 +1671,50 @@ func TestDiggingLineOnlyWhileThinking(t *testing.T) {
 	for _, c := range cases {
 		if got := thinking(c.turns, c.busy); got != c.want {
 			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// A frame taller or wider than the terminal makes it scroll, which tears the
+// layout and shows the shell behind it. Long bash commands were the trigger:
+// unbounded in the permission prompt, and tabs / carriage returns in the
+// transcript that lipgloss.Width under-counts.
+func TestLongBashCommandsStayInsideTheFrame(t *testing.T) {
+	const w, h = 70, 30
+	commands := map[string]string{
+		"spaces":  "echo " + strings.Repeat("abcdefghij ", 200),
+		"nospace": "curl https://example.com/" + strings.Repeat("x", 2000),
+		"tabs":    "cat <<EOF\n\t\tindented\t" + strings.Repeat("y", 60) + "\nEOF",
+		"cr":      "printf 'a\rb' " + strings.Repeat("z", 100),
+	}
+	for name, cmd := range commands {
+		for _, asking := range []bool{false, true} {
+			m := newChat(api.New("http://127.0.0.1:1", ""), NewStyles("burrow"), api.Station{ID: 1, Name: "a", Reachable: true}, 0, 1)
+			m.resize(w, h)
+			m.showTools = true
+			in, _ := json.Marshal(map[string]any{"command": cmd})
+			out, _ := json.Marshal(cmd)
+			for _, raw := range []string{
+				`{"type":"message.updated","properties":{"info":{"id":"a1","role":"assistant"}}}`,
+				`{"type":"message.part.updated","properties":{"part":{"id":"t1","messageID":"a1","type":"tool","tool":"bash","state":{"status":"running","title":"run it","input":` + string(in) + `,"output":` + string(out) + `}}}}`,
+			} {
+				e, _ := chat.ParseEvent([]byte(raw))
+				m.state.Apply(e)
+			}
+			if asking {
+				m.state.PendingPermission = &chat.PendingPermission{ID: "p", Permission: "bash", Patterns: []string{cmd}}
+				m.state.Error = cmd
+			}
+			lines := strings.Split(m.View(), "\n")
+			if len(lines) != h {
+				t.Errorf("%s (asking=%v): frame is %d lines, want %d", name, asking, len(lines), h)
+			}
+			for i, l := range lines {
+				if strings.ContainsAny(l, "\t\r") || lipgloss.Width(l) > w {
+					t.Errorf("%s (asking=%v): line %d overflows: %q", name, asking, i, l)
+				}
+			}
+			m.Close()
 		}
 	}
 }

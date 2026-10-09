@@ -8,7 +8,7 @@
 // must never statically import notifee or this file).
 import notifee, {AndroidForegroundServiceType} from '@notifee/react-native';
 
-import {handleNotificationMsg, notificationColor} from '../notifications/agentEvents';
+import {handleNotificationMsg, notificationColor, notificationLargeIcon} from '../notifications/agentEvents';
 import {CH_SERVICE, ensureChannels, NID_FGS, PRESS_ACTION} from '../notifications/channels';
 import {settingsStore} from '../settings';
 
@@ -89,6 +89,7 @@ export async function startMonitoring(): Promise<void> {
       pressAction: PRESS_ACTION,
       asForegroundService: true,
       color: await notificationColor(),
+      ...(await notificationLargeIcon()),
       foregroundServiceTypes: [AndroidForegroundServiceType.FOREGROUND_SERVICE_TYPE_DATA_SYNC],
       ongoing: true,
       colorized: false,

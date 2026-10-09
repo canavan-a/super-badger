@@ -8,6 +8,7 @@
 import notifee from '@notifee/react-native';
 
 import {formatDataPointValue} from '../api';
+import {notificationIconUri} from '../appIcon';
 import {rgbToHex, themeAccent} from '../logo/logoTheme';
 import {settingsStore} from '../settings';
 import {THEMES} from '../theme';
@@ -58,6 +59,17 @@ export async function notificationColor(stationColor?: string): Promise<string> 
   return rgbToHex(themeAccent(THEMES[themeName] ?? THEMES.light));
 }
 
+// The themed launcher icon as the notification's large icon. The tint above
+// only reaches the monochrome status-bar S; the full-color app icon a
+// notification shows is the manifest's static <application android:icon>,
+// always the light one, since Android can't change that at runtime. Spread
+// into the android options — empty (no large icon) when it couldn't be made,
+// as Notifee rejects an explicit undefined.
+export async function notificationLargeIcon(): Promise<{largeIcon?: string; circularLargeIcon?: boolean}> {
+  const uri = await notificationIconUri();
+  return uri ? {largeIcon: uri, circularLargeIcon: true} : {};
+}
+
 // The station whose chat is on screen with the app in the foreground, or
 // null. Set by App.tsx. Its notifications are cleared the moment it's opened
 // (that *is* "coming to look"), and new chat pings for it are skipped — no
@@ -105,6 +117,7 @@ export async function handleNotificationMsg(msg: NotificationMsg): Promise<void>
 
   const data = (kind: NotificationKind) => ({stationId: String(msg.station_id), kind});
   const color = await notificationColor(msg.station_color);
+  const largeIcon = await notificationLargeIcon();
 
   switch (msg.type) {
     case 'agent_idle':
@@ -120,6 +133,7 @@ export async function handleNotificationMsg(msg: NotificationMsg): Promise<void>
           timestamp: Date.now(),
           showTimestamp: true,
           color,
+          ...largeIcon,
         },
       });
       return;
@@ -136,6 +150,7 @@ export async function handleNotificationMsg(msg: NotificationMsg): Promise<void>
           timestamp: Date.now(),
           showTimestamp: true,
           color,
+          ...largeIcon,
         },
       });
       return;
@@ -152,6 +167,7 @@ export async function handleNotificationMsg(msg: NotificationMsg): Promise<void>
           timestamp: Date.now(),
           showTimestamp: true,
           color,
+          ...largeIcon,
         },
       });
       return;
@@ -170,6 +186,7 @@ export async function handleNotificationMsg(msg: NotificationMsg): Promise<void>
           timestamp: Date.now(),
           showTimestamp: true,
           color,
+          ...largeIcon,
         },
       });
       return;
