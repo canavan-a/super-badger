@@ -35,9 +35,6 @@ export interface Turn {
   partOrder: string[];
   parts: Record<string, Part>;
   done: boolean;
-  // opencode's finish reason once the message completes — 'tool-calls'
-  // means another step follows, so the reply as a whole isn't over.
-  finish?: string;
 }
 
 // A pending tool-permission request opencode is blocked on — until this is
@@ -176,7 +173,7 @@ export function applyEvent(state: ChatState, evt: EventMsg): ChatState {
       if (!info) return state;
       let next = ensureTurn(state, info.id, info.role);
       if (info.time?.completed) {
-        next = updateTurn(next, info.id, t => ({...t, done: true, finish: info.finish}));
+        next = updateTurn(next, info.id, t => ({...t, done: true}));
         // session.idle is opencode's dedicated "done" signal, but it isn't
         // reliably the thing that fires here (or reliably survives a
         // reconnect's history replay) — a completed assistant message is
@@ -242,11 +239,16 @@ export function applyEvent(state: ChatState, evt: EventMsg): ChatState {
     case 'session.idle':
       return {...state, busy: false};
 
-    // Newer opencode reports idle through session.status as well (and not
-    // always alongside session.idle) — treated the same, so a missed
-    // session.idle can't leave the send button spinning.
-    case 'session.status':
-      return p.status?.type === 'idle' && state.busy ? {...state, busy: false} : state;
+    // opencode's own run state, sent live and also by the server on every
+    // socket connect (see server/api/ws.go) — the one source of truth for
+    // busy, so a reply whose end this client missed can't leave the send
+    // button spinning and new messages queueing behind nothing.
+    case 'session.status': {
+      const type = p.status?.type;
+      if (!type) return state;
+      const busy = type !== 'idle';
+      return state.busy === busy ? state : {...state, busy};
+    }
 
     case 'permission.asked': {
       const {id, permission, patterns} = p;
@@ -454,20 +456,14 @@ export function rebuildFromHistory(
     turnIndex[t.messageID] = i;
   });
 
-  // busy can't be trusted from before the gap — the reply may have finished
-  // (or started) while nothing was listening. The newest assistant turn is
-  // the source of truth; with only a just-sent user turn at the tail, keep
-  // whatever the send path set.
-  const tail = turns[turns.length - 1];
-  const busy =
-    tail?.role === 'assistant' ? !(tail.done && isFinalFinish(tail.finish)) : tail ? prev.busy : false;
-
+  // busy is deliberately left alone: guessing it from the newest turn here
+  // got it wrong (stuck spinner). The session.status the server sends on
+  // every connect sets it instead.
   return {
     state: {
       ...prev,
       turns,
       turnIndex,
-      busy,
       pendingPermission: prev.pendingPermission ?? base.pendingPermission,
       pendingQuestion: prev.pendingQuestion ?? base.pendingQuestion,
     },

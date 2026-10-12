@@ -224,6 +224,30 @@ func (s *Service) RejectQuestion(ctx context.Context, requestID string) error {
 	return s.oc.RejectQuestion(ctx, requestID)
 }
 
+// SessionStatus reports whether st's session is running a reply right now,
+// straight from opencode ("idle", "busy" or "retry") — sent to every
+// freshly-connected station WebSocket so the app's send button never has to
+// guess from history whether a reply it may have missed the end of is still
+// going.
+func (s *Service) SessionStatus(ctx context.Context, id uint) (sessionID, status string, err error) {
+	st, err := database.GetStation(s.db, id)
+	if err != nil {
+		return "", "", err
+	}
+	if st.OpencodeSessionID == "" {
+		return "", "", nil
+	}
+	all, err := s.oc.SessionStatus(ctx, st.Directory)
+	if err != nil {
+		return "", "", err
+	}
+	status = all[st.OpencodeSessionID]
+	if status == "" {
+		status = "idle"
+	}
+	return st.OpencodeSessionID, status, nil
+}
+
 // PendingQuestions returns any question requests opencode is currently
 // blocked on for st's session, shaped as question.asked events — same
 // reconnect-strand fix as PendingPermissions, for the separate question

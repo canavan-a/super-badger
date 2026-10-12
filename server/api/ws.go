@@ -150,6 +150,23 @@ func stationWS(svc *station.Service, broker *opencode.EventBroker) gin.HandlerFu
 			}
 		}
 
+		// Same idea for whether a reply is running: a client that was
+		// disconnected (app backgrounded) when one finished never saw the
+		// end of it, and would otherwise keep spinning/queueing forever.
+		// Shaped like opencode's own session.status event so the app's
+		// reducer handles it the same way as a live one.
+		if sid, status, err := svc.SessionStatus(c.Request.Context(), id); err == nil && sid != "" {
+			select {
+			case writes <- gin.H{
+				"type":       "session.status",
+				"properties": gin.H{"sessionID": sid, "status": gin.H{"type": status}},
+			}:
+			default:
+			}
+		} else if err != nil {
+			log.Printf("[station %d] session status: %v", id, err)
+		}
+
 		for {
 			select {
 			case <-done:

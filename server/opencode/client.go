@@ -176,6 +176,30 @@ func (c *Client) CreateSession(ctx context.Context, p CreateSessionParams) (Sess
 	return sess, nil
 }
 
+// SessionStatus returns opencode's own live run state ("idle", "busy",
+// "retry") for every session it knows about in directory, keyed by session
+// ID — the authoritative answer to "is a reply running right now", unlike
+// anything inferred from the event stream (which a client that was
+// disconnected at the wrong moment can miss). Idle sessions may be absent
+// from the map entirely.
+func (c *Client) SessionStatus(ctx context.Context, directory string) (map[string]string, error) {
+	path := "/session/status"
+	if directory != "" {
+		path += "?directory=" + url.QueryEscape(directory)
+	}
+	var raw map[string]struct {
+		Type string `json:"type"`
+	}
+	if err := c.do(ctx, "GET", path, nil, &raw); err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(raw))
+	for id, st := range raw {
+		out[id] = st.Type
+	}
+	return out, nil
+}
+
 func (c *Client) AbortSession(ctx context.Context, sessionID string) error {
 	return c.do(ctx, "POST", fmt.Sprintf("/session/%s/abort", sessionID), nil, nil)
 }

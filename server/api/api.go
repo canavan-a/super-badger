@@ -54,6 +54,7 @@ func NewRouter(svc *station.Service, oc *opencode.Client, mv *mullvad.Client, br
 	r.POST("/stations/:id/compact", compactStation(svc))
 	r.POST("/stations/:id/abort", abortStation(svc))
 	r.GET("/stations/:id/usage", stationUsage(svc))
+	r.GET("/stations/:id/status", stationRunStatus(svc))
 	r.GET("/stations/:id/ws", stationWS(svc, broker))
 	r.GET("/stations/:id/history", stationHistory(svc))
 	r.GET("/stations/:id/datapoints", listStationDataPoints(db))
@@ -370,6 +371,28 @@ func stationUsage(svc *station.Service) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, usage)
+	}
+}
+
+// stationRunStatus reports whether a Station's session is running a reply
+// right now (see station.Service.SessionStatus) — polled by the app when
+// its send button has been spinning with no events for a while, to tell a
+// long quiet tool run apart from a finish it never heard about.
+func stationRunStatus(svc *station.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, ok := parseID(c)
+		if !ok {
+			return
+		}
+		_, status, err := svc.SessionStatus(c.Request.Context(), id)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if status == "" {
+			status = "idle"
+		}
+		c.JSON(http.StatusOK, gin.H{"status": status})
 	}
 }
 

@@ -93,21 +93,6 @@ test('rebuildFromHistory keeps live text that has grown past the snapshot', () =
   expect(getTurn(state, 'm1')?.parts.p1).toMatchObject({text: 'Hello world'});
 });
 
-test('rebuildFromHistory takes busy from the newest assistant turn', () => {
-  const stuck = {...emptyChatState, busy: true};
-  const finished = rebuildFromHistory(stuck, [msg('m1', 'user'), msg('m2', 'assistant', done)], null);
-  expect(finished.state.busy).toBe(false);
-
-  const running = rebuildFromHistory(emptyChatState, [msg('m1', 'user'), msg('m2', 'assistant')], null);
-  expect(running.state.busy).toBe(true);
-
-  const midStep = rebuildFromHistory(
-    emptyChatState,
-    [msg('m2', 'assistant', {finish: 'tool-calls', time: {completed: 1}})],
-    null,
-  );
-  expect(midStep.state.busy).toBe(true);
-});
 
 test('rebuildFromHistory drops the optimistic user turn once its echo is in history', () => {
   const prev = {...addLocalUserTurn(emptyChatState, 'local-1', 'hi there'), busy: true};
@@ -118,10 +103,19 @@ test('rebuildFromHistory drops the optimistic user turn once its echo is in hist
   const notYet = rebuildFromHistory(prev, [], 'local-1');
   expect(notYet.localEchoed).toBe(false);
   expect(notYet.state.turns.map(t => t.messageID)).toEqual(['local-1']);
-  expect(notYet.state.busy).toBe(true);
 });
 
 test('session.status idle clears busy', () => {
   const state = applyEvent({...emptyChatState, busy: true}, {type: 'session.status', properties: {status: {type: 'idle'}}});
   expect(state.busy).toBe(false);
+});
+
+test('session.status busy sets busy, so a reply running on open shows as running', () => {
+  const state = applyEvent(emptyChatState, {type: 'session.status', properties: {status: {type: 'busy'}}});
+  expect(state.busy).toBe(true);
+});
+
+test('rebuildFromHistory leaves busy to session.status', () => {
+  const idle = rebuildFromHistory(emptyChatState, [msg('m1', 'user'), msg('m2', 'assistant')], null);
+  expect(idle.state.busy).toBe(false);
 });

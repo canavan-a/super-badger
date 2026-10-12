@@ -172,6 +172,12 @@ export function getStationUsage(id: number): Promise<TokenUsage> {
   return request<TokenUsage>(`/stations/${id}/usage`);
 }
 
+// opencode's live run state for the station's session — "idle" whenever no
+// reply is running (see server's stationRunStatus).
+export function getStationRunStatus(id: number): Promise<{status: 'idle' | 'busy' | 'retry'}> {
+  return request(`/stations/${id}/status`);
+}
+
 export function promptStation(id: number, text: string): Promise<unknown> {
   return request<unknown>(`/stations/${id}/prompt`, {
     method: 'POST',

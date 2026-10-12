@@ -1,7 +1,7 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {AppState} from 'react-native';
 
-import {getStationHistory} from './api';
+import {getStationHistory, getStationRunStatus} from './api';
 import {
   addLocalUserTurn,
   applyEvent,
@@ -163,31 +163,24 @@ export function useStationChat(stationId: number) {
 
   // Safety net for a busy flag that outlived its reply: if the turn-finished
   // event was lost (socket half-dead, app suspended mid-reply), nothing else
-  // would ever clear it and the send button stays a spinner. Only busy is
-  // taken from the check — the transcript is left alone so a user reading
-  // older history isn't disturbed.
+  // would ever clear it and the send button stays a spinner. Asks opencode
+  // directly, so a long quiet tool run (still genuinely busy) is left alone.
   useEffect(() => {
     const timer = setInterval(() => {
       if (!busyRef.current || Date.now() - lastEventAt.current < BUSY_STALL_MS) return;
       lastEventAt.current = Date.now();
-      if (pendingLocalUserID.current) {
-        // Sent, but opencode never even echoed the message back — it didn't
-        // arrive (sent into a socket that was already dead). Unblock the
-        // composer rather than spin forever.
-        pendingLocalUserID.current = null;
-        setState(prev => ({
-          ...prev,
-          busy: false,
-          error: 'The server never confirmed the last message — it may not have sent.',
-        }));
-        return;
-      }
-      getStationHistory(stationId)
-        .then(page => {
-          setState(prev => {
-            const {state: checked} = rebuildFromHistory(prev, page.events, null);
-            return checked.busy === prev.busy ? prev : {...prev, busy: checked.busy};
-          });
+      getStationRunStatus(stationId)
+        .then(({status: run}) => {
+          if (run !== 'idle') return;
+          // Idle with the sent message never even echoed back means it never
+          // arrived (sent into a socket that was already dead).
+          const lost = pendingLocalUserID.current !== null;
+          pendingLocalUserID.current = null;
+          setState(prev => ({
+            ...prev,
+            busy: false,
+            error: lost ? 'The server never confirmed the last message — it may not have sent.' : prev.error,
+          }));
         })
         .catch(() => {});
     }, 10_000);
