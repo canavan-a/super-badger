@@ -57,13 +57,29 @@ func TestToolCallStepKeepsBusy(t *testing.T) {
 	}
 }
 
-func TestReconcileLocalUserTurn(t *testing.T) {
+func TestSessionStatusDrivesBusy(t *testing.T) {
 	s := New()
-	s.AddLocalUserTurn("local-1", "hi")
-	s.ReconcileLocalUserTurn("local-1", "real")
-	s.Apply(ev(t, `{"type":"message.part.updated","properties":{"part":{"id":"p","messageID":"real","type":"text","text":"hi"}}}`))
-	if len(s.Turns) != 1 || s.Turn("real").Text() != "hi" || s.Turn("local-1") != nil {
-		t.Fatalf("bad reconcile: %+v", s.Turns)
+	s.Apply(ev(t, `{"type":"session.status","properties":{"sessionID":"x","status":{"type":"busy"}}}`))
+	if !s.Busy {
+		t.Fatal("busy status should set busy")
+	}
+	s.Apply(ev(t, `{"type":"session.status","properties":{"sessionID":"x","status":{"type":"idle"}}}`))
+	if s.Busy {
+		t.Fatal("idle status should clear busy")
+	}
+}
+
+func TestReplyStartingSetsBusy(t *testing.T) {
+	s := New()
+	s.Apply(ev(t, `{"type":"message.updated","properties":{"info":{"id":"a1","role":"assistant"}}}`))
+	if !s.Busy {
+		t.Fatal("a started assistant message should set busy")
+	}
+	s.Apply(ev(t, `{"type":"message.updated","properties":{"info":{"id":"a1","role":"assistant","finish":"stop","time":{"completed":1}}}}`))
+	// opencode re-updates the user message (summaries) after the reply ends.
+	s.Apply(ev(t, `{"type":"message.updated","properties":{"info":{"id":"u1","role":"user"}}}`))
+	if s.Busy {
+		t.Fatal("a user message update after the reply shouldn't set busy")
 	}
 }
 

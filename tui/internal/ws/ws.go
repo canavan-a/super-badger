@@ -151,3 +151,7 @@ func QuestionReply(id string, answers [][]string) map[string]any {
 func QuestionReject(id string) map[string]any {
 	return map[string]any{"type": "question_reject", "request_id": id}
 }
+
+// QueueRemove drops one message from the station's server-side queue (see
+// server/station/queue.go).
+func QueueRemove(id uint) map[string]any { return map[string]any{"type": "queue_remove", "id": id} }

@@ -283,7 +283,7 @@ func TestSlashSettingsOpensSettings(t *testing.T) {
 		if !strings.Contains(ansi.ReplaceAllString(a.View(), ""), tc.want) {
 			t.Errorf("%s did not open the expected screen (%q)", tc.typed, tc.want)
 		}
-		if len(a.chat.outbox) != 0 || a.chat.ta.Value() != "" {
+		if len(a.chat.allQueued()) != 0 || a.chat.ta.Value() != "" {
 			t.Errorf("%s must not be sent to the model and the box should clear", tc.typed)
 		}
 	}
@@ -291,7 +291,7 @@ func TestSlashSettingsOpensSettings(t *testing.T) {
 	a.sub, a.subName = nil, ""
 	a.chat.ta.SetValue("/compact-please")
 	a.key(tea.KeyMsg{Type: tea.KeyEnter})
-	if len(a.chat.outbox) != 1 {
+	if len(a.chat.allQueued()) != 1 {
 		t.Fatal("unknown /text should be sent as a normal message")
 	}
 }
@@ -524,13 +524,13 @@ func TestEscAndCtrlCNeverCancelAReply(t *testing.T) {
 
 func TestStopCommandAbortsAndDropsQueuedMessages(t *testing.T) {
 	a, c := busyChat(t)
-	c.outbox = []queued{{"1", "follow-up one"}, {"2", "follow-up two"}}
+	c.queue = []queued{{id: 1, text: "follow-up one"}, {id: 2, text: "follow-up two"}}
 	c.ta.SetValue("/stop")
 	cmd := a.key(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("/stop while busy should issue the abort")
 	}
-	if len(c.outbox) != 0 {
+	if len(c.allQueued()) != 0 {
 		t.Fatal("/stop should discard messages queued behind the cancelled reply")
 	}
 	if c.ta.Value() != "" {
@@ -540,7 +540,7 @@ func TestStopCommandAbortsAndDropsQueuedMessages(t *testing.T) {
 		t.Fatal("the user should see that it's stopping")
 	}
 	// It must not have been sent to the model as a prompt.
-	for _, q := range c.outbox {
+	for _, q := range c.allQueued() {
 		if q.text == "/stop" {
 			t.Fatal("/stop was queued as a message")
 		}
@@ -570,7 +570,7 @@ func TestShowTogglesThinking(t *testing.T) {
 		if c.showThink != want {
 			t.Fatalf("toggle %d: showThink=%v, want %v", i, c.showThink, want)
 		}
-		if len(c.outbox) != 0 {
+		if len(c.allQueued()) != 0 {
 			t.Fatal("/show must not be sent to the model")
 		}
 	}
@@ -758,8 +758,8 @@ func TestHelpShowsTheCommandsAndAnyKeyClosesIt(t *testing.T) {
 	if cmd := a.key(tea.KeyMsg{Type: tea.KeyEnter}); cmd != nil {
 		t.Fatal("/help is purely local; it should not produce a command")
 	}
-	if !c.help || len(c.outbox) != 0 || c.ta.Value() != "" {
-		t.Fatalf("help=%v outbox=%d input=%q", c.help, len(c.outbox), c.ta.Value())
+	if !c.help || len(c.allQueued()) != 0 || c.ta.Value() != "" {
+		t.Fatalf("help=%v queued=%d input=%q", c.help, len(c.allQueued()), c.ta.Value())
 	}
 	view := plainRow(c.View())
 	for _, cmd := range []string{"/help", "/stop", "/kill", "/show", "/reset", "/compact", "/settings", "/stations", "/station", "/splash", "/quit"} {
@@ -988,7 +988,7 @@ func TestCompactCommand(t *testing.T) {
 	if !c.compacting {
 		t.Fatal("the top bar should show it is compacting")
 	}
-	if len(c.outbox) != 0 || c.ta.Value() != "" {
+	if len(c.allQueued()) != 0 || c.ta.Value() != "" {
 		t.Fatal("/compact must not be sent to the model, and the box should clear")
 	}
 
@@ -1540,8 +1540,8 @@ func TestResetCommandAsksFirst(t *testing.T) {
 	if cmd := a.key(tea.KeyMsg{Type: tea.KeyEnter}); cmd != nil {
 		t.Fatal("/reset should only ask, not reset yet")
 	}
-	if c.confirm != "reset" || len(c.outbox) != 0 || c.ta.Value() != "" {
-		t.Fatalf("confirm=%q outbox=%d input=%q", c.confirm, len(c.outbox), c.ta.Value())
+	if c.confirm != "reset" || len(c.allQueued()) != 0 || c.ta.Value() != "" {
+		t.Fatalf("confirm=%q queued=%d input=%q", c.confirm, len(c.allQueued()), c.ta.Value())
 	}
 	// Anything but y backs out.
 	a.key(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
@@ -1560,13 +1560,13 @@ func TestKillAbortsEvenWhenIdle(t *testing.T) {
 	// /kill must still reach the server.
 	a, c := busyChat(t)
 	c.state.Busy = false
-	c.outbox = []queued{{"1", "follow-up"}}
+	c.queue = []queued{{id: 1, text: "follow-up"}}
 	c.ta.SetValue("/kill")
 	if cmd := a.key(tea.KeyMsg{Type: tea.KeyEnter}); cmd == nil {
 		t.Fatal("/kill should issue the abort regardless of Busy")
 	}
-	if len(c.outbox) != 0 || c.ta.Value() != "" {
-		t.Fatalf("outbox=%d input=%q", len(c.outbox), c.ta.Value())
+	if len(c.allQueued()) != 0 || c.ta.Value() != "" {
+		t.Fatalf("queued=%d input=%q", len(c.allQueued()), c.ta.Value())
 	}
 	c.state.Busy = true
 	c.Update(killedMsg{c.gen})
@@ -1716,5 +1716,67 @@ func TestLongBashCommandsStayInsideTheFrame(t *testing.T) {
 			}
 			m.Close()
 		}
+	}
+}
+
+func TestServerQueueFrameIsShownAndClickRemovesIt(t *testing.T) {
+	_, c := busyChat(t)
+	if !c.applyQueueFrame([]byte(`{"type":"queue","items":[{"id":7,"text":"first follow-up"},{"id":9,"text":"second follow-up"}]}`)) {
+		t.Fatal("queue frame not recognised")
+	}
+	if c.applyQueueFrame([]byte(`{"type":"message.updated","properties":{}}`)) {
+		t.Fatal("non-queue frames must fall through to the event stream")
+	}
+	view := ansi.ReplaceAllString(c.View(), "")
+	if !strings.Contains(view, "first follow-up") || !strings.Contains(view, "click to remove") {
+		t.Fatalf("queued messages not shown:\n%s", view)
+	}
+
+	// Click on the second queued block's text row.
+	var row int
+	for i, l := range strings.Split(view, "\n") {
+		if strings.Contains(l, "second follow-up") {
+			row = i
+		}
+	}
+	c.Update(tea.MouseMsg{X: 5, Y: row, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	if q := c.allQueued(); len(q) != 1 || q[0].id != 7 {
+		t.Fatalf("click should remove only the clicked message, queue = %+v", q)
+	}
+
+	// A click outside any queued block leaves the queue alone.
+	c.View()
+	c.Update(tea.MouseMsg{X: 5, Y: 0, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	if len(c.allQueued()) != 1 {
+		t.Fatal("a click elsewhere removed a queued message")
+	}
+}
+
+func TestUnqueueCommand(t *testing.T) {
+	a, c := busyChat(t)
+	c.queue = []queued{{id: 1, text: "one"}, {id: 2, text: "two"}, {id: 3, text: "three"}}
+	c.ta.SetValue("/unqueue 1")
+	a.key(tea.KeyMsg{Type: tea.KeyEnter})
+	c.ta.SetValue("/unqueue")
+	a.key(tea.KeyMsg{Type: tea.KeyEnter})
+	if q := c.allQueued(); len(q) != 1 || q[0].text != "two" {
+		t.Fatalf("queue = %+v, want just \"two\"", q)
+	}
+	c.ta.SetValue("/unqueue 5")
+	a.key(tea.KeyMsg{Type: tea.KeyEnter})
+	if len(c.allQueued()) != 1 || !strings.Contains(c.state.Notice, "1–1") {
+		t.Fatalf("out-of-range /unqueue: queue=%+v notice=%q", c.allQueued(), c.state.Notice)
+	}
+}
+
+func TestSendWhileDisconnectedWaitsForConnection(t *testing.T) {
+	a, c := busyChat(t)
+	c.ta.SetValue("hello")
+	a.key(tea.KeyMsg{Type: tea.KeyEnter})
+	if q := c.allQueued(); len(q) != 1 || !q[0].local {
+		t.Fatalf("queue = %+v, want one local message", q)
+	}
+	if !strings.Contains(ansi.ReplaceAllString(c.View(), ""), "waiting for connection") {
+		t.Fatal("an unsent message should say it's waiting for the connection")
 	}
 }

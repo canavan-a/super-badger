@@ -219,6 +219,12 @@ func (s *State) Apply(e Event) {
 			if str(info, "role") == "assistant" && !stepContinues(str(info, "finish")) {
 				s.Busy = false
 			}
+		} else if str(info, "role") == "assistant" {
+			// A reply has started — the server sends the queue itself (see
+			// server/station/queue.go), so there's no local send to mark
+			// busy. Assistant only: opencode updates user messages again
+			// after the reply ends (summaries), which would flip busy back on.
+			s.Busy = true
 		}
 
 	case "message.part.updated":
@@ -257,6 +263,14 @@ func (s *State) Apply(e Event) {
 
 	case "session.idle":
 		s.Busy = false
+
+	// opencode's own run state, live and also sent by the server on every
+	// connect (server/api/ws.go) — so a reply that finished (or started)
+	// while this client wasn't watching still shows correctly.
+	case "session.status":
+		if st := str(obj(p, "status"), "type"); st != "" {
+			s.Busy = st != "idle"
+		}
 
 	case "permission.asked":
 		id := str(p, "id")
@@ -326,29 +340,13 @@ func (s *State) Apply(e Event) {
 	}
 }
 
-// AddLocalUserTurn shows the user's message immediately, without waiting for
+// AddLocalUserTurn appends a finished user turn directly, without waiting for
 // opencode's echo.
 func (s *State) AddLocalUserTurn(id, text string) {
 	t := &Turn{MessageID: id, Role: "user", PartOrder: []string{id}, Done: true,
 		Parts: map[string]*Part{id: {Kind: KindText, ID: id, Text: text}}}
 	s.Turns = append(s.Turns, t)
 	s.turnIndex[id] = len(s.Turns) - 1
-}
-
-// ReconcileLocalUserTurn swaps an optimistic turn's key for opencode's real
-// messageID once its own event arrives, so the live stream folds into the
-// same turn rather than duplicating it.
-func (s *State) ReconcileLocalUserTurn(localID, realID string) {
-	i, ok := s.turnIndex[localID]
-	if !ok || localID == realID {
-		return
-	}
-	t := s.Turns[i]
-	t.MessageID = realID
-	t.Parts = map[string]*Part{}
-	t.PartOrder = nil
-	delete(s.turnIndex, localID)
-	s.turnIndex[realID] = i
 }
 
 // Seed replays cached history events; every event is an idempotent upsert.

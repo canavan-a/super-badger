@@ -1,8 +1,10 @@
 package ui
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -66,7 +68,23 @@ type (
 	deletedMsg struct{ id uint }
 )
 
-type queued struct{ id, text string }
+// queued is one message waiting to go to opencode. The queue lives on the
+// server (server/station/queue.go): shared with every other app/TUI on the
+// station, kept across restarts, and sent by the server — everything queued
+// together as one prompt — once the running reply finishes. local ones were
+// typed while disconnected and are handed over when the socket reopens.
+type queued struct {
+	id    uint
+	text  string
+	local bool
+}
+
+// queueRow is where one queued block sits in the transcript, in transcript
+// lines, so a click can be mapped back to the message it hit.
+type queueRow struct {
+	start, end int // [start, end)
+	idx        int // index into allQueued()
+}
 
 type chatModel struct {
 	gen     int
@@ -80,9 +98,10 @@ type chatModel struct {
 	state   *chat.State
 	pending []chat.Event // buffered until the next flush
 
-	outbox       []queued
-	pendingLocal string
-	seq          int
+	queue     []queued // the server's, replaced by every "queue" frame
+	unsent    []queued // typed while disconnected
+	queueRows []queueRow
+	vpTop     int // screen row the transcript viewport starts on
 
 	vp        viewport.Model
 	ta        textarea.Model
@@ -249,13 +268,15 @@ func (m *chatModel) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case wsMsg:
 		if msg.m.Frame != nil {
-			if e, err := chat.ParseEvent(msg.m.Frame); err == nil {
-				m.pending = append(m.pending, e)
+			if !m.applyQueueFrame(msg.m.Frame) {
+				if e, err := chat.ParseEvent(msg.m.Frame); err == nil {
+					m.pending = append(m.pending, e)
+				}
 			}
 		} else {
 			m.status = msg.m.Status
 			if m.status == "open" {
-				return tea.Batch(m.waitFrame(), m.pump())
+				m.sendUnsent()
 			}
 		}
 		return m.waitFrame()
@@ -320,6 +341,13 @@ func (m *chatModel) Update(msg tea.Msg) tea.Cmd {
 		m.dirty = true
 
 	case tea.MouseMsg:
+		// Clicking a queued message removes it from the queue.
+		if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+			if i, ok := m.queuedAt(msg.Y); ok {
+				m.removeQueued(i)
+				return nil
+			}
+		}
 		var cmd tea.Cmd
 		m.vp, cmd = m.vp.Update(msg)
 		m.stick = m.vp.AtBottom()
@@ -331,58 +359,102 @@ func (m *chatModel) Update(msg tea.Msg) tea.Cmd {
 	return nil
 }
 
-// flush applies buffered events in one batch, reconciling the optimistic
-// local user turn against opencode's echo, and pumps the outbox when a reply
-// finishes.
+// flush applies buffered events in one batch.
 func (m *chatModel) flush() tea.Cmd {
 	if len(m.pending) == 0 {
 		return nil
 	}
 	wasBusy := m.state.Busy
 	for _, e := range m.pending {
-		if m.pendingLocal != "" && e.Type == "message.updated" {
-			if info, _ := e.Properties["info"].(map[string]any); info != nil && info["role"] == "user" {
-				id, _ := info["id"].(string)
-				m.state.ReconcileLocalUserTurn(m.pendingLocal, id)
-				m.pendingLocal = ""
-			}
-		}
 		m.state.Apply(e)
 	}
 	m.pending = nil
 	m.dirty = true
 	if wasBusy && !m.state.Busy {
 		// Usage isn't pushed by any event, so refetch when a reply completes.
-		return tea.Batch(m.fetchTop(), m.pump())
+		return m.fetchTop()
 	}
-	return m.pump()
-}
-
-// pump sends the head of the outbox once nothing is in flight. This station
-// only ever runs one prompt at a time, so later messages wait their turn.
-func (m *chatModel) pump() tea.Cmd {
-	if m.state.Busy || len(m.outbox) == 0 || m.status != "open" {
-		return nil
-	}
-	head := m.outbox[0]
-	if !m.conn.Send(ws.Prompt(head.text)) {
-		return nil
-	}
-	m.outbox = m.outbox[1:]
-	m.pendingLocal = "local-" + head.id
-	m.state.AddLocalUserTurn(m.pendingLocal, head.text)
-	m.state.Busy = true
-	m.state.Error = ""
-	m.stick = true
-	m.dirty = true
 	return nil
 }
 
+// applyQueueFrame takes a {"type":"queue","items":[...]} snapshot of the
+// server's queue, reporting false for any other frame.
+func (m *chatModel) applyQueueFrame(frame []byte) bool {
+	var f struct {
+		Type  string `json:"type"`
+		Items []struct {
+			ID   uint   `json:"id"`
+			Text string `json:"text"`
+		} `json:"items"`
+	}
+	if json.Unmarshal(frame, &f) != nil || f.Type != "queue" {
+		return false
+	}
+	m.queue = m.queue[:0]
+	for _, it := range f.Items {
+		m.queue = append(m.queue, queued{id: it.ID, text: it.Text})
+	}
+	m.dirty = true
+	return true
+}
+
+// send hands text to the server's queue, which sends it straight away if
+// nothing is running, or with everything else queued once the current
+// reply finishes. While disconnected it's held here and handed over on
+// reconnect.
 func (m *chatModel) send(text string) tea.Cmd {
-	m.seq++
-	m.outbox = append(m.outbox, queued{fmt.Sprintf("%d-%d", time.Now().UnixNano(), m.seq), text})
+	m.state.Error = ""
 	m.stick, m.dirty = true, true
-	return m.pump()
+	if m.status != "open" || !m.conn.Send(ws.Prompt(text)) {
+		m.unsent = append(m.unsent, queued{text: text, local: true})
+	}
+	return nil
+}
+
+func (m *chatModel) sendUnsent() {
+	var still []queued
+	for _, q := range m.unsent {
+		if !m.conn.Send(ws.Prompt(q.text)) {
+			still = append(still, q)
+		}
+	}
+	m.unsent = still
+	m.dirty = true
+}
+
+// allQueued is everything shown as queued, in display order.
+func (m *chatModel) allQueued() []queued {
+	return append(append([]queued(nil), m.queue...), m.unsent...)
+}
+
+// removeQueued drops allQueued()[i] — from the server's queue for every
+// client on this station, or from the local unsent list. Hidden right away;
+// the server's next snapshot confirms it (one already sent stays sent).
+func (m *chatModel) removeQueued(i int) {
+	if i < len(m.queue) {
+		q := m.queue[i]
+		m.queue = append(m.queue[:i:i], m.queue[i+1:]...)
+		m.conn.Send(ws.QueueRemove(q.id))
+	} else if j := i - len(m.queue); j < len(m.unsent) {
+		m.unsent = append(m.unsent[:j:j], m.unsent[j+1:]...)
+	}
+	m.state.Notice = "removed from the queue"
+	m.dirty = true
+}
+
+// queuedAt maps a screen row to the queued message drawn there, if any.
+func (m *chatModel) queuedAt(y int) (int, bool) {
+	line := y - m.vpTop
+	if line < 0 || line >= m.vp.Height {
+		return 0, false
+	}
+	line += m.vp.YOffset
+	for _, r := range m.queueRows {
+		if line >= r.start && line < r.end {
+			return r.idx, true
+		}
+	}
+	return 0, false
 }
 
 func (m *chatModel) key(k tea.KeyMsg) tea.Cmd {
@@ -544,7 +616,9 @@ func (m *chatModel) menuKey(s string) tea.Cmd {
 // Busy only turns on for replies this client sent, so a run started before
 // connecting (or from another client) would otherwise be unstoppable.
 func (m *chatModel) kill() tea.Cmd {
-	m.outbox = nil
+	// The server empties its queue as part of the abort; clearing here too
+	// just saves waiting for its snapshot.
+	m.queue, m.unsent = nil, nil
 	m.state.Notice = "killing…"
 	m.dirty = true
 	return m.runAction("kill")
@@ -608,7 +682,7 @@ type resetDoneMsg struct {
 func (m *chatModel) afterReset(s api.Station) {
 	m.station = s
 	m.state = chat.New()
-	m.pending, m.outbox, m.pendingLocal = nil, nil, ""
+	m.pending, m.queue, m.unsent = nil, nil, nil
 	m.histCursor, m.histMore, m.anchor = "", false, false
 	m.usage = api.TokenUsage{}
 	m.dirty, m.stick = true, true
@@ -860,11 +934,19 @@ func (m *chatModel) transcript() string {
 		if t.Role == "assistant" {
 			b.WriteString(m.assistantTurn(t, wrap) + "\n\n")
 		} else {
-			b.WriteString(m.userBlock(t.Text(), wrap, false) + "\n\n")
+			b.WriteString(m.userBlock(t.Text(), wrap) + "\n\n")
 		}
 	}
-	for _, q := range m.outbox {
-		b.WriteString(m.userBlock(q.text, wrap, true) + "\n\n")
+	m.queueRows = m.queueRows[:0]
+	for i, q := range m.allQueued() {
+		label := "❯ you · queued · click to remove"
+		if q.local {
+			label = "❯ you · waiting for connection · click to remove"
+		}
+		block := m.userBlockLabeled(label, q.text, wrap)
+		start := strings.Count(b.String(), "\n")
+		m.queueRows = append(m.queueRows, queueRow{start, start + lipgloss.Height(block), i})
+		b.WriteString(block + "\n\n")
 	}
 	if thinking(m.state.Turns, m.state.Busy) {
 		now := time.Now()
@@ -882,11 +964,11 @@ func (m *chatModel) transcript() string {
 }
 
 // userBlock is "my" text: a full-width raised panel with a cyan rail.
-func (m *chatModel) userBlock(text string, wrap lipgloss.Style, queued bool) string {
-	label := "❯ you"
-	if queued {
-		label = "❯ you · queued"
-	}
+func (m *chatModel) userBlock(text string, wrap lipgloss.Style) string {
+	return m.userBlockLabeled("❯ you", text, wrap)
+}
+
+func (m *chatModel) userBlockLabeled(label, text string, wrap lipgloss.Style) string {
 	blank := m.panelLine("▎", "")
 	lines := []string{blank, m.panelLine("▎ ", lipgloss.NewStyle().Bold(true).Render(label))}
 	for _, l := range strings.Split(wrap.Render(text), "\n") {
@@ -1118,6 +1200,7 @@ func (m *chatModel) View() string {
 	top, bottom := m.topBar(), m.bottom()
 	m.vp.Width = m.w
 	m.vp.Height = max(1, m.h-lipgloss.Height(top)-lipgloss.Height(bottom))
+	m.vpTop = lipgloss.Height(top)
 	if m.dirty {
 		// After an older page is prepended, shift the offset by however many
 		// lines it added so the lines being read stay put instead of the view
@@ -1142,6 +1225,9 @@ func (m *chatModel) View() string {
 // for anything else, which falls through to the navigation commands and then
 // to being sent to the model as ordinary text.
 func (m *chatModel) localCommand(text string) (cmd tea.Cmd, ok bool) {
+	if text == "/unqueue" || strings.HasPrefix(text, "/unqueue ") {
+		return nil, m.unqueue(strings.TrimSpace(strings.TrimPrefix(text, "/unqueue")))
+	}
 	switch text {
 	case "/help":
 		m.help = true
@@ -1174,8 +1260,10 @@ func (m *chatModel) localCommand(text string) (cmd tea.Cmd, ok bool) {
 		m.confirm = "reset"
 		return nil, true
 	case "/stop":
-		queued := len(m.outbox)
-		m.outbox = nil // follow-ups typed ahead of the reply you just cancelled
+		// Stop drops the follow-ups queued behind the reply too — the server
+		// clears its queue as part of the abort, for every client.
+		queued := len(m.allQueued())
+		m.queue, m.unsent = nil, nil
 		m.dirty = true
 		switch {
 		case m.state.Busy:
@@ -1183,6 +1271,7 @@ func (m *chatModel) localCommand(text string) (cmd tea.Cmd, ok bool) {
 			return m.runAction("abort"), true
 		case queued > 0:
 			m.state.Notice = "cleared the queued messages"
+			return m.runAction("abort"), true
 		default:
 			m.state.Notice = "nothing to stop (/kill force-stops the agent anyway)"
 		}
@@ -1193,11 +1282,35 @@ func (m *chatModel) localCommand(text string) (cmd tea.Cmd, ok bool) {
 	return nil, false
 }
 
+// unqueue handles "/unqueue [n]": drops the nth queued message (1 = the
+// oldest), or the newest with no n — the keyboard route to what clicking a
+// queued block does, for terminals where clicks don't get through. Always
+// reports ok: anything starting with /unqueue is meant for this.
+func (m *chatModel) unqueue(arg string) bool {
+	all := m.allQueued()
+	if len(all) == 0 {
+		m.state.Notice = "nothing queued"
+		return true
+	}
+	i := len(all) - 1
+	if arg != "" {
+		n, err := strconv.Atoi(arg)
+		if err != nil || n < 1 || n > len(all) {
+			m.state.Notice = fmt.Sprintf("/unqueue takes 1–%d", len(all))
+			return true
+		}
+		i = n - 1
+	}
+	m.removeQueued(i)
+	return true
+}
+
 // commandHelp is what /help lists — every typed command, in the order shown.
 // (TestHelpListsEveryCommand keeps it in step with the commands that exist.)
 var commandHelp = []struct{ cmd, desc string }{
 	{"/help", "show this list"},
 	{"/stop", "cancel the running reply (and drop messages queued behind it)"},
+	{"/unqueue", "drop a queued message: /unqueue N (1 = oldest), or the newest; clicking one works too"},
 	{"/kill", "force-stop the agent, even if this client didn't start the run"},
 	{"/compact", "summarize older messages to free up context"},
 	{"/show", "hide or show the model's thinking (shown by default)"},

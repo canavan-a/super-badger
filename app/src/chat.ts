@@ -185,6 +185,12 @@ export function applyEvent(state: ChatState, evt: EventMsg): ChatState {
         if (info.role === 'assistant' && isFinalFinish(info.finish)) {
           next = {...next, busy: false};
         }
+      } else if (info.role === 'assistant' && !next.busy) {
+        // A reply has started — the server sent the queue on its own (see
+        // server/station/queue.go), so there's no local send to mark busy.
+        // Assistant only: opencode updates user messages again after the
+        // reply ends (summaries), which would wrongly flip busy back on.
+        next = {...next, busy: true};
       }
       return next;
     }
@@ -318,36 +324,6 @@ export function getTurn(state: ChatState, messageID: string): Turn | undefined {
   return idx === undefined ? undefined : state.turns[idx];
 }
 
-// Adds the user's own message to the transcript immediately, rather than
-// waiting for opencode's own message.updated/part events to echo it back —
-// that echo isn't guaranteed to arrive promptly (or, under load, at all),
-// which previously meant a sent message could vanish between being removed
-// from the "Queued" list and the echo landing. See reconcileLocalUserTurn,
-// which folds the real event stream into this same turn once it does show up
-// (or the local id, if it never does, since a genuine send should never
-// disappear either way).
-export function addLocalUserTurn(state: ChatState, id: string, text: string): ChatState {
-  const turn: Turn = {messageID: id, role: 'user', partOrder: [id], parts: {[id]: {kind: 'text', id, text}}, done: true};
-  const turns = [...state.turns, turn];
-  return {...state, turns, turnIndex: {...state.turnIndex, [id]: turns.length - 1}};
-}
-
-// Swaps a locally-created optimistic turn's key for opencode's real
-// messageID once its own event for that message arrives, so the live event
-// stream folds into the same turn instead of appearing as an unrelated
-// second (duplicate) one. Clears the placeholder part — the
-// message.part.updated/delta events that follow populate the real content.
-export function reconcileLocalUserTurn(state: ChatState, localID: string, realID: string): ChatState {
-  const idx = state.turnIndex[localID];
-  if (idx === undefined || realID === localID) return state;
-  const turns = state.turns.slice();
-  turns[idx] = {...turns[idx], messageID: realID, parts: {}, partOrder: []};
-  const turnIndex = {...state.turnIndex};
-  delete turnIndex[localID];
-  turnIndex[realID] = idx;
-  return {...state, turns, turnIndex};
-}
-
 // Replays cached history events (see api.getStationHistory) on top of
 // whatever's already in state — used once, on mount, before live WS events
 // start arriving. Order-independent by construction (every event is an
@@ -383,8 +359,7 @@ export function allTurns(state: ChatState): Turn[] {
 }
 
 // The plain text of a turn's text parts (no reasoning/tool output) — what the
-// long-press "select text" view shows, and how a local turn is matched to
-// its echo.
+// long-press "select text" view shows.
 export function turnText(turn: Turn): string {
   return turn.partOrder
     .map(id => turn.parts[id])
@@ -404,14 +379,8 @@ export function turnText(turn: Turn): string {
 // Two things from local state survive: turns that arrived live after the
 // history snapshot was taken (anything after the newest turn both share),
 // and live text that's grown past the snapshot's prefix of the same part
-// (see applyEvent's message.part.updated comment). The optimistic local
-// user turn (see addLocalUserTurn) is dropped if its echo is already in
-// history — `localEchoed` tells the caller to stop waiting to reconcile it.
-export function rebuildFromHistory(
-  prev: ChatState,
-  events: EventMsg[],
-  pendingLocalID: string | null,
-): {state: ChatState; localEchoed: boolean} {
+// (see applyEvent's message.part.updated comment).
+export function rebuildFromHistory(prev: ChatState, events: EventMsg[]): ChatState {
   const base = seedFromHistory(emptyChatState, events);
   const turns = base.turns.map(t => {
     const old = getTurn(prev, t.messageID);
@@ -437,18 +406,9 @@ export function rebuildFromHistory(
   prev.turns.forEach((t, i) => {
     if (base.turnIndex[t.messageID] !== undefined) lastShared = i;
   });
-  const lastUser = [...base.turns].reverse().find(t => t.role === 'user');
-  let localEchoed = false;
-  for (const [i, t] of prev.turns.entries()) {
-    if (base.turnIndex[t.messageID] !== undefined) continue;
-    if (t.messageID === pendingLocalID) {
-      if (lastUser && turnText(lastUser) === turnText(t)) {
-        localEchoed = true;
-        continue;
-      }
-      turns.push(t);
-    } else if (i > lastShared && lastShared >= 0) {
-      turns.push(t);
+  if (lastShared >= 0) {
+    for (const t of prev.turns.slice(lastShared + 1)) {
+      if (base.turnIndex[t.messageID] === undefined) turns.push(t);
     }
   }
   const turnIndex: Record<string, number> = {};
@@ -460,13 +420,10 @@ export function rebuildFromHistory(
   // got it wrong (stuck spinner). The session.status the server sends on
   // every connect sets it instead.
   return {
-    state: {
-      ...prev,
-      turns,
-      turnIndex,
-      pendingPermission: prev.pendingPermission ?? base.pendingPermission,
-      pendingQuestion: prev.pendingQuestion ?? base.pendingQuestion,
-    },
-    localEchoed,
+    ...prev,
+    turns,
+    turnIndex,
+    pendingPermission: prev.pendingPermission ?? base.pendingPermission,
+    pendingQuestion: prev.pendingQuestion ?? base.pendingQuestion,
   };
 }

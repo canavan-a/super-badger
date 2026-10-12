@@ -59,7 +59,8 @@ export function StationDetailScreen({
 
   const {
     state: chat,
-    outbox,
+    queue,
+    removeQueued,
     send: sendWs,
     reset: resetChat,
     forceIdle,
@@ -335,7 +336,8 @@ export function StationDetailScreen({
           // resync.
           key={listKey}
           chat={chat}
-          outbox={outbox}
+          queue={queue}
+          onRemoveQueued={removeQueued}
           compacting={compacting}
           hasMoreHistory={hasMoreHistory}
           loadingOlder={loadingOlder}
@@ -366,9 +368,9 @@ export function StationDetailScreen({
         )}
       </View>
 
-      {outbox.length > 0 && (
+      {queue.length > 0 && (
         <Text style={styles.queueBanner}>
-          ⏳ {outbox.length} message{outbox.length > 1 ? 's' : ''} queued — will send once the current reply
+          ⏳ {queue.length} message{queue.length > 1 ? 's' : ''} queued — sent together once the current reply
           finishes
         </Text>
       )}
@@ -412,14 +414,14 @@ export function StationDetailScreen({
         </Pressable>
         {
           // Sending while busy no longer blocks — it queues (see
-          // useStationChat's outbox/pump) instead of racing the in-flight
+          // the server's queue — see useStationChat) instead of racing the in-flight
           // reply, matching how opencode's own CLI lets you type ahead.
           // No spinner here while the agent works (e.g. a long bash tool
           // call): it read as "your message is stuck sending". The Stop
           // button beside this and the reply's own progress show that.
         }
         <Pressable style={styles.sendButton} onPress={send}>
-          {chat.busy && outbox.length > 0 ? (
+          {chat.busy && queue.length > 0 ? (
             <Text style={styles.sendButtonText}>Queue</Text>
           ) : (
             <Icon name="send" size={18} color={theme.primaryText} />
@@ -488,7 +490,8 @@ export function StationDetailScreen({
 // behavior wanted here.
 function ChatList({
   chat,
-  outbox,
+  queue,
+  onRemoveQueued,
   compacting,
   hasMoreHistory,
   loadingOlder,
@@ -497,7 +500,8 @@ function ChatList({
   theme,
 }: {
   chat: ChatState;
-  outbox: QueuedMessage[];
+  queue: QueuedMessage[];
+  onRemoveQueued: (id: string) => void;
   compacting: boolean;
   hasMoreHistory: boolean;
   loadingOlder: boolean;
@@ -753,17 +757,25 @@ function ChatList({
           loadingOlder ? <ActivityIndicator style={styles.olderSpinner} size="small" color={theme.textMuted} /> : null
         }
         ListFooterComponent={
-          outbox.length > 0 ? (
+          queue.length > 0 ? (
             <View style={styles.queueList}>
-              {outbox.map(m => (
-                <View key={m.id} style={styles.queuedItem}>
+              {queue.map(m => (
+                // Tap removes it from the queue — for every app on this
+                // station, since the queue lives on the server.
+                <Pressable
+                  key={m.id}
+                  style={styles.queuedItem}
+                  onPress={() => onRemoveQueued(m.id)}
+                  accessibilityLabel="Remove queued message">
                   <View style={styles.queuedBadge}>
-                    <Text style={styles.queuedBadgeText}>⏳ Queued</Text>
+                    <Text style={styles.queuedBadgeText}>
+                      {m.local ? '⏳ Waiting for connection' : '⏳ Queued'} · tap to remove
+                    </Text>
                   </View>
                   <View style={[styles.bubble, styles.bubbleYou, styles.bubbleQueued]}>
                     <Text style={styles.youText}>{m.text}</Text>
                   </View>
-                </View>
+                </Pressable>
               ))}
             </View>
           ) : null

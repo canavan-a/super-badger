@@ -1,5 +1,4 @@
 import {
-  addLocalUserTurn,
   applyEvent,
   emptyChatState,
   getTurn,
@@ -81,7 +80,7 @@ test('rebuildFromHistory drops older pages but keeps live turns newer than the s
   let prev = seedFromHistory(emptyChatState, [msg('old', 'user'), textPart('old', 'po', 'old page')]);
   prev = seedFromHistory(prev, [msg('m1', 'user'), msg('m2', 'assistant', done), msg('m3', 'user')]);
 
-  const {state} = rebuildFromHistory(prev, [msg('m1', 'user'), msg('m2', 'assistant', done)], null);
+  const state = rebuildFromHistory(prev, [msg('m1', 'user'), msg('m2', 'assistant', done)]);
 
   expect(state.turns.map(t => t.messageID)).toEqual(['m1', 'm2', 'm3']);
   expect(state.turnIndex).toEqual({m1: 0, m2: 1, m3: 2});
@@ -89,21 +88,11 @@ test('rebuildFromHistory drops older pages but keeps live turns newer than the s
 
 test('rebuildFromHistory keeps live text that has grown past the snapshot', () => {
   const prev = seedFromHistory(emptyChatState, [msg('m1', 'assistant'), textPart('m1', 'p1', 'Hello world')]);
-  const {state} = rebuildFromHistory(prev, [msg('m1', 'assistant'), textPart('m1', 'p1', 'Hello')], null);
+  const state = rebuildFromHistory(prev, [msg('m1', 'assistant'), textPart('m1', 'p1', 'Hello')]);
   expect(getTurn(state, 'm1')?.parts.p1).toMatchObject({text: 'Hello world'});
 });
 
 
-test('rebuildFromHistory drops the optimistic user turn once its echo is in history', () => {
-  const prev = {...addLocalUserTurn(emptyChatState, 'local-1', 'hi there'), busy: true};
-  const echoed = rebuildFromHistory(prev, [msg('u1', 'user'), textPart('u1', 'pu', 'hi there')], 'local-1');
-  expect(echoed.localEchoed).toBe(true);
-  expect(echoed.state.turns.map(t => t.messageID)).toEqual(['u1']);
-
-  const notYet = rebuildFromHistory(prev, [], 'local-1');
-  expect(notYet.localEchoed).toBe(false);
-  expect(notYet.state.turns.map(t => t.messageID)).toEqual(['local-1']);
-});
 
 test('session.status idle clears busy', () => {
   const state = applyEvent({...emptyChatState, busy: true}, {type: 'session.status', properties: {status: {type: 'idle'}}});
@@ -116,6 +105,16 @@ test('session.status busy sets busy, so a reply running on open shows as running
 });
 
 test('rebuildFromHistory leaves busy to session.status', () => {
-  const idle = rebuildFromHistory(emptyChatState, [msg('m1', 'user'), msg('m2', 'assistant')], null);
-  expect(idle.state.busy).toBe(false);
+  const state = rebuildFromHistory(emptyChatState, [msg('m1', 'user'), msg('m2', 'assistant')]);
+  expect(state.busy).toBe(false);
+});
+
+test('a reply starting (sent by the server, not this app) turns busy on', () => {
+  const started = applyEvent(emptyChatState, msg('a1', 'assistant'));
+  expect(started.busy).toBe(true);
+  const finished = applyEvent(started, msg('a1', 'assistant', done));
+  expect(finished.busy).toBe(false);
+  // opencode re-updates the user message (summaries) after the reply ends.
+  const afterwards = applyEvent(finished, msg('u1', 'user'));
+  expect(afterwards.busy).toBe(false);
 });

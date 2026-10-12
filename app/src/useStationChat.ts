@@ -2,15 +2,7 @@ import {useCallback, useEffect, useRef, useState} from 'react';
 import {AppState} from 'react-native';
 
 import {getStationHistory, getStationRunStatus} from './api';
-import {
-  addLocalUserTurn,
-  applyEvent,
-  ChatState,
-  emptyChatState,
-  prependHistory,
-  rebuildFromHistory,
-  reconcileLocalUserTurn,
-} from './chat';
+import {applyEvent, ChatState, emptyChatState, prependHistory, rebuildFromHistory} from './chat';
 import {settingsStore} from './settings';
 
 function wsURL(stationId: number): string {
@@ -42,20 +34,21 @@ export type ConnectionStatus = 'connecting' | 'open' | 'closed';
 const FLUSH_INTERVAL_MS = 150;
 
 // While busy, how long the socket can go without a single event before the
-// busy flag is double-checked against the server's history. A long-running
-// tool can legitimately be quiet this long, which is why this only checks
-// rather than clearing busy outright.
+// busy flag is double-checked against the server. A long-running tool can
+// legitimately be quiet this long, which is why this only checks rather than
+// clearing busy outright.
 const BUSY_STALL_MS = 45_000;
 
-// One outgoing message the app is holding onto rather than handing straight
-// to opencode — either because a reply is still in flight (this station only
-// ever runs one prompt at a time — see station.Service.activate) or, briefly,
-// between being queued and the socket actually accepting it. This is what
-// lets the composer show "queued" the way opencode's own CLI does when you
-// type ahead while it's still responding.
+// One message waiting to go to opencode. The queue itself lives on the
+// server (see server/station/queue.go) — shared with every other app/TUI on
+// this station, kept across app restarts, and sent by the server once the
+// running reply finishes, all queued messages together as one prompt.
+// `local` ones were typed while the socket was down and haven't reached the
+// server yet; they're handed over the moment it reconnects.
 export interface QueuedMessage {
   id: string;
   text: string;
+  local?: boolean;
 }
 
 export function useStationChat(stationId: number) {
@@ -64,39 +57,28 @@ export function useStationChat(stationId: number) {
   const wsRef = useRef<WebSocket | null>(null);
   const pending = useRef<any[]>([]);
   const flushTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  // Mirrors state.busy for use inside pump() below without making pump
-  // depend on (and thus be recreated by) every state change.
+  // Mirrors state.busy for the stall check below without making it depend
+  // on (and thus be recreated by) every state change.
   const busyRef = useRef(false);
-  // The outbox lives in a ref, not state, so pump() can synchronously check
-  // and mutate it — a setState *updater* function doing that (the more
-  // idiomatic-looking approach) gets re-invoked speculatively by React under
-  // some conditions, which would double-send a queued message. outboxVersion
-  // just forces a re-render whenever the ref's contents actually change.
-  const outboxRef = useRef<QueuedMessage[]>([]);
-  const [outboxVersion, setOutboxVersion] = useState(0);
-  // The single in-flight message's local turn id, set the moment pump() sends
-  // it and cleared once opencode's own message.updated echo for it arrives
-  // (see reconcileLocalUserTurn). Only ever one at a time — this station runs
-  // one prompt at a time (see pump()'s own comment) — so there's never more
-  // than one id to reconcile against.
-  const pendingLocalUserID = useRef<string | null>(null);
+  busyRef.current = state.busy;
+  // The server's queue, replaced wholesale by every {"type":"queue"}
+  // snapshot it pushes.
+  const [serverQueue, setServerQueue] = useState<QueuedMessage[]>([]);
+  // Typed while disconnected — in a ref too so the socket's onopen can hand
+  // them over without depending on render timing.
+  const unsentRef = useRef<QueuedMessage[]>([]);
+  const [unsent, setUnsent] = useState<QueuedMessage[]>([]);
+  const setUnsentBoth = (next: QueuedMessage[]) => {
+    unsentRef.current = next;
+    setUnsent(next);
+  };
 
   useEffect(() => {
     flushTimer.current = setInterval(() => {
       if (pending.current.length === 0) return;
       const batch = pending.current;
       pending.current = [];
-      setState(prev => {
-        let next = prev;
-        for (const evt of batch) {
-          if (pendingLocalUserID.current && evt.type === 'message.updated' && evt.properties?.info?.role === 'user') {
-            next = reconcileLocalUserTurn(next, pendingLocalUserID.current, evt.properties.info.id);
-            pendingLocalUserID.current = null;
-          }
-          next = applyEvent(next, evt);
-        }
-        return next;
-      });
+      setState(prev => batch.reduce(applyEvent, prev));
     }, FLUSH_INTERVAL_MS);
     return () => {
       if (flushTimer.current) clearInterval(flushTimer.current);
@@ -135,11 +117,7 @@ export function useStationChat(stationId: number) {
           loadingOlderRef.current = false;
           setLoadingOlder(false);
           setHasMoreHistory(page.hasMore);
-          setState(prev => {
-            const {state: next, localEchoed} = rebuildFromHistory(prev, page.events, pendingLocalUserID.current);
-            if (localEchoed) pendingLocalUserID.current = null;
-            return next;
-          });
+          setState(prev => rebuildFromHistory(prev, page.events));
           if (remount) setListKey(k => k + 1);
         })
         .catch(() => {
@@ -163,24 +141,15 @@ export function useStationChat(stationId: number) {
 
   // Safety net for a busy flag that outlived its reply: if the turn-finished
   // event was lost (socket half-dead, app suspended mid-reply), nothing else
-  // would ever clear it and the send button stays a spinner. Asks opencode
-  // directly, so a long quiet tool run (still genuinely busy) is left alone.
+  // would ever clear it. Asks opencode directly, so a long quiet tool run
+  // (still genuinely busy) is left alone.
   useEffect(() => {
     const timer = setInterval(() => {
       if (!busyRef.current || Date.now() - lastEventAt.current < BUSY_STALL_MS) return;
       lastEventAt.current = Date.now();
       getStationRunStatus(stationId)
         .then(({status: run}) => {
-          if (run !== 'idle') return;
-          // Idle with the sent message never even echoed back means it never
-          // arrived (sent into a socket that was already dead).
-          const lost = pendingLocalUserID.current !== null;
-          pendingLocalUserID.current = null;
-          setState(prev => ({
-            ...prev,
-            busy: false,
-            error: lost ? 'The server never confirmed the last message — it may not have sent.' : prev.error,
-          }));
+          if (run === 'idle') setState(prev => (prev.busy ? {...prev, busy: false} : prev));
         })
         .catch(() => {});
     }, 10_000);
@@ -216,9 +185,6 @@ export function useStationChat(stationId: number) {
   // Set by the socket effect below; tears down the current socket and opens a
   // fresh one right away (no 2s retry wait).
   const reconnectNowRef = useRef<() => void>(() => {});
-  // pump (below) is defined after the socket effect but called from its
-  // onopen.
-  const pumpRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     let cancelled = false;
@@ -240,16 +206,31 @@ export function useStationChat(stationId: number) {
         // (nothing's been missed, so no need to restart the list).
         resync(openedBefore);
         openedBefore = true;
-        pumpRef.current();
+        // Hand over anything typed while offline; the server's queue
+        // snapshot that follows shows them as properly queued.
+        for (const m of unsentRef.current) {
+          ws.send(JSON.stringify({type: 'prompt', text: m.text}));
+        }
+        if (unsentRef.current.length > 0) setUnsentBoth([]);
       };
       ws.onmessage = ev => {
         if (cancelled || wsRef.current !== ws) return;
         lastEventAt.current = Date.now();
+        let msg: any;
         try {
-          pending.current.push(JSON.parse(ev.data));
+          msg = JSON.parse(ev.data);
         } catch {
-          // ignore malformed frames
+          return; // ignore malformed frames
         }
+        if (msg.type === 'queue') {
+          // Applied right away rather than batched: it's a whole snapshot,
+          // and rare (one per queue change).
+          setServerQueue(
+            (msg.items ?? []).map((m: {id: number; text: string}) => ({id: String(m.id), text: m.text})),
+          );
+          return;
+        }
+        pending.current.push(msg);
       };
       ws.onclose = () => {
         if (cancelled || wsRef.current !== ws) return;
@@ -282,9 +263,9 @@ export function useStationChat(stationId: number) {
   }, [stationId, resync]);
 
   // Coming back from the background, Android has often silently killed the
-  // socket while it still reports OPEN — sends into it vanish (stuck send
-  // spinner) and nothing new arrives (history "not loading until restart").
-  // A fresh socket on every resume avoids trusting it; its onopen resyncs.
+  // socket while it still reports OPEN — sends into it vanish and nothing new
+  // arrives (history "not loading until restart"). A fresh socket on every
+  // resume avoids trusting it; its onopen resyncs.
   useEffect(() => {
     let wasBackground = false;
     const sub = AppState.addEventListener('change', next => {
@@ -297,55 +278,32 @@ export function useStationChat(stationId: number) {
     return () => sub.remove();
   }, []);
 
-  // Sends the head of the outbox the moment nothing is in flight — called
-  // both right after enqueueing (in case nothing was in flight already) and
-  // whenever a reply finishes (see the busyRef effect below). Reading/mutating
-  // busyRef instead of state.busy is what lets this run synchronously right
-  // after enqueueing without waiting on a render.
-  //
-  // Only while the socket is actually open: sending into a connecting/closed
-  // one silently drops the prompt, but busy would still go true with nothing
-  // ever coming to clear it. The message waits in the outbox ("queued")
-  // instead, and the socket's onopen pumps it.
-  const pump = useCallback(() => {
-    if (busyRef.current || outboxRef.current.length === 0) return;
-    if (wsRef.current?.readyState !== WebSocket.OPEN) return;
-    const [head, ...rest] = outboxRef.current;
-    outboxRef.current = rest;
-    busyRef.current = true;
-    setOutboxVersion(v => v + 1);
-    // Added as a real turn immediately rather than waiting on opencode's own
-    // message.updated echo — see addLocalUserTurn's comment for why the
-    // wait-for-echo approach could make a just-sent message vanish. Also
-    // fixes the "queued" bubble never being seen at all when nothing was
-    // busy: send() -> pump() dequeues synchronously in the same tick, so it
-    // never rendered as queued before this either.
-    const localID = `local-${head.id}`;
-    pendingLocalUserID.current = localID;
-    setState(s => ({...addLocalUserTurn(s, localID, head.text), busy: true, error: null}));
-    lastEventAt.current = Date.now();
-    wsRef.current.send(JSON.stringify({type: 'prompt', text: head.text}));
+  // Hands the message to the server's queue, which sends it straight away
+  // if nothing is running, or with everything else queued once the current
+  // reply finishes. While the socket is down it's held locally (shown as
+  // queued) and handed over on reconnect.
+  const send = useCallback((text: string) => {
+    setState(prev => (prev.error ? {...prev, error: null} : prev));
+    const ws = wsRef.current;
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({type: 'prompt', text}));
+      return;
+    }
+    const id = `local-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setUnsentBoth([...unsentRef.current, {id, text, local: true}]);
   }, []);
-  pumpRef.current = pump;
 
-  useEffect(() => {
-    busyRef.current = state.busy;
-    if (!state.busy) pump();
-  }, [state.busy, pump]);
-
-  // Enqueues rather than sending directly — this station's session can only
-  // run one prompt at a time (see station.Service.activate), so a message
-  // sent while busy needs somewhere to sit rather than racing the in-flight
-  // one. pump() immediately tries to dispatch it in case nothing was busy.
-  const send = useCallback(
-    (text: string) => {
-      const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      outboxRef.current = [...outboxRef.current, {id, text}];
-      setOutboxVersion(v => v + 1);
-      pump();
-    },
-    [pump],
-  );
+  // Drops one queued message — for every app on this station, since the
+  // queue is the server's. Removed from view right away; the server's next
+  // snapshot confirms it (a message that was already sent just stays sent).
+  const removeQueued = useCallback((id: string) => {
+    if (unsentRef.current.some(m => m.id === id)) {
+      setUnsentBoth(unsentRef.current.filter(m => m.id !== id));
+      return;
+    }
+    setServerQueue(q => q.filter(m => m.id !== id));
+    wsRef.current?.send(JSON.stringify({type: 'queue_remove', id: Number(id)}));
+  }, []);
 
   // Answers a pending permission.asked request (see chat.ts's
   // PendingPermission) — without this, opencode leaves that session's agent
@@ -369,50 +327,46 @@ export function useStationChat(stationId: number) {
   }, []);
 
   // Lets the owner dismiss a session error banner rather than it sitting
-  // there until the next prompt happens to clear it (pump() only resets
-  // `error` right before sending a new one — see above).
+  // there until the next send happens to clear it.
   const dismissError = useCallback(() => {
     setState(prev => (prev.error ? {...prev, error: null} : prev));
   }, []);
 
-  // After a force stop (kill): drop queued follow-ups and clear busy without
-  // waiting on opencode's turn-finished event, which may never come if this
-  // client never saw the run start.
+  // After a force stop (kill): clear busy without waiting on opencode's
+  // turn-finished event, which may never come if this client never saw the
+  // run start. The server already emptied the queue as part of the abort;
+  // clearing it here too just saves waiting for its snapshot.
   const forceIdle = useCallback(() => {
-    outboxRef.current = [];
-    busyRef.current = false;
-    pendingLocalUserID.current = null;
-    setOutboxVersion(v => v + 1);
+    setUnsentBoth([]);
+    setServerQueue([]);
     setState(prev => ({...prev, busy: false}));
   }, []);
 
   const reset = useCallback(() => {
     pending.current = [];
-    outboxRef.current = [];
-    busyRef.current = false;
-    pendingLocalUserID.current = null;
     historyCursor.current = '';
     setHasMoreHistory(false);
-    setOutboxVersion(v => v + 1);
+    setUnsentBoth([]);
+    setServerQueue([]);
     setState(emptyChatState);
   }, []);
 
   // After a Station reset (new opencode session), the open socket's
-  // subscription is still keyed to the old session ID — closing it lets the
-  // existing reconnect-on-close logic re-open against the station's
-  // *current* session (the server resolves that fresh on every connect).
+  // subscription is still keyed to the old session ID — a fresh socket
+  // re-opens against the station's *current* session (the server resolves
+  // that fresh on every connect).
   const reconnect = useCallback(() => {
     reconnectNowRef.current();
   }, []);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- outboxRef.current is intentionally read fresh each render, not tracked as a dependency
-  const outbox = outboxRef.current;
+  const queue = [...serverQueue, ...unsent];
 
   return {
     state,
     status,
-    outbox,
+    queue,
     send,
+    removeQueued,
     reset,
     forceIdle,
     reconnect,
