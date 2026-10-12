@@ -38,6 +38,9 @@ func main() {
 	defer cancel()
 
 	go broker.Run(ctx)
+	// Sends each station's queued messages once its session goes idle —
+	// independent of any client being connected.
+	go svc.RunQueue(ctx)
 
 	hub := notify.NewHub()
 	notifier := metrics.NotifierFunc(func(st database.Station, key, label string, decimals int, value float64, direction database.ThresholdDirection) {

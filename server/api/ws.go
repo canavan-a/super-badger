@@ -2,10 +2,8 @@ package api
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -24,7 +22,9 @@ var wsUpgrader = websocket.Upgrader{
 }
 
 // wsClientMessage is what the app sends over a station's WebSocket:
-// {"type":"prompt","text":"..."} to start a reply,
+// {"type":"prompt","text":"..."} to queue a message (sent right away if the
+// session is idle — see station.Service.Enqueue),
+// {"type":"queue_remove","id":N} to drop a queued one,
 // {"type":"permission_reply","request_id":"...","reply":"once"|"always"|"reject"}
 // to answer a pending tool-permission request, or
 // {"type":"question_reply","request_id":"...","answers":[["label"]]} /
@@ -37,6 +37,7 @@ var wsUpgrader = websocket.Upgrader{
 type wsClientMessage struct {
 	Type      string     `json:"type"`
 	Text      string     `json:"text"`
+	ID        uint       `json:"id"`
 	RequestID string     `json:"request_id"`
 	Reply     string     `json:"reply"`
 	Answers   [][]string `json:"answers"`
@@ -78,12 +79,15 @@ func stationWS(svc *station.Service, broker *opencode.EventBroker) gin.HandlerFu
 		// directly from more than one goroutine.
 		writes := make(chan any, 16)
 
-		// sessionChanged lets promptWithRecovery tell this loop to follow a
-		// new session ID after a transparent reset (see below) — without
-		// this, a station whose opencode session went stale (e.g. opencode
-		// itself restarted, which drops all sessions from memory — confirmed
-		// live) would stay subscribed to a dead session forever.
-		sessionChanged := make(chan string, 1)
+		// The station's own feed: queue snapshots, errors/notices from
+		// sending the queue, and station.SessionChanged when that send had to
+		// replace an expired session — without following that, a station
+		// whose opencode session went stale (e.g. opencode itself restarted,
+		// which drops all sessions from memory — confirmed live) would stay
+		// subscribed to a dead session forever. Subscribed before the
+		// snapshot below so no change can slip in between.
+		stationMsgs, unsubscribeStation := svc.SubscribeStation(id)
+		defer unsubscribeStation()
 		done := make(chan struct{})
 
 		// Reads run on their own goroutine so a slow/blocked write below
@@ -104,8 +108,12 @@ func stationWS(svc *station.Service, broker *opencode.EventBroker) gin.HandlerFu
 				}
 				switch {
 				case msg.Type == "prompt" && msg.Text != "":
-					if err := promptWithRecovery(c.Request.Context(), svc, id, msg.Text, sessionChanged, writes); err != nil {
+					if err := svc.Enqueue(id, msg.Text); err != nil {
 						sendErr("prompt", err)
+					}
+				case msg.Type == "queue_remove" && msg.ID != 0:
+					if err := svc.RemoveQueued(id, msg.ID); err != nil {
+						sendErr("queue_remove", err)
 					}
 				case msg.Type == "permission_reply" && msg.RequestID != "" && msg.Reply != "":
 					if err := svc.ReplyPermission(c.Request.Context(), msg.RequestID, msg.Reply); err != nil {
@@ -167,15 +175,31 @@ func stationWS(svc *station.Service, broker *opencode.EventBroker) gin.HandlerFu
 			log.Printf("[station %d] session status: %v", id, err)
 		}
 
+		// The queue as it stands right now; every change after this
+		// arrives through stationMsgs.
+		if q, err := svc.Queue(id); err == nil {
+			select {
+			case writes <- q:
+			default:
+			}
+		}
+
 		for {
 			select {
 			case <-done:
 				unsubscribe()
 				return
-			case newSessionID := <-sessionChanged:
-				unsubscribe()
-				sessionID = newSessionID
-				events, unsubscribe = broker.Subscribe(sessionID)
+			case m := <-stationMsgs:
+				if changed, ok := m.(station.SessionChanged); ok {
+					unsubscribe()
+					sessionID = changed.SessionID
+					events, unsubscribe = broker.Subscribe(sessionID)
+					continue
+				}
+				if err := conn.WriteJSON(m); err != nil {
+					unsubscribe()
+					return
+				}
 			case evt, ok := <-events:
 				if !ok {
 					return
@@ -325,39 +349,4 @@ func (sc *stationCache) refresh() {
 			sc.byID[st.OpencodeSessionID] = st
 		}
 	}
-}
-
-// promptWithRecovery calls PromptAsync, and if opencode reports the session
-// no longer exists (e.g. opencode itself restarted, which drops all sessions
-// from memory — confirmed live), transparently resets the Station to a fresh
-// session and retries once — notifying sessionChanged so stationWS's event
-// subscription follows the new session ID rather than listening to a dead
-// one forever, and telling the client what's happening (via writes) rather
-// than just silently retrying behind its back.
-func promptWithRecovery(ctx context.Context, svc *station.Service, id uint, text string, sessionChanged chan<- string, writes chan<- any) error {
-	err := svc.PromptAsync(ctx, id, text)
-	if err == nil || !strings.Contains(err.Error(), "Session not found") {
-		return err
-	}
-
-	select {
-	case writes <- gin.H{"type": "notice", "text": "Session expired — starting a new one…"}:
-	default:
-	}
-
-	st, resetErr := svc.Reset(ctx, id)
-	if resetErr != nil {
-		return fmt.Errorf("session expired and reset failed: %w", resetErr)
-	}
-	select {
-	case sessionChanged <- st.OpencodeSessionID:
-	default:
-	}
-	// Tells the client to discard any transcript it's showing — it belongs
-	// to the now-dead session, not this new one.
-	select {
-	case writes <- gin.H{"type": "session_reset"}:
-	default:
-	}
-	return svc.PromptAsync(ctx, id, text)
 }

@@ -231,11 +231,18 @@ func (c *Client) Prompt(ctx context.Context, sessionID, text string) (json.RawMe
 // immediately (opencode responds 204) — the reply streams in as events on
 // the /event SSE stream (see StreamEvents) instead of blocking this call.
 func (c *Client) PromptAsync(ctx context.Context, sessionID, text string) error {
-	body := map[string]any{
-		"parts": []map[string]any{
-			{"type": "text", "text": text},
-		},
+	return c.PromptAsyncParts(ctx, sessionID, []string{text})
+}
+
+// PromptAsyncParts is PromptAsync with several texts as separate text parts
+// of one user message — how a station's queued messages all reach the model
+// together in a single turn (see station.Service's queue).
+func (c *Client) PromptAsyncParts(ctx context.Context, sessionID string, texts []string) error {
+	parts := make([]map[string]any, len(texts))
+	for i, t := range texts {
+		parts[i] = map[string]any{"type": "text", "text": t}
 	}
+	body := map[string]any{"parts": parts}
 	return c.do(ctx, "POST", fmt.Sprintf("/session/%s/prompt_async", sessionID), body, nil)
 }
 

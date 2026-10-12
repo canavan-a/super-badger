@@ -22,6 +22,7 @@ type Service struct {
 	db     *gorm.DB
 	oc     *opencode.Client
 	broker *opencode.EventBroker
+	queue  *queueState
 }
 
 func NewService(db *gorm.DB, oc *opencode.Client, broker *opencode.EventBroker) *Service {
@@ -29,6 +30,7 @@ func NewService(db *gorm.DB, oc *opencode.Client, broker *opencode.EventBroker) 
 		db:     db,
 		oc:     oc,
 		broker: broker,
+		queue:  newQueueState(),
 	}
 }
 
@@ -73,6 +75,10 @@ func (s *Service) Reset(ctx context.Context, id uint) (database.Station, error) 
 	st, err := database.GetStation(s.db, id)
 	if err != nil {
 		return database.Station{}, err
+	}
+	// Queued follow-ups belong to the conversation being thrown away.
+	if err := s.clearQueue(id); err != nil {
+		return st, err
 	}
 	if err := s.activate(ctx, &st); err != nil {
 		return st, err
@@ -322,6 +328,11 @@ func (s *Service) Abort(ctx context.Context, id uint) error {
 	if st.OpencodeSessionID == "" {
 		return errors.New("station has no active session")
 	}
+	// Stop drops what was queued behind the reply too. Cleared first, so
+	// the idle event the abort itself produces finds nothing to send.
+	if err := s.clearQueue(id); err != nil {
+		return err
+	}
 	return s.oc.AbortSession(ctx, st.OpencodeSessionID)
 }
 
@@ -348,6 +359,9 @@ func (s *Service) Delete(ctx context.Context, id uint) error {
 		_ = s.oc.AbortSession(ctx, st.OpencodeSessionID)
 		_ = s.oc.DeleteSession(ctx, st.OpencodeSessionID)
 		s.broker.ClearHistory(st.OpencodeSessionID)
+	}
+	if err := s.clearQueue(id); err != nil {
+		return err
 	}
 	return database.DeleteStation(s.db, id)
 }
