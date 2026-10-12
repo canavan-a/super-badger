@@ -414,11 +414,12 @@ export function StationDetailScreen({
           // Sending while busy no longer blocks — it queues (see
           // useStationChat's outbox/pump) instead of racing the in-flight
           // reply, matching how opencode's own CLI lets you type ahead.
+          // No spinner here while the agent works (e.g. a long bash tool
+          // call): it read as "your message is stuck sending". The Stop
+          // button beside this and the reply's own progress show that.
         }
         <Pressable style={styles.sendButton} onPress={send}>
-          {chat.busy && outbox.length === 0 ? (
-            <ActivityIndicator color={theme.primaryText} />
-          ) : chat.busy ? (
+          {chat.busy && outbox.length > 0 ? (
             <Text style={styles.sendButtonText}>Queue</Text>
           ) : (
             <Icon name="send" size={18} color={theme.primaryText} />
