@@ -35,6 +35,9 @@ export interface Turn {
   partOrder: string[];
   parts: Record<string, Part>;
   done: boolean;
+  // opencode's finish reason once the message completes — 'tool-calls'
+  // means another step follows, so the reply as a whole isn't over.
+  finish?: string;
 }
 
 // A pending tool-permission request opencode is blocked on — until this is
@@ -160,6 +163,10 @@ function partFromRaw(raw: any): Part | null {
   }
 }
 
+function isFinalFinish(finish: string | undefined): boolean {
+  return finish !== 'tool-calls' && finish !== 'unknown';
+}
+
 export function applyEvent(state: ChatState, evt: EventMsg): ChatState {
   const p = evt.properties ?? {};
 
@@ -169,7 +176,7 @@ export function applyEvent(state: ChatState, evt: EventMsg): ChatState {
       if (!info) return state;
       let next = ensureTurn(state, info.id, info.role);
       if (info.time?.completed) {
-        next = updateTurn(next, info.id, t => ({...t, done: true}));
+        next = updateTurn(next, info.id, t => ({...t, done: true, finish: info.finish}));
         // session.idle is opencode's dedicated "done" signal, but it isn't
         // reliably the thing that fires here (or reliably survives a
         // reconnect's history replay) — a completed assistant message is
@@ -178,7 +185,7 @@ export function applyEvent(state: ChatState, evt: EventMsg): ChatState {
         // indefinitely when session.idle didn't arrive. But opencode
         // completes one message per step, and a step that ended in tool
         // calls is followed by another, so only a final step counts.
-        if (info.role === 'assistant' && info.finish !== 'tool-calls' && info.finish !== 'unknown') {
+        if (info.role === 'assistant' && isFinalFinish(info.finish)) {
           next = {...next, busy: false};
         }
       }
@@ -234,6 +241,12 @@ export function applyEvent(state: ChatState, evt: EventMsg): ChatState {
 
     case 'session.idle':
       return {...state, busy: false};
+
+    // Newer opencode reports idle through session.status as well (and not
+    // always alongside session.idle) — treated the same, so a missed
+    // session.idle can't leave the send button spinning.
+    case 'session.status':
+      return p.status?.type === 'idle' && state.busy ? {...state, busy: false} : state;
 
     case 'permission.asked': {
       const {id, permission, patterns} = p;
@@ -365,4 +378,99 @@ export function prependHistory(state: ChatState, events: EventMsg[]): ChatState 
 // has no optimistic local echo to duplicate against.
 export function allTurns(state: ChatState): Turn[] {
   return state.turns;
+}
+
+// The plain text of a turn's text parts (no reasoning/tool output) — what the
+// long-press "select text" view shows, and how a local turn is matched to
+// its echo.
+export function turnText(turn: Turn): string {
+  return turn.partOrder
+    .map(id => turn.parts[id])
+    .filter((p): p is Extract<Part, {kind: 'text'}> => p?.kind === 'text')
+    .map(p => p.text)
+    .join('\n\n');
+}
+
+// Throws away whatever's held locally and rebuilds from a fresh newest page
+// of history — used whenever the socket (re)connects or the app comes back
+// to the foreground. Anything that happened while disconnected never reached
+// this client live, and patching it in on top of stale local state is what
+// left chats half-loaded, out of order or flashing until the app was
+// restarted; a clean rebuild is the same state a fresh open would have.
+// Older pages are dropped too and come back through loadOlder on scroll.
+//
+// Two things from local state survive: turns that arrived live after the
+// history snapshot was taken (anything after the newest turn both share),
+// and live text that's grown past the snapshot's prefix of the same part
+// (see applyEvent's message.part.updated comment). The optimistic local
+// user turn (see addLocalUserTurn) is dropped if its echo is already in
+// history — `localEchoed` tells the caller to stop waiting to reconcile it.
+export function rebuildFromHistory(
+  prev: ChatState,
+  events: EventMsg[],
+  pendingLocalID: string | null,
+): {state: ChatState; localEchoed: boolean} {
+  const base = seedFromHistory(emptyChatState, events);
+  const turns = base.turns.map(t => {
+    const old = getTurn(prev, t.messageID);
+    if (!old) return t;
+    let parts = t.parts;
+    for (const id of t.partOrder) {
+      const fresh = t.parts[id];
+      const live = old.parts[id];
+      if (
+        live &&
+        'text' in live &&
+        'text' in fresh &&
+        live.text.length > fresh.text.length &&
+        live.text.startsWith(fresh.text)
+      ) {
+        parts = {...parts, [id]: live};
+      }
+    }
+    return parts === t.parts ? t : {...t, parts};
+  });
+
+  let lastShared = -1;
+  prev.turns.forEach((t, i) => {
+    if (base.turnIndex[t.messageID] !== undefined) lastShared = i;
+  });
+  const lastUser = [...base.turns].reverse().find(t => t.role === 'user');
+  let localEchoed = false;
+  for (const [i, t] of prev.turns.entries()) {
+    if (base.turnIndex[t.messageID] !== undefined) continue;
+    if (t.messageID === pendingLocalID) {
+      if (lastUser && turnText(lastUser) === turnText(t)) {
+        localEchoed = true;
+        continue;
+      }
+      turns.push(t);
+    } else if (i > lastShared && lastShared >= 0) {
+      turns.push(t);
+    }
+  }
+  const turnIndex: Record<string, number> = {};
+  turns.forEach((t, i) => {
+    turnIndex[t.messageID] = i;
+  });
+
+  // busy can't be trusted from before the gap — the reply may have finished
+  // (or started) while nothing was listening. The newest assistant turn is
+  // the source of truth; with only a just-sent user turn at the tail, keep
+  // whatever the send path set.
+  const tail = turns[turns.length - 1];
+  const busy =
+    tail?.role === 'assistant' ? !(tail.done && isFinalFinish(tail.finish)) : tail ? prev.busy : false;
+
+  return {
+    state: {
+      ...prev,
+      turns,
+      turnIndex,
+      busy,
+      pendingPermission: prev.pendingPermission ?? base.pendingPermission,
+      pendingQuestion: prev.pendingQuestion ?? base.pendingQuestion,
+    },
+    localEchoed,
+  };
 }

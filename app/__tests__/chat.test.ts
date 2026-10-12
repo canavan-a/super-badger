@@ -1,4 +1,12 @@
-import {applyEvent, emptyChatState, getTurn, prependHistory, seedFromHistory} from '../src/chat';
+import {
+  addLocalUserTurn,
+  applyEvent,
+  emptyChatState,
+  getTurn,
+  prependHistory,
+  rebuildFromHistory,
+  seedFromHistory,
+} from '../src/chat';
 
 test('a stale (shorter) history replay does not clobber already-streamed text', () => {
   let state = emptyChatState;
@@ -56,5 +64,64 @@ test('a step that ends in tool calls keeps the reply busy until the final step',
     type: 'message.updated',
     properties: {info: {id: 'm2', role: 'assistant', finish: 'stop', time: {completed: 2}}},
   });
+  expect(state.busy).toBe(false);
+});
+
+const msg = (id: string, role: string, extra: object = {}) => ({
+  type: 'message.updated',
+  properties: {info: {id, role, ...extra}},
+});
+const textPart = (messageID: string, id: string, text: string) => ({
+  type: 'message.part.updated',
+  properties: {part: {id, messageID, type: 'text', text}},
+});
+const done = {finish: 'stop', time: {completed: 1}};
+
+test('rebuildFromHistory drops older pages but keeps live turns newer than the snapshot', () => {
+  let prev = seedFromHistory(emptyChatState, [msg('old', 'user'), textPart('old', 'po', 'old page')]);
+  prev = seedFromHistory(prev, [msg('m1', 'user'), msg('m2', 'assistant', done), msg('m3', 'user')]);
+
+  const {state} = rebuildFromHistory(prev, [msg('m1', 'user'), msg('m2', 'assistant', done)], null);
+
+  expect(state.turns.map(t => t.messageID)).toEqual(['m1', 'm2', 'm3']);
+  expect(state.turnIndex).toEqual({m1: 0, m2: 1, m3: 2});
+});
+
+test('rebuildFromHistory keeps live text that has grown past the snapshot', () => {
+  const prev = seedFromHistory(emptyChatState, [msg('m1', 'assistant'), textPart('m1', 'p1', 'Hello world')]);
+  const {state} = rebuildFromHistory(prev, [msg('m1', 'assistant'), textPart('m1', 'p1', 'Hello')], null);
+  expect(getTurn(state, 'm1')?.parts.p1).toMatchObject({text: 'Hello world'});
+});
+
+test('rebuildFromHistory takes busy from the newest assistant turn', () => {
+  const stuck = {...emptyChatState, busy: true};
+  const finished = rebuildFromHistory(stuck, [msg('m1', 'user'), msg('m2', 'assistant', done)], null);
+  expect(finished.state.busy).toBe(false);
+
+  const running = rebuildFromHistory(emptyChatState, [msg('m1', 'user'), msg('m2', 'assistant')], null);
+  expect(running.state.busy).toBe(true);
+
+  const midStep = rebuildFromHistory(
+    emptyChatState,
+    [msg('m2', 'assistant', {finish: 'tool-calls', time: {completed: 1}})],
+    null,
+  );
+  expect(midStep.state.busy).toBe(true);
+});
+
+test('rebuildFromHistory drops the optimistic user turn once its echo is in history', () => {
+  const prev = {...addLocalUserTurn(emptyChatState, 'local-1', 'hi there'), busy: true};
+  const echoed = rebuildFromHistory(prev, [msg('u1', 'user'), textPart('u1', 'pu', 'hi there')], 'local-1');
+  expect(echoed.localEchoed).toBe(true);
+  expect(echoed.state.turns.map(t => t.messageID)).toEqual(['u1']);
+
+  const notYet = rebuildFromHistory(prev, [], 'local-1');
+  expect(notYet.localEchoed).toBe(false);
+  expect(notYet.state.turns.map(t => t.messageID)).toEqual(['local-1']);
+  expect(notYet.state.busy).toBe(true);
+});
+
+test('session.status idle clears busy', () => {
+  const state = applyEvent({...emptyChatState, busy: true}, {type: 'session.status', properties: {status: {type: 'idle'}}});
   expect(state.busy).toBe(false);
 });

@@ -11,7 +11,7 @@ import {formatDataPointValue} from '../api';
 import {rgbToHex, themeAccent} from '../logo/logoTheme';
 import {settingsStore} from '../settings';
 import {THEMES} from '../theme';
-import {CH_ALERTS, PRESS_ACTION} from './channels';
+import {CH_ALERTS, ensureChannels, PREFER_SMALL_ICON, PRESS_ACTION} from './channels';
 
 export interface NotificationMsg {
   type: 'agent_idle' | 'permission_requested' | 'question_requested' | 'datapoint_threshold';
@@ -103,7 +103,7 @@ export async function handleNotificationMsg(msg: NotificationMsg): Promise<void>
     console.warn('[agentEvents] clearChatNotifications failed, continuing anyway', err);
   }
 
-  const data = (kind: NotificationKind) => ({stationId: String(msg.station_id), kind});
+  const data = (kind: NotificationKind) => ({stationId: String(msg.station_id), kind, ...PREFER_SMALL_ICON});
   const color = await notificationColor(msg.station_color);
 
   switch (msg.type) {
@@ -178,4 +178,18 @@ export async function handleNotificationMsg(msg: NotificationMsg): Promise<void>
     // Unknown message type — ignore rather than throw, this socket is
     // meant to tolerate the server adding new message types over time.
   }
+}
+
+// Settings' "Send test notification": the agent-idle alert the background
+// monitor would raise, for the given station, so it carries that station's
+// color and a tap opens it like a real one. Creates the channels itself, as
+// they otherwise only exist once background monitoring has been switched on.
+export async function sendTestNotification(station: {id: number; name: string; color?: string}): Promise<void> {
+  await ensureChannels();
+  await handleNotificationMsg({
+    type: 'agent_idle',
+    station_id: station.id,
+    station_name: station.name,
+    station_color: station.color || undefined,
+  });
 }

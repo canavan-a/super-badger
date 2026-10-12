@@ -3,6 +3,7 @@ import {
   Animated,
   AppState,
   AppStateStatus,
+  BackHandler,
   Dimensions,
   PanResponder,
   Platform,
@@ -276,6 +277,36 @@ function AppInner(): React.JSX.Element {
   const orderedStations = visibleStations;
   const currentStationIndex =
     route.name === 'stationDetail' ? orderedStations.findIndex(s => s.id === route.id) : -1;
+
+  // Android back: closes the drawer if it's open; otherwise leads home, which
+  // is the top station's chat (a station's Data Points page goes back to that
+  // station instead). On a station's chat, or with no station to go to, the
+  // system handles it as usual.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (drawerOpen) {
+        setDrawerOpen(false);
+        return true;
+      }
+      if (route.name === 'stationDetail') return false;
+      if (route.name === 'stationSettings') {
+        navigate({name: 'stationDetail', id: route.id});
+        return true;
+      }
+      const top = orderedStations[0];
+      if (top) {
+        navigate({name: 'stationDetail', id: top.id});
+        return true;
+      }
+      if (route.name !== 'stations') {
+        navigate({name: 'stations'});
+        return true;
+      }
+      return false;
+    });
+    return () => sub.remove();
+  }, [drawerOpen, route, orderedStations, navigate]);
   const screenWidth = Dimensions.get('window').width;
   const swipeX = useRef(new Animated.Value(0)).current;
   const EDGE_ZONE = 28;

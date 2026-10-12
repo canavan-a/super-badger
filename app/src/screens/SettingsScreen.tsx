@@ -22,6 +22,7 @@ import {
   Release,
   runUpdate,
 } from '../appUpdater';
+import {listStations} from '../api';
 import {MetricSourcesSettings} from '../components/MetricSourcesSettings';
 import {StationLayoutSettings} from '../components/StationLayoutSettings';
 import {VpnSettings} from '../components/VpnSettings';
@@ -79,6 +80,29 @@ export function SettingsScreen(): React.JSX.Element {
   // prompt once denied) and to see the actual current status.
   const [permStatus, setPermStatus] = useState<string>();
   const [permBusy, setPermBusy] = useState(false);
+  const [testNotifBusy, setTestNotifBusy] = useState(false);
+
+  // Fires a simulated agent-idle alert for the top station (the first one the
+  // station list shows), so the notification's look and tap-through can be
+  // checked without waiting on a real agent.
+  const sendTestNotification = async () => {
+    setTestNotifBusy(true);
+    try {
+      const top = (await listStations()).find(s => !s.hidden);
+      if (!top) {
+        Alert.alert('Test notification', 'Add a station first: the test notification is sent on its behalf.');
+        return;
+      }
+      const notifee = (await import('@notifee/react-native')).default;
+      await notifee.requestPermission();
+      const {sendTestNotification: send} = await import('../notifications/agentEvents');
+      await send(top);
+    } catch (err) {
+      Alert.alert('Test notification', String(err));
+    } finally {
+      setTestNotifBusy(false);
+    }
+  };
 
   const recheckPermission = async () => {
     setPermBusy(true);
@@ -402,21 +426,31 @@ export function SettingsScreen(): React.JSX.Element {
                 <Switch value={bgNotifications} onValueChange={toggleBgNotifications} disabled={bgNotifBusy} />
               </View>
 
-              <View style={styles.testRow}>
-                <Pressable style={styles.testButton} onPress={recheckPermission} disabled={permBusy}>
-                  {permBusy ? (
+              <View style={styles.actionStack}>
+                <View style={styles.actionRow}>
+                  <Pressable style={styles.testButton} onPress={recheckPermission} disabled={permBusy}>
+                    {permBusy ? (
+                      <ActivityIndicator size="small" color={theme.text} />
+                    ) : (
+                      <Text style={styles.testButtonText}>Re-check notification permission</Text>
+                    )}
+                  </Pressable>
+                  {permStatus === 'Allowed' && <Text style={styles.testOk}>✓ {permStatus}</Text>}
+                  {permStatus && permStatus !== 'Allowed' && <Text style={styles.testError}>✗ {permStatus}</Text>}
+                </View>
+
+                <Pressable style={styles.testButton} onPress={sendTestNotification} disabled={testNotifBusy}>
+                  {testNotifBusy ? (
                     <ActivityIndicator size="small" color={theme.text} />
                   ) : (
-                    <Text style={styles.testButtonText}>Re-check notification permission</Text>
+                    <Text style={styles.testButtonText}>Send test notification</Text>
                   )}
                 </Pressable>
-                {permStatus === 'Allowed' && <Text style={styles.testOk}>✓ {permStatus}</Text>}
-                {permStatus && permStatus !== 'Allowed' && <Text style={styles.testError}>✗ {permStatus}</Text>}
-              </View>
 
-              <Pressable style={styles.testButton} onPress={() => Linking.openSettings()}>
-                <Text style={styles.testButtonText}>Battery optimization settings</Text>
-              </Pressable>
+                <Pressable style={styles.testButton} onPress={() => Linking.openSettings()}>
+                  <Text style={styles.testButtonText}>Battery optimization settings</Text>
+                </Pressable>
+              </View>
             </>
           )}
 
@@ -558,6 +592,17 @@ function makeStyles(theme: Theme) {
       alignItems: 'center',
       gap: 10,
       marginTop: 10,
+    },
+    // The notification section's buttons: one column, evenly spaced, with a
+    // status (e.g. the permission result) allowed beside its button.
+    actionStack: {
+      gap: 10,
+      marginTop: 4,
+    },
+    actionRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
     },
     testButton: {
       alignSelf: 'flex-start',

@@ -1,4 +1,5 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
+import {AppState} from 'react-native';
 
 import {getStationHistory} from './api';
 import {
@@ -7,8 +8,8 @@ import {
   ChatState,
   emptyChatState,
   prependHistory,
+  rebuildFromHistory,
   reconcileLocalUserTurn,
-  seedFromHistory,
 } from './chat';
 import {settingsStore} from './settings';
 
@@ -39,6 +40,12 @@ export type ConnectionStatus = 'connecting' | 'open' | 'closed';
 // flashing in the chat list. 150ms keeps streaming looking smooth while
 // cutting that work by ~3x.
 const FLUSH_INTERVAL_MS = 150;
+
+// While busy, how long the socket can go without a single event before the
+// busy flag is double-checked against the server's history. A long-running
+// tool can legitimately be quiet this long, which is why this only checks
+// rather than clearing busy outright.
+const BUSY_STALL_MS = 45_000;
 
 // One outgoing message the app is holding onto rather than handing straight
 // to opencode — either because a reply is still in flight (this station only
@@ -100,35 +107,91 @@ export function useStationChat(stationId: number) {
   // server/opencode/events.go) when landing on a station — otherwise
   // navigating away and back always starts blank. Only the newest page is
   // fetched here; older pages come in via loadOlder as the user scrolls up,
-  // since the whole cache can be several MB of tool output. Order-independent
-  // versus the live WS connection below (seedFromHistory/applyEvent are
-  // idempotent upserts), so it's fine that this resolves whenever it
-  // resolves. If the session was reset, the server's history for it is gone
-  // too (cleared together — see station.Service.activate), so this naturally
-  // comes back empty rather than showing stale, no-longer-real history.
+  // since the whole cache can be several MB of tool output. If the session
+  // was reset, the server's history for it is gone too (cleared together —
+  // see station.Service.activate), so this naturally comes back empty rather
+  // than showing stale, no-longer-real history.
+  //
+  // Runs on mount and again on every socket (re)connect — see
+  // rebuildFromHistory for why reconnecting starts over from a fresh page
+  // instead of keeping what was already loaded. `remount` bumps listKey so
+  // the chat list also starts over (scroll position, paging window), the
+  // same as a cold app start.
   const historyCursor = useRef('');
   const loadingOlderRef = useRef(false);
   const [hasMoreHistory, setHasMoreHistory] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const [listKey, setListKey] = useState(0);
+  const resyncSeq = useRef(0);
+  const lastEventAt = useRef(Date.now());
+
+  const resync = useCallback(
+    (remount: boolean) => {
+      const seq = ++resyncSeq.current;
+      getStationHistory(stationId)
+        .then(page => {
+          if (seq !== resyncSeq.current) return;
+          historyCursor.current = page.cursor;
+          loadingOlderRef.current = false;
+          setLoadingOlder(false);
+          setHasMoreHistory(page.hasMore);
+          setState(prev => {
+            const {state: next, localEchoed} = rebuildFromHistory(prev, page.events, pendingLocalUserID.current);
+            if (localEchoed) pendingLocalUserID.current = null;
+            return next;
+          });
+          if (remount) setListKey(k => k + 1);
+        })
+        .catch(() => {
+          // No history yet (or fetch failed) — keep what's shown; the next
+          // reconnect or resume retries.
+        });
+    },
+    [stationId],
+  );
 
   useEffect(() => {
-    let cancelled = false;
     historyCursor.current = '';
     setHasMoreHistory(false);
-    getStationHistory(stationId)
-      .then(page => {
-        if (cancelled) return;
-        historyCursor.current = page.cursor;
-        setHasMoreHistory(page.hasMore);
-        if (page.events.length > 0) setState(prev => seedFromHistory(prev, page.events));
-      })
-      .catch(() => {
-        // No history yet (or fetch failed) — starting blank is correct here,
-        // not an error worth surfacing.
-      });
+    resync(false);
     return () => {
-      cancelled = true;
+      // Invalidates any fetch still in flight for the old station.
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- a counter, not a DOM ref
+      resyncSeq.current++;
     };
+  }, [resync]);
+
+  // Safety net for a busy flag that outlived its reply: if the turn-finished
+  // event was lost (socket half-dead, app suspended mid-reply), nothing else
+  // would ever clear it and the send button stays a spinner. Only busy is
+  // taken from the check — the transcript is left alone so a user reading
+  // older history isn't disturbed.
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (!busyRef.current || Date.now() - lastEventAt.current < BUSY_STALL_MS) return;
+      lastEventAt.current = Date.now();
+      if (pendingLocalUserID.current) {
+        // Sent, but opencode never even echoed the message back — it didn't
+        // arrive (sent into a socket that was already dead). Unblock the
+        // composer rather than spin forever.
+        pendingLocalUserID.current = null;
+        setState(prev => ({
+          ...prev,
+          busy: false,
+          error: 'The server never confirmed the last message — it may not have sent.',
+        }));
+        return;
+      }
+      getStationHistory(stationId)
+        .then(page => {
+          setState(prev => {
+            const {state: checked} = rebuildFromHistory(prev, page.events, null);
+            return checked.busy === prev.busy ? prev : {...prev, busy: checked.busy};
+          });
+        })
+        .catch(() => {});
+    }, 10_000);
+    return () => clearInterval(timer);
   }, [stationId]);
 
   // Fetches the page of history just older than what's shown and puts it
@@ -138,10 +201,12 @@ export function useStationChat(stationId: number) {
     if (loadingOlderRef.current || !historyCursor.current) return;
     loadingOlderRef.current = true;
     setLoadingOlder(true);
-    const requestedFor = stationId;
+    // A resync in between replaces the transcript and cursor this page was
+    // requested against — splicing it in would duplicate/misorder turns.
+    const seq = resyncSeq.current;
     getStationHistory(stationId, historyCursor.current)
       .then(page => {
-        if (requestedFor !== stationId) return;
+        if (seq !== resyncSeq.current) return;
         historyCursor.current = page.cursor;
         setHasMoreHistory(page.hasMore);
         if (page.events.length > 0) setState(prev => prependHistory(prev, page.events));
@@ -155,9 +220,17 @@ export function useStationChat(stationId: number) {
       });
   }, [stationId]);
 
+  // Set by the socket effect below; tears down the current socket and opens a
+  // fresh one right away (no 2s retry wait).
+  const reconnectNowRef = useRef<() => void>(() => {});
+  // pump (below) is defined after the socket effect but called from its
+  // onopen.
+  const pumpRef = useRef<() => void>(() => {});
+
   useEffect(() => {
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let openedBefore = false;
 
     const connect = () => {
       if (cancelled) return;
@@ -166,11 +239,19 @@ export function useStationChat(stationId: number) {
       wsRef.current = ws;
 
       ws.onopen = () => {
-        if (cancelled) return;
+        if (cancelled || wsRef.current !== ws) return;
         setStatus('open');
+        lastEventAt.current = Date.now();
+        // Whatever happened while disconnected never arrived here — pick it
+        // up from history. The first open just backs up the mount-time fetch
+        // (nothing's been missed, so no need to restart the list).
+        resync(openedBefore);
+        openedBefore = true;
+        pumpRef.current();
       };
       ws.onmessage = ev => {
-        if (cancelled) return;
+        if (cancelled || wsRef.current !== ws) return;
+        lastEventAt.current = Date.now();
         try {
           pending.current.push(JSON.parse(ev.data));
         } catch {
@@ -178,15 +259,24 @@ export function useStationChat(stationId: number) {
         }
       };
       ws.onclose = () => {
-        if (cancelled) return;
+        if (cancelled || wsRef.current !== ws) return;
         setStatus('closed');
         // Reconnect — a Station reset, opencode restart, or transient
         // network blip shouldn't strand the chat screen permanently.
+        clearTimeout(retryTimer);
         retryTimer = setTimeout(connect, 2000);
       };
       ws.onerror = () => {
         ws.close();
       };
+    };
+
+    reconnectNowRef.current = () => {
+      clearTimeout(retryTimer);
+      const old = wsRef.current;
+      wsRef.current = null; // detaches old's handlers (they check wsRef)
+      old?.close();
+      connect();
     };
 
     connect();
@@ -196,15 +286,37 @@ export function useStationChat(stationId: number) {
       clearTimeout(retryTimer);
       wsRef.current?.close();
     };
-  }, [stationId]);
+  }, [stationId, resync]);
+
+  // Coming back from the background, Android has often silently killed the
+  // socket while it still reports OPEN — sends into it vanish (stuck send
+  // spinner) and nothing new arrives (history "not loading until restart").
+  // A fresh socket on every resume avoids trusting it; its onopen resyncs.
+  useEffect(() => {
+    let wasBackground = false;
+    const sub = AppState.addEventListener('change', next => {
+      if (next === 'background') wasBackground = true;
+      if (next === 'active' && wasBackground) {
+        wasBackground = false;
+        reconnectNowRef.current();
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   // Sends the head of the outbox the moment nothing is in flight — called
   // both right after enqueueing (in case nothing was in flight already) and
   // whenever a reply finishes (see the busyRef effect below). Reading/mutating
   // busyRef instead of state.busy is what lets this run synchronously right
   // after enqueueing without waiting on a render.
+  //
+  // Only while the socket is actually open: sending into a connecting/closed
+  // one silently drops the prompt, but busy would still go true with nothing
+  // ever coming to clear it. The message waits in the outbox ("queued")
+  // instead, and the socket's onopen pumps it.
   const pump = useCallback(() => {
     if (busyRef.current || outboxRef.current.length === 0) return;
+    if (wsRef.current?.readyState !== WebSocket.OPEN) return;
     const [head, ...rest] = outboxRef.current;
     outboxRef.current = rest;
     busyRef.current = true;
@@ -218,8 +330,10 @@ export function useStationChat(stationId: number) {
     const localID = `local-${head.id}`;
     pendingLocalUserID.current = localID;
     setState(s => ({...addLocalUserTurn(s, localID, head.text), busy: true, error: null}));
-    wsRef.current?.send(JSON.stringify({type: 'prompt', text: head.text}));
+    lastEventAt.current = Date.now();
+    wsRef.current.send(JSON.stringify({type: 'prompt', text: head.text}));
   }, []);
+  pumpRef.current = pump;
 
   useEffect(() => {
     busyRef.current = state.busy;
@@ -295,7 +409,7 @@ export function useStationChat(stationId: number) {
   // existing reconnect-on-close logic re-open against the station's
   // *current* session (the server resolves that fresh on every connect).
   const reconnect = useCallback(() => {
-    wsRef.current?.close();
+    reconnectNowRef.current();
   }, []);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps -- outboxRef.current is intentionally read fresh each render, not tracked as a dependency
@@ -316,5 +430,6 @@ export function useStationChat(stationId: number) {
     hasMoreHistory,
     loadingOlder,
     loadOlder,
+    listKey,
   };
 }

@@ -9,7 +9,7 @@
 import notifee, {AndroidForegroundServiceType} from '@notifee/react-native';
 
 import {handleNotificationMsg, notificationColor} from '../notifications/agentEvents';
-import {CH_SERVICE, ensureChannels, NID_FGS, PRESS_ACTION} from '../notifications/channels';
+import {CH_SERVICE, ensureChannels, NID_FGS, PREFER_SMALL_ICON, PRESS_ACTION} from '../notifications/channels';
 import {settingsStore} from '../settings';
 
 function notificationsWsURL(): string {
@@ -80,6 +80,7 @@ export async function startMonitoring(): Promise<void> {
     id: NID_FGS,
     title: 'super-badger',
     body: 'Watching for agent activity…',
+    data: PREFER_SMALL_ICON,
     android: {
       channelId: CH_SERVICE,
       // Required: Notifee's default is 'ic_launcher', which doesn't exist

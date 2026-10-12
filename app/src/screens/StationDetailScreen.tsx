@@ -28,7 +28,7 @@ import {
   StationDataPoint,
   TokenUsage,
 } from '../api';
-import {allTurns, ChatState, Part, PendingPermission, PendingQuestion, Turn} from '../chat';
+import {allTurns, ChatState, Part, PendingPermission, PendingQuestion, Turn, turnText} from '../chat';
 import {DiggingSpinner} from '../components/DiggingSpinner';
 import {Icon} from '../components/Icon';
 import {CodeBlockSegment, parseMarkdown} from '../markdown';
@@ -71,6 +71,7 @@ export function StationDetailScreen({
     hasMoreHistory,
     loadingOlder,
     loadOlder,
+    listKey,
   } = useStationChat(stationId);
 
   // Token/cost usage — same figures the opencode CLI's status line shows.
@@ -329,6 +330,10 @@ export function StationDetailScreen({
 
       <View style={styles.chatArea}>
         <ChatList
+          // Fresh list (scroll position, paging window) whenever the
+          // transcript is rebuilt after a reconnect — see useStationChat's
+          // resync.
+          key={listKey}
           chat={chat}
           outbox={outbox}
           compacting={compacting}
@@ -692,12 +697,19 @@ function ChatList({
     });
   };
 
+  // Long-press on a bubble opens its text in a sheet where it can be
+  // highlighted/copied. In-place `selectable` Text wasn't enough: each
+  // markdown paragraph is its own Text, and Android can't extend a
+  // selection across them.
+  const [selectionText, setSelectionText] = useState<string | null>(null);
+
   const renderItem = useCallback(
     ({item, index}: {item: Turn; index: number}) => (
       <TurnView
         turn={item}
         prevTurn={index > 0 ? turnsRef.current[index - 1] : undefined}
         compacting={compacting}
+        onLongPress={setSelectionText}
         styles={styles}
         theme={theme}
       />
@@ -781,6 +793,34 @@ function ChatList({
           <Text style={styles.jumpToBottomText}>↓ Jump to bottom</Text>
         </Pressable>
       )}
+      <Modal
+        visible={selectionText !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSelectionText(null)}>
+        <Pressable style={styles.selectBackdrop} onPress={() => setSelectionText(null)}>
+          <Pressable style={styles.selectCard} onPress={() => {}}>
+            <ScrollView style={styles.selectScroll}>
+              <Text selectable style={styles.selectText}>
+                {selectionText}
+              </Text>
+            </ScrollView>
+            <View style={styles.selectActions}>
+              <Pressable
+                style={styles.menuRow}
+                onPress={() => {
+                  Clipboard.setString(selectionText ?? '');
+                  setSelectionText(null);
+                }}>
+                <Text style={styles.menuRowText}>Copy all</Text>
+              </Pressable>
+              <Pressable style={styles.menuRow} onPress={() => setSelectionText(null)}>
+                <Text style={styles.menuRowText}>Close</Text>
+              </Pressable>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -958,22 +998,28 @@ const TurnView = React.memo(function TurnView({
   turn,
   prevTurn,
   compacting,
+  onLongPress,
   styles,
   theme,
 }: {
   turn: Turn;
   prevTurn?: Turn;
   compacting: boolean;
+  onLongPress: (text: string) => void;
   styles: Styles;
   theme: Theme;
 }): React.JSX.Element | null {
+  const handleLongPress = () => {
+    const text = turnText(turn);
+    if (text) onLongPress(text);
+  };
   if (turn.role === 'user') {
     // Hide rather than show an empty bubble ("a dot for mine") — the paired
     // assistant turn right after it (below) carries the one visible badge
     // for this pair instead.
     if (isEmptyUserTurn(turn)) return null;
     return (
-      <View style={[styles.bubble, styles.bubbleYou]}>
+      <Pressable style={[styles.bubble, styles.bubbleYou]} onLongPress={handleLongPress}>
         {turn.partOrder.map(id => {
           const part = turn.parts[id];
           return part.kind === 'text' && part.text ? (
@@ -982,12 +1028,12 @@ const TurnView = React.memo(function TurnView({
             </Text>
           ) : null;
         })}
-      </View>
+      </Pressable>
     );
   }
   const isCompactionReply = turn.partOrder.length === 0 && (compacting || isEmptyUserTurn(prevTurn));
   return (
-    <View style={[styles.bubble, styles.bubbleAssistant]}>
+    <Pressable style={[styles.bubble, styles.bubbleAssistant]} onLongPress={handleLongPress}>
       {turn.partOrder.map(id => (
         <PartView key={id} part={turn.parts[id]} styles={styles} theme={theme} />
       ))}
@@ -1005,7 +1051,7 @@ const TurnView = React.memo(function TurnView({
         // which show their own progress.
         !turn.done && isThinking(turn) && <DiggingSpinner />
       )}
-    </View>
+    </Pressable>
   );
 });
 
@@ -1344,6 +1390,34 @@ function makeStyles(theme: Theme) {
     menuDivider: {
       height: 1,
       backgroundColor: theme.border,
+    },
+    selectBackdrop: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.4)',
+      justifyContent: 'center',
+      padding: 16,
+    },
+    selectCard: {
+      maxHeight: '80%',
+      borderRadius: 10,
+      backgroundColor: theme.surface,
+      borderWidth: 1,
+      borderColor: theme.border,
+      overflow: 'hidden',
+    },
+    selectScroll: {
+      padding: 14,
+    },
+    selectText: {
+      fontSize: 15,
+      lineHeight: 21,
+      color: theme.text,
+    },
+    selectActions: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      borderTopWidth: 1,
+      borderTopColor: theme.border,
     },
     directory: {
       fontSize: 11,
