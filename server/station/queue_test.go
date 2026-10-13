@@ -128,40 +128,34 @@ func TestEnqueueWhileIdleSendsAtOnce(t *testing.T) {
 	}
 }
 
-func TestQueuedWhileBusySentTogetherOnIdle(t *testing.T) {
+func TestEnqueueWhileBusySendsAtOnce(t *testing.T) {
 	svc, fake, id := newTestService(t)
 	fake.set(func(f *fakeOpencode) { f.status = "busy" })
-	_ = svc.Enqueue(id, "one")
-	_ = svc.Enqueue(id, "two")
-	time.Sleep(50 * time.Millisecond)
-	if len(fake.sent()) != 0 {
-		t.Fatalf("sent while busy: %v", fake.sent())
+	_ = svc.Enqueue(id, "mid-reply")
+	waitFor(t, "prompt", func() bool { return len(fake.sent()) == 1 })
+	if got := fake.sent()[0]; len(got) != 1 || got[0] != "mid-reply" {
+		t.Fatalf("sent %v", got)
 	}
-	if n := queueLen(t, svc, id); n != 2 {
-		t.Fatalf("queue len %d, want 2", n)
-	}
-
-	fake.set(func(f *fakeOpencode) { f.status = "" })
-	svc.drain(context.Background(), id)
-	got := fake.sent()
-	if len(got) != 1 || strings.Join(got[0], ",") != "one,two" {
-		t.Fatalf("sent %v, want one prompt [one two]", got)
+	if n := queueLen(t, svc, id); n != 0 {
+		t.Fatalf("queue len %d after send", n)
 	}
 }
 
-func TestNoOverlappingSendRightAfterPrompt(t *testing.T) {
+func TestSentInQueueOrder(t *testing.T) {
 	svc, fake, id := newTestService(t)
-	_ = svc.Enqueue(id, "first")
-	waitFor(t, "first prompt", func() bool { return len(fake.sent()) == 1 })
-	// opencode hasn't caught up yet and still reports idle.
-	fake.set(func(f *fakeOpencode) { f.status = "" })
-	_ = svc.Enqueue(id, "second")
-	time.Sleep(50 * time.Millisecond)
-	if len(fake.sent()) != 1 {
-		t.Fatalf("second message sent during the in-flight grace: %v", fake.sent())
+	for _, text := range []string{"one", "two", "three"} {
+		_ = svc.Enqueue(id, text)
 	}
-	if n := queueLen(t, svc, id); n != 1 {
-		t.Fatalf("queue len %d, want 1", n)
+	var got []string
+	waitFor(t, "all three sent", func() bool {
+		got = nil
+		for _, p := range fake.sent() {
+			got = append(got, p...)
+		}
+		return len(got) == 3
+	})
+	if strings.Join(got, ",") != "one,two,three" {
+		t.Fatalf("sent in order %v", got)
 	}
 }
 
@@ -169,10 +163,9 @@ func TestFailedSendRestoresQueueAndReportsError(t *testing.T) {
 	svc, fake, id := newTestService(t)
 	msgs, unsubscribe := svc.SubscribeStation(id)
 	defer unsubscribe()
-	fake.set(func(f *fakeOpencode) { f.status = "busy" })
-	_ = svc.Enqueue(id, "a")
-	_ = svc.Enqueue(id, "b")
-	fake.set(func(f *fakeOpencode) { f.status = ""; f.fail = true })
+	fake.set(func(f *fakeOpencode) { f.fail = true })
+	_, _ = database.EnqueueMessage(svc.db, id, "a")
+	_, _ = database.EnqueueMessage(svc.db, id, "b")
 	svc.drain(context.Background(), id)
 
 	q, _ := svc.Queue(id)
@@ -191,11 +184,25 @@ func TestFailedSendRestoresQueueAndReportsError(t *testing.T) {
 	}
 }
 
-func TestRemoveQueued(t *testing.T) {
+func TestRetriedSendKeepsOrderAheadOfNewMessages(t *testing.T) {
 	svc, fake, id := newTestService(t)
-	fake.set(func(f *fakeOpencode) { f.status = "busy" })
-	_ = svc.Enqueue(id, "keep")
-	_ = svc.Enqueue(id, "drop")
+	fake.set(func(f *fakeOpencode) { f.fail = true })
+	_, _ = database.EnqueueMessage(svc.db, id, "old")
+	svc.drain(context.Background(), id)
+	fake.set(func(f *fakeOpencode) { f.fail = false })
+	_, _ = database.EnqueueMessage(svc.db, id, "new")
+	svc.drain(context.Background(), id)
+	got := fake.sent()
+	if len(got) != 1 || strings.Join(got[0], ",") != "old,new" {
+		t.Fatalf("sent %v, want one prompt [old new]", got)
+	}
+}
+
+func TestRemoveQueued(t *testing.T) {
+	svc, _, id := newTestService(t)
+	// Straight into the table: Enqueue would send them at once.
+	_, _ = database.EnqueueMessage(svc.db, id, "keep")
+	_, _ = database.EnqueueMessage(svc.db, id, "drop")
 	q, _ := svc.Queue(id)
 	if err := svc.RemoveQueued(id, q.Items[1].ID); err != nil {
 		t.Fatal(err)
@@ -212,15 +219,13 @@ func TestRemoveQueued(t *testing.T) {
 
 func TestAbortClearsQueue(t *testing.T) {
 	svc, fake, id := newTestService(t)
-	fake.set(func(f *fakeOpencode) { f.status = "busy" })
-	_ = svc.Enqueue(id, "x")
+	_, _ = database.EnqueueMessage(svc.db, id, "x")
 	if err := svc.Abort(context.Background(), id); err != nil {
 		t.Fatal(err)
 	}
 	if n := queueLen(t, svc, id); n != 0 {
 		t.Fatalf("queue len %d after abort", n)
 	}
-	fake.set(func(f *fakeOpencode) { f.status = "" })
 	svc.drain(context.Background(), id)
 	if len(fake.sent()) != 0 {
 		t.Fatalf("sent after abort: %v", fake.sent())

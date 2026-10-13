@@ -370,8 +370,7 @@ export function StationDetailScreen({
 
       {queue.length > 0 && (
         <Text style={styles.queueBanner}>
-          ⏳ {queue.length} message{queue.length > 1 ? 's' : ''} queued — sent together once the current reply
-          finishes
+          ⏳ {queue.length} message{queue.length > 1 ? 's' : ''} queued — sending…
         </Text>
       )}
 
@@ -1031,17 +1030,22 @@ const TurnView = React.memo(function TurnView({
     // assistant turn right after it (below) carries the one visible badge
     // for this pair instead.
     if (isEmptyUserTurn(turn)) return null;
+    // Messages the server queue sent together arrive as one user message
+    // with a text part each — one bubble per part, as they were typed.
     return (
-      <Pressable style={[styles.bubble, styles.bubbleYou]} onLongPress={handleLongPress}>
+      <>
         {turn.partOrder.map(id => {
           const part = turn.parts[id];
           return part.kind === 'text' && part.text ? (
-            <Text key={id} style={styles.youText}>
-              {part.text}
-            </Text>
+            <Pressable
+              key={id}
+              style={[styles.bubble, styles.bubbleYou]}
+              onLongPress={() => onLongPress(part.text)}>
+              <Text style={styles.youText}>{part.text}</Text>
+            </Pressable>
           ) : null;
         })}
-      </Pressable>
+      </>
     );
   }
   const isCompactionReply = turn.partOrder.length === 0 && (compacting || isEmptyUserTurn(prevTurn));

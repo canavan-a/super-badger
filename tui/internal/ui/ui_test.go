@@ -72,6 +72,27 @@ func TestFrameIsExactlyScreenSized(t *testing.T) {
 	}
 }
 
+func TestBatchedUserPartsShownAsSeparateMessages(t *testing.T) {
+	m := newChat(api.New("http://127.0.0.1:1", ""), NewStyles("burrow"), api.Station{ID: 1, Name: "alpha", Reachable: true}, 0, 1)
+	defer m.Close()
+	m.resize(70, 30)
+	for _, raw := range []string{
+		`{"type":"message.updated","properties":{"info":{"id":"u1","role":"user"}}}`,
+		`{"type":"message.part.updated","properties":{"part":{"id":"p1","messageID":"u1","type":"text","text":"first thing"}}}`,
+		`{"type":"message.part.updated","properties":{"part":{"id":"p2","messageID":"u1","type":"text","text":"second thing"}}}`,
+	} {
+		e, _ := chat.ParseEvent([]byte(raw))
+		m.state.Apply(e)
+	}
+	plain := ansi.ReplaceAllString(m.transcript(), "")
+	if n := strings.Count(plain, "❯ you"); n != 2 {
+		t.Fatalf("%d user blocks, want 2:\n%s", n, plain)
+	}
+	if strings.Contains(plain, "first thingsecond thing") {
+		t.Fatalf("parts run together:\n%s", plain)
+	}
+}
+
 func TestUserAndModelTurnsLookDifferent(t *testing.T) {
 	st := NewStyles("burrow")
 	m := newChat(api.New("http://127.0.0.1:1", ""), st, api.Station{ID: 1, Name: "alpha", Color: "#34C759", Reachable: true}, 0, 1)

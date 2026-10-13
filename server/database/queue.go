@@ -6,8 +6,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// QueuedMessage is one prompt waiting for its Station's session to go idle
-// (see station.Queue for how and when it's sent).
+// QueuedMessage is one prompt on its way to its Station's session (see
+// station/queue.go for how and when it's sent).
 type QueuedMessage struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
 	StationID uint      `gorm:"not null" json:"station_id"`
@@ -75,13 +75,4 @@ func StationsWithQueue(db *gorm.DB) ([]uint, error) {
 	var ids []uint
 	err := db.Model(&QueuedMessage{}).Distinct("station_id").Pluck("station_id", &ids).Error
 	return ids, err
-}
-
-// GetStationBySession finds the Station currently using opencode session
-// sessionID — found false if none does (deleted, or the session was
-// replaced by a reset).
-func GetStationBySession(db *gorm.DB, sessionID string) (Station, bool, error) {
-	var st Station
-	res := db.Where("opencode_session_id = ?", sessionID).Limit(1).Find(&st)
-	return st, res.RowsAffected > 0, res.Error
 }

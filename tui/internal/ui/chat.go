@@ -70,8 +70,8 @@ type (
 
 // queued is one message waiting to go to opencode. The queue lives on the
 // server (server/station/queue.go): shared with every other app/TUI on the
-// station, kept across restarts, and sent by the server — everything queued
-// together as one prompt — once the running reply finishes. local ones were
+// station, kept across restarts, and sent by the server straight away, even
+// mid-reply (opencode picks it up between tool calls). local ones were
 // typed while disconnected and are handed over when the socket reopens.
 type queued struct {
 	id    uint
@@ -398,9 +398,8 @@ func (m *chatModel) applyQueueFrame(frame []byte) bool {
 	return true
 }
 
-// send hands text to the server's queue, which sends it straight away if
-// nothing is running, or with everything else queued once the current
-// reply finishes. While disconnected it's held here and handed over on
+// send hands text to the server's queue, which sends it straight away,
+// even while a reply is running. While disconnected it's held here and handed over on
 // reconnect.
 func (m *chatModel) send(text string) tea.Cmd {
 	m.state.Error = ""
@@ -934,7 +933,13 @@ func (m *chatModel) transcript() string {
 		if t.Role == "assistant" {
 			b.WriteString(m.assistantTurn(t, wrap) + "\n\n")
 		} else {
-			b.WriteString(m.userBlock(t.Text(), wrap) + "\n\n")
+			// Messages the server queue sent together arrive as one user
+			// message with a text part each — shown apart, as they were typed.
+			for _, id := range t.PartOrder {
+				if p := t.Parts[id]; p != nil && p.Kind == chat.KindText && p.Text != "" {
+					b.WriteString(m.userBlock(p.Text, wrap) + "\n\n")
+				}
+			}
 		}
 	}
 	m.queueRows = m.queueRows[:0]

@@ -41,8 +41,8 @@ const BUSY_STALL_MS = 45_000;
 
 // One message waiting to go to opencode. The queue itself lives on the
 // server (see server/station/queue.go) — shared with every other app/TUI on
-// this station, kept across app restarts, and sent by the server once the
-// running reply finishes, all queued messages together as one prompt.
+// this station, kept across app restarts, and sent by the server straight
+// away, even mid-reply (opencode picks it up between tool calls).
 // `local` ones were typed while the socket was down and haven't reached the
 // server yet; they're handed over the moment it reconnects.
 export interface QueuedMessage {
@@ -278,9 +278,8 @@ export function useStationChat(stationId: number) {
     return () => sub.remove();
   }, []);
 
-  // Hands the message to the server's queue, which sends it straight away
-  // if nothing is running, or with everything else queued once the current
-  // reply finishes. While the socket is down it's held locally (shown as
+  // Hands the message to the server's queue, which sends it straight away,
+  // even while a reply is running. While the socket is down it's held locally (shown as
   // queued) and handed over on reconnect.
   const send = useCallback((text: string) => {
     setState(prev => (prev.error ? {...prev, error: null} : prev));

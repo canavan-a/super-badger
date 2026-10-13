@@ -328,8 +328,8 @@ func (s *Service) Abort(ctx context.Context, id uint) error {
 	if st.OpencodeSessionID == "" {
 		return errors.New("station has no active session")
 	}
-	// Stop drops what was queued behind the reply too. Cleared first, so
-	// the idle event the abort itself produces finds nothing to send.
+	// Stop drops anything still queued too, so it isn't sent into the
+	// session right after the abort.
 	if err := s.clearQueue(id); err != nil {
 		return err
 	}

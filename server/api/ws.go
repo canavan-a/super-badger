@@ -22,8 +22,8 @@ var wsUpgrader = websocket.Upgrader{
 }
 
 // wsClientMessage is what the app sends over a station's WebSocket:
-// {"type":"prompt","text":"..."} to queue a message (sent right away if the
-// session is idle — see station.Service.Enqueue),
+// {"type":"prompt","text":"..."} to queue a message (sent right away, even
+// mid-reply — see station.Service.Enqueue),
 // {"type":"queue_remove","id":N} to drop a queued one,
 // {"type":"permission_reply","request_id":"...","reply":"once"|"always"|"reject"}
 // to answer a pending tool-permission request, or

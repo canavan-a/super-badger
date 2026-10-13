@@ -2,7 +2,6 @@ package station
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -10,17 +9,17 @@ import (
 	"time"
 
 	"main/database"
-	"main/opencode"
 )
 
 // A Station's outgoing prompts go through a server-side queue rather than
 // straight to opencode: every client (app, TUI, web) watching the station
-// sees the same queue, it survives any of them closing, and the server
-// itself sends it once the running reply finishes — even with nothing
-// connected. Whatever is queued when the session goes idle is sent together
-// as one prompt (one text part per message), so the model gets all of it in
-// a single turn. A message sent while idle is just a queue that drains at
-// once.
+// sees the same queue, and it survives any of them closing. The server sends
+// it straight away, even while a reply is running: opencode saves a prompt
+// posted to a busy session at once and its run loop picks it up at the next
+// step, between tool calls, rather than after the whole turn (confirmed live
+// against opencode 1.18.35). So a message only sits in the queue for the
+// moment its send takes, or while sending keeps failing (opencode down),
+// until the periodic sweep gets it through.
 
 // QueueMsg is the snapshot pushed to a station's subscribers on every queue
 // change (see SubscribeStation) — sent as-is over the station WebSocket.
@@ -34,26 +33,18 @@ type QueueMsg struct {
 // can move its event subscription to the new session ID.
 type SessionChanged struct{ SessionID string }
 
-// inflightGrace covers the moment between prompt_async returning and
-// opencode reporting the session busy: a message queued right after a send
-// would otherwise see "idle" and go out as a second, overlapping prompt.
-const inflightGrace = 10 * time.Second
-
-// sweepInterval re-checks every station with something queued, in case the
-// idle event that should have sent it was missed (the broker's upstream
-// reconnecting, a dropped event) or arrived just before opencode's status
-// caught up.
+// sweepInterval retries every station with something still queued — a send
+// that failed, or whatever was queued before a server restart.
 const sweepInterval = 15 * time.Second
 
 type queueState struct {
-	locks    sync.Map // station id -> *sync.Mutex
-	mu       sync.Mutex
-	inflight map[uint]time.Time
-	subs     map[uint]map[chan any]struct{}
+	locks sync.Map // station id -> *sync.Mutex
+	mu    sync.Mutex
+	subs  map[uint]map[chan any]struct{}
 }
 
 func newQueueState() *queueState {
-	return &queueState{inflight: map[uint]time.Time{}, subs: map[uint]map[chan any]struct{}{}}
+	return &queueState{subs: map[uint]map[chan any]struct{}{}}
 }
 
 func (q *queueState) lock(id uint) *sync.Mutex {
@@ -108,8 +99,8 @@ func (s *Service) Queue(id uint) (QueueMsg, error) {
 	return QueueMsg{Type: "queue", Items: items}, err
 }
 
-// Enqueue adds text to station id's queue and sends it right away if the
-// session is idle.
+// Enqueue adds text to station id's queue and sends it right away, whether
+// or not a reply is running.
 func (s *Service) Enqueue(id uint, text string) error {
 	if _, err := database.EnqueueMessage(s.db, id, text); err != nil {
 		return err
@@ -146,40 +137,19 @@ func (s *Service) clearQueue(id uint) error {
 	return nil
 }
 
-// drain sends everything queued for station id as one prompt, if its
-// session is idle. Safe to call any time, from anywhere: it's serialized per
-// station and does nothing when there's nothing to send or a reply is
-// running.
+// drain sends everything queued for station id as one prompt (one text part
+// per message), busy or not. Safe to call any time, from anywhere: it's
+// serialized per station, so messages go out in the order they were queued,
+// and does nothing when there's nothing to send.
 func (s *Service) drain(ctx context.Context, id uint) {
 	l := s.queue.lock(id)
 	l.Lock()
 	defer l.Unlock()
 
-	s.queue.mu.Lock()
-	sentAt, inflight := s.queue.inflight[id]
-	s.queue.mu.Unlock()
-	if inflight && time.Since(sentAt) < inflightGrace {
-		return
-	}
-	// Every idle event lands here, queue or not — skip the status round
-	// trip to opencode when there's nothing to send.
-	if queued, err := database.ListQueue(s.db, id); err != nil || len(queued) == 0 {
-		return
-	}
-
 	st, err := database.GetStation(s.db, id)
 	if err != nil || st.OpencodeSessionID == "" {
 		return
 	}
-	statuses, err := s.oc.SessionStatus(ctx, st.Directory)
-	if err != nil {
-		log.Printf("[station %d] queue: session status: %v", id, err)
-		return
-	}
-	if status := statuses[st.OpencodeSessionID]; status != "" && status != "idle" {
-		return // sent when this reply finishes (see Run)
-	}
-
 	msgs, err := database.TakeQueue(s.db, id)
 	if err != nil || len(msgs) == 0 {
 		return
@@ -197,11 +167,7 @@ func (s *Service) drain(ctx context.Context, id uint) {
 		}
 		s.publishQueue(id)
 		s.publish(id, map[string]any{"type": "error", "error": err.Error()})
-		return
 	}
-	s.queue.mu.Lock()
-	s.queue.inflight[id] = time.Now()
-	s.queue.mu.Unlock()
 }
 
 // promptWithRecovery sends texts, and if opencode reports the session no
@@ -225,12 +191,10 @@ func (s *Service) promptWithRecovery(ctx context.Context, st *database.Station, 
 	return s.oc.PromptAsyncParts(ctx, st.OpencodeSessionID, texts)
 }
 
-// RunQueue sends each station's queue whenever its session goes idle, plus a
-// periodic sweep for anything left behind (including whatever was queued
-// before a server restart). Runs for the lifetime of the process.
+// RunQueue retries every station's leftover queue on a periodic sweep (sends
+// that failed, and whatever was queued before a server restart). Runs for
+// the lifetime of the process.
 func (s *Service) RunQueue(ctx context.Context) {
-	events, unsubscribe := s.broker.SubscribeAll()
-	defer unsubscribe()
 	sweep := time.NewTicker(sweepInterval)
 	defer sweep.Stop()
 	s.sweepQueues(ctx)
@@ -241,21 +205,6 @@ func (s *Service) RunQueue(ctx context.Context) {
 			return
 		case <-sweep.C:
 			s.sweepQueues(ctx)
-		case evt, ok := <-events:
-			if !ok {
-				return
-			}
-			if !isIdleEvent(evt) {
-				continue
-			}
-			st, found, err := database.GetStationBySession(s.db, evt.SessionID())
-			if err != nil || !found {
-				continue
-			}
-			s.queue.mu.Lock()
-			delete(s.queue.inflight, st.ID)
-			s.queue.mu.Unlock()
-			go s.drain(ctx, st.ID)
 		}
 	}
 }
@@ -269,20 +218,4 @@ func (s *Service) sweepQueues(ctx context.Context) {
 	for _, id := range ids {
 		go s.drain(ctx, id)
 	}
-}
-
-func isIdleEvent(evt opencode.Event) bool {
-	switch evt.Type {
-	case "session.idle":
-		return true
-	case "session.status":
-		var p struct {
-			Status struct {
-				Type string `json:"type"`
-			} `json:"status"`
-		}
-		_ = json.Unmarshal(evt.Properties, &p)
-		return p.Status.Type == "idle"
-	}
-	return false
 }
