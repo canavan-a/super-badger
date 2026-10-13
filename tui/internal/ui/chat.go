@@ -792,12 +792,9 @@ func (m *chatModel) statusLabel() (string, lipgloss.Style) {
 	return "idle", m.st.Soft
 }
 
-func (m *chatModel) hint() string {
-	if m.blocked() || m.overlay() {
-		return ""
-	}
-	return "^s stations · ←/→ swap · /stop · /show thinking · ^k actions · ^e station · ^g settings · ^o tools · ^q quit"
-}
+// hint is the key hint on the window's bottom edge. The chat leaves it empty:
+// /help lists the keys instead (see keyHelp).
+func (m *chatModel) hint() string { return "" }
 
 func (m *chatModel) topBar() string {
 	s := m.st
@@ -1133,11 +1130,15 @@ func (m *chatModel) bottom() string {
 		for _, c := range commandHelp {
 			w = max(w, len(c.cmd))
 		}
-		panel = append(panel, s.Primary.Bold(true).Render("commands"), "")
+		// The close hint shares the title row so the whole list fits a
+		// 30-row terminal.
+		title, closer := s.Primary.Bold(true).Render("commands"), s.Muted.Render("any key to close")
+		panel = append(panel, title+strings.Repeat(" ", max(2, iw-lipgloss.Width(title)-lipgloss.Width(closer)))+closer)
 		for _, c := range commandHelp {
 			panel = append(panel, s.Primary.Render(c.cmd)+strings.Repeat(" ", w-len(c.cmd)+2)+s.Soft.Render(c.desc))
 		}
-		panel = append(panel, "", s.Muted.Render("any key to close"))
+		panel = append(panel, "", s.Primary.Bold(true).Render("keys"))
+		panel = append(panel, m.keyGrid(iw)...)
 	case m.confirm != "":
 		color = s.T.Danger
 		panel = append(panel, s.Danger.Render(fmt.Sprintf("%s this station? (y/N)", strings.Title(m.confirm)))) //nolint:staticcheck
@@ -1325,6 +1326,49 @@ var commandHelp = []struct{ cmd, desc string }{
 	{"/station", "settings for this station"},
 	{"/splash", "replay the title screen"},
 	{"/quit", "quit (also /exit)"},
+}
+
+// keyHelp is the keyboard half of /help (the window's bottom edge used to
+// carry these as a hint line).
+var keyHelp = []struct{ key, desc string }{
+	{"ctrl+s", "pick or create a station"},
+	{"ctrl+p/n", "prev/next station (or ←/→)"},
+	{"ctrl+k", "station actions menu"},
+	{"ctrl+e", "settings for this station"},
+	{"ctrl+g", "settings"},
+	{"ctrl+o", "show or hide tool calls"},
+	{"alt+c/r/k/d", "compact · reset · kill · delete"},
+	{"alt+enter", "newline (also ctrl+j)"},
+	{"pgup/pgdn", "scroll (also ctrl+u/d)"},
+	{"home/end", "top/bottom (empty box)"},
+	{"tab", "complete a /command"},
+	{"ctrl+q", "quit (also ctrl+c)"},
+}
+
+// keyGrid lays keyHelp out in as many columns as fit in width w, filling
+// down each column first.
+func (m *chatModel) keyGrid(w int) []string {
+	s := m.st
+	kw, cw := 0, 0
+	for _, k := range keyHelp {
+		kw = max(kw, lipgloss.Width(k.key))
+	}
+	for _, k := range keyHelp {
+		cw = max(cw, kw+2+lipgloss.Width(k.desc))
+	}
+	const gap = 4
+	cols := max(1, min(len(keyHelp), (w+gap)/(cw+gap)))
+	rows := (len(keyHelp) + cols - 1) / cols
+	out := make([]string, rows)
+	for i, k := range keyHelp {
+		cell := s.Primary.Render(k.key) + strings.Repeat(" ", kw-lipgloss.Width(k.key)+2) + s.Soft.Render(k.desc)
+		r := i % rows
+		if i >= rows { // not the first column: pad the row out to this column
+			out[r] += strings.Repeat(" ", max(0, (i/rows)*(cw+gap)-lipgloss.Width(out[r])))
+		}
+		out[r] += cell
+	}
+	return out
 }
 
 var slashCommands = map[string]string{
