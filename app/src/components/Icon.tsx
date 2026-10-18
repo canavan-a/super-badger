@@ -7,11 +7,12 @@ import {
   Copy,
   GripVertical,
   LucideIcon,
-  Menu,
   MoreVertical,
+  Plus,
   Send,
   Settings,
   Square,
+  SquareTerminal,
   Trash2,
   X,
 } from 'lucide-react-native';
@@ -24,7 +25,6 @@ import {
 // alias's comment for why the default resolution silently produced
 // invisible icons on the web build.
 export type IconName =
-  | 'menu'
   | 'kebab'
   | 'gear'
   | 'chevron-left'
@@ -36,10 +36,11 @@ export type IconName =
   | 'drag-handle'
   | 'copy'
   | 'send'
-  | 'stop';
+  | 'stop'
+  | 'plus'
+  | 'terminal';
 
 const ICONS: Record<IconName, LucideIcon> = {
-  menu: Menu,
   kebab: MoreVertical,
   gear: Settings,
   'chevron-left': ChevronLeft,
@@ -52,6 +53,8 @@ const ICONS: Record<IconName, LucideIcon> = {
   copy: Copy,
   send: Send,
   stop: Square,
+  plus: Plus,
+  terminal: SquareTerminal,
 };
 
 // Icons that read better solid than outlined (a hollow square doesn't read

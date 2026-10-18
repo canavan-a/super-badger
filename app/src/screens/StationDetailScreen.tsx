@@ -31,6 +31,7 @@ import {
 import {allTurns, ChatState, Part, PendingPermission, PendingQuestion, Turn, turnText} from '../chat';
 import {DiggingSpinner} from '../components/DiggingSpinner';
 import {Icon} from '../components/Icon';
+import {PixelField} from '../components/PixelField';
 import {CodeBlockSegment, parseMarkdown} from '../markdown';
 import {platformConfirm} from '../platformConfirm';
 import {Route} from '../routes';
@@ -723,6 +724,8 @@ function ChatList({
 
   return (
     <View style={styles.chatContainer}>
+      {/* The same still constellation as the station list, behind the messages. */}
+      <PixelField />
       <FlatList
         ref={listRef}
         style={styles.chat}
@@ -1569,9 +1572,10 @@ function makeStyles(theme: Theme) {
     chatContainer: {
       flex: 1,
     },
+    // Transparent, so the PixelField behind it shows through; the screen's
+    // container already paints theme.bg.
     chat: {
       flex: 1,
-      backgroundColor: theme.bg,
     },
     jumpToBottomButton: {
       position: 'absolute',

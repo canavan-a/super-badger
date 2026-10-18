@@ -16,9 +16,8 @@ import {
 } from 'react-native';
 
 import {checkServerHealth, listStations, listCommands, Command, Station} from './api';
-import {Drawer} from './components/Drawer';
 import {Icon, IconName} from './components/Icon';
-import {StationsDrawerContent} from './components/StationsDrawerContent';
+import {PixelField} from './components/PixelField';
 import {pendingNav} from './notifications/pendingNav';
 import {Route} from './routes';
 import {AddStationScreen} from './screens/AddStationScreen';
@@ -55,7 +54,7 @@ export interface HeaderInfo {
   // picker) — distinct from `indicator`, which is reachability/status, not
   // identity. Rendered as a left-edge accent stripe on the header bar,
   // matching the same station color shown as a left-border accent on
-  // StationCard (station list) and the drawer's station rows.
+  // StationCard (station list).
   accentColor?: string;
   subtitle?: string;
   // Small labeled pills rendered below the subtitle — one per owner-surfaced
@@ -79,21 +78,20 @@ function AppInner(): React.JSX.Element {
   // Keeps the launcher icon in step with the theme (Android; see appIcon.ts).
   useThemedAppIcon();
   const [route, setRoute] = useState<Route>({name: 'stations'});
-  const [drawerOpen, setDrawerOpen] = useState(false);
   const [stations, setStations] = useState<Station[]>([]);
   const [loading, setLoading] = useState(true);
   // Commands advertised by the metric sources' commands endpoints — global
   // to each source, not tied to a station (see docs/command-spec.md).
   // Fetched alongside the
-  // station list so the drawer's Commands button reflects the latest poll
-  // the moment the drawer opens; an endpoint that stops advertising
-  // commands makes the button vanish within a poll.
+  // station list so the home screen's + menu only offers Commands while an
+  // endpoint advertises some; one that stops makes the entry vanish within
+  // a poll.
   const [commands, setCommands] = useState<Command[]>([]);
   // null = "haven't checked yet" — deliberately distinct from false, so the
   // banner doesn't flash on for an instant on every fresh load.
   const [serverOnline, setServerOnline] = useState<boolean | null>(null);
   // Hidden stations (Settings → Stations) stay configured but are left off
-  // the home list, the drawer and swipe rotation.
+  // the home list and swipe rotation.
   const visibleStations = useMemo(() => stations.filter(s => !s.hidden), [stations]);
   const [headerInfo, setHeaderInfo] = useState<HeaderInfo | null>(null);
 
@@ -107,8 +105,8 @@ function AppInner(): React.JSX.Element {
 
   // Commands ride alongside the station list (the server polls both from
   // the same metric sources on the same ticker), so they refresh on the same
-  // triggers. A failed fetch yields an empty list — the drawer's Commands
-  // button hides rather than pretending there's something to run.
+  // triggers. A failed fetch yields an empty list — the + menu's Commands
+  // entry hides rather than pretending there's something to run.
   const refreshCommands = useCallback(() => {
     listCommands().then(setCommands).catch(() => setCommands([]));
   }, []);
@@ -131,8 +129,8 @@ function AppInner(): React.JSX.Element {
   }, [refreshStations, refreshCommands]);
 
   // Station list changes (create/delete) happen from other screens; a fresh
-  // fetch whenever we land back on a route that shows the list keeps the
-  // drawer in sync without a shared store.
+  // fetch whenever we land back on a route that shows the list keeps it in
+  // sync without a shared store.
   useEffect(() => {
     if (!settingsReady.current) return;
     if (route.name === 'stations' || route.name === 'stationDetail') {
@@ -172,8 +170,14 @@ function AppInner(): React.JSX.Element {
       setHeaderInfo(null);
     }
     setRoute(next);
-    setDrawerOpen(false);
   }, []);
+
+  // The header's back arrow (and Android back): a station's Data Points page
+  // goes back to that station, everything else back to the station list.
+  const goBack = useCallback(() => {
+    if (route.name === 'stationSettings') navigate({name: 'stationDetail', id: route.id});
+    else navigate({name: 'stations'});
+  }, [route, navigate]);
 
   const openStation = useCallback((stationId: number) => {
     navigate({name: 'stationDetail', id: stationId});
@@ -242,7 +246,7 @@ function AppInner(): React.JSX.Element {
   }, [openStation]);
 
   // Tell the notification side which station's chat is on screen, so
-  // opening it (by tap, drawer, swipe or resuming the app onto it) clears
+  // opening it (by tap, the list, swipe or resuming the app onto it) clears
   // its notifications. Backgrounding counts as not viewing.
   const viewingId = route.name === 'stationDetail' ? route.id : null;
   useEffect(() => {
@@ -278,35 +282,17 @@ function AppInner(): React.JSX.Element {
   const currentStationIndex =
     route.name === 'stationDetail' ? orderedStations.findIndex(s => s.id === route.id) : -1;
 
-  // Android back: closes the drawer if it's open; otherwise leads home, which
-  // is the top station's chat (a station's Data Points page goes back to that
-  // station instead). On a station's chat, or with no station to go to, the
-  // system handles it as usual.
+  // Android back: the same as the header's back arrow; on the station list
+  // itself the system handles it as usual.
   useEffect(() => {
     if (Platform.OS !== 'android') return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (drawerOpen) {
-        setDrawerOpen(false);
-        return true;
-      }
-      if (route.name === 'stationDetail') return false;
-      if (route.name === 'stationSettings') {
-        navigate({name: 'stationDetail', id: route.id});
-        return true;
-      }
-      const top = orderedStations[0];
-      if (top) {
-        navigate({name: 'stationDetail', id: top.id});
-        return true;
-      }
-      if (route.name !== 'stations') {
-        navigate({name: 'stations'});
-        return true;
-      }
-      return false;
+      if (route.name === 'stations') return false;
+      goBack();
+      return true;
     });
     return () => sub.remove();
-  }, [drawerOpen, route, orderedStations, navigate]);
+  }, [route, goBack]);
   const screenWidth = Dimensions.get('window').width;
   const swipeX = useRef(new Animated.Value(0)).current;
   const EDGE_ZONE = 28;
@@ -424,19 +410,13 @@ function AppInner(): React.JSX.Element {
             ? {borderLeftWidth: 4, borderLeftColor: headerInfo!.accentColor}
             : null,
         ]}>
-        <Pressable
-          style={styles.hamburger}
-          onPress={() => {
-            // Refetch every time the menu opens rather than trusting
-            // whatever fetch happened at mount/navigation time — cheap, and
-            // it directly matches what the user expects ("open the menu,
-            // see current data") instead of depending on load-order timing.
-            refreshStations();
-            refreshCommands();
-            setDrawerOpen(true);
-          }}>
-          <Icon name="menu" size={20} color={theme.text} />
-        </Pressable>
+        {/* The constellation carries on up through the header. */}
+        <PixelField />
+        {route.name !== 'stations' && (
+          <Pressable style={styles.headerBack} onPress={goBack} accessibilityLabel="Back" hitSlop={8}>
+            <Icon name="chevron-left" size={22} color={theme.text} />
+          </Pressable>
+        )}
 
         <View style={styles.headerTextArea}>
           <View style={styles.headerTitleRow}>
@@ -495,13 +475,26 @@ function AppInner(): React.JSX.Element {
             )}
           </View>
         ) : null}
+        {route.name === 'stations' && (
+          <Pressable
+            style={styles.headerIconButton}
+            onPress={() => navigate({name: 'settings'})}
+            accessibilityLabel="Settings">
+            <Icon name="gear" size={20} color={theme.text} />
+          </Pressable>
+        )}
       </View>
 
       <Animated.View
         style={[styles.body, {transform: [{translateX: swipeX}]}]}
         {...panResponder.panHandlers}>
         {route.name === 'stations' && (
-          <StationsHomeScreen stations={visibleStations} loading={loading} onNavigate={navigate} />
+          <StationsHomeScreen
+            stations={visibleStations}
+            commands={commands}
+            loading={loading}
+            onNavigate={navigate}
+          />
         )}
         {route.name === 'stationDetail' && (
           // Keyed by stationId so navigating from one station's chat straight
@@ -529,14 +522,6 @@ function AppInner(): React.JSX.Element {
         {route.name === 'settings' && <SettingsScreen />}
       </Animated.View>
 
-      <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)}>
-        <StationsDrawerContent
-          stations={visibleStations}
-          commands={commands}
-          loading={loading}
-          onNavigate={navigate}
-        />
-      </Drawer>
     </SafeAreaView>
   );
 }
@@ -564,7 +549,7 @@ function makeStyles(theme: Theme) {
       flexDirection: 'row',
       // Plain center alignment for a single-line title (every non-station
       // screen, and the station screens before their data loads) - the
-      // hamburger/actions are the same height as the title line here, so
+      // back arrow/actions are the same height as the title line here, so
       // centering them together looks right.
       alignItems: 'center',
       paddingHorizontal: 12,
@@ -573,21 +558,22 @@ function makeStyles(theme: Theme) {
       borderBottomColor: theme.border,
     },
     // Once a station header's badges can wrap to a second line, centering
-    // against that taller block left the hamburger/action buttons visibly
+    // against that taller block left the back-arrow/action buttons visibly
     // padded below the title's top edge. Top-aligning instead keeps every
     // column starting at the same line regardless of how tall the badge
     // row grows - only applied here, not on the plain single-line title
     // screens above, where top-aligning made the title look off-center
-    // against the fixed-height hamburger/action icon boxes.
+    // against the fixed-height back-arrow/action icon boxes.
     headerDetail: {
       alignItems: 'flex-start',
     },
-    hamburger: {
+    headerBack: {
       width: 36,
       height: 36,
       alignItems: 'center',
       justifyContent: 'center',
       marginRight: 4,
+      marginLeft: -6,
     },
     headerTextArea: {
       flex: 1,
