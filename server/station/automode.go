@@ -191,15 +191,18 @@ func (s *Service) waitIdle(ctx context.Context, st database.Station) {
 // overflowPhrases are how providers word "the request no longer fits the
 // context window" — llama.cpp's is the one seen live here ("request (110096
 // tokens) exceeds the available context size (110080 tokens), try
-// increasing it"); the rest cover OpenAI/Anthropic/OpenRouter-style
-// backends and opencode's own overflow error.
+// increasing it"), as is strata's ("prompt (169199 tokens) + max tokens
+// (32000) exceeds the context (200000)"); the rest cover
+// OpenAI/Anthropic/OpenRouter-style backends and opencode's own overflow
+// error.
 var overflowPhrases = []string{
 	"exceeds the available context size",
 	"contextoverflowerror",
 	"context_length_exceeded",
 	"maximum context length",
 	"context length exceeded",
-	"exceeds the context window",
+	"exceeds the context",      // also "... context window"
+	"leaves no room to answer", // strata with fit_max_tokens, once the prompt alone fills the context
 	"exceeds context window",
 	"prompt is too long",
 	"input is too long for",

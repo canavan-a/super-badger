@@ -261,8 +261,8 @@ export function StationDetailScreen({
         ? {color: theme.danger, label: 'error'}
         : {color: theme.textMuted, label: 'idle'}
       : {color: theme.danger, label: 'unreachable'};
-    // "Data" always shows (it's the only way to reach the top-bar config);
-    // compact/reset/delete are opt-in like everything else on the top bar
+    // The title always opens the top-bar/data config (it's the only way
+    // there); compact/reset/delete are opt-in like everything else on the top bar
     // (see StationSettingsScreen's Top bar section).
     const optionalActions = [
       {key: 'compact' as const, label: compactLabel, onPress: doCompact},
@@ -278,11 +278,8 @@ export function StationDetailScreen({
       accentColor: station.color,
       badges,
       tokenCount: showTokenCount ? formatTokens(activeContext) : undefined,
-      actions: [
-        ...optionalActions,
-        {label: 'Actions', icon: 'kebab', onPress: () => setMenuOpen(true)},
-        {label: 'Data', icon: 'gear', onPress: () => onNavigate({name: 'stationSettings', id: stationId})},
-      ],
+      onPress: () => onNavigate({name: 'stationSettings', id: stationId}),
+      actions: [...optionalActions, {label: 'Actions', icon: 'kebab', onPress: () => setMenuOpen(true)}],
     });
     return () => onHeaderChange(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps

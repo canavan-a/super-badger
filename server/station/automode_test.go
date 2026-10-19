@@ -12,6 +12,9 @@ func TestIsContextOverflow(t *testing.T) {
 	overflow := []string{
 		// llama.cpp, as seen live.
 		`{"sessionID":"s","error":{"name":"APIError","data":{"message":"request (110096 tokens) exceeds the available context size (110080 tokens), try increasing it"}}}`,
+		// strata, as seen live.
+		`{"sessionID":"s","error":{"name":"APIError","data":{"message":"prompt (169199 tokens) + max tokens (32000) exceeds the context (200000); requests are never truncated. Send a smaller max_tokens (at most 30793 here), or add \"fit_max_tokens\": true to the model's strata-<model>.json to shorten it to the room left (#545)","statusCode":400}}}`,
+		`{"sessionID":"s","error":{"name":"APIError","data":{"message":"prompt (199990 tokens) leaves no room to answer in the context (200000); requests are never truncated"}}}`,
 		`{"sessionID":"s","error":{"name":"ContextOverflowError","data":{"message":"x"}}}`,
 		`{"error":{"data":{"responseBody":"{\"error\":{\"code\":\"context_length_exceeded\"}}"}}}`,
 		`{"error":{"data":{"message":"prompt is too long: 210000 tokens > 200000 maximum"}}}`,

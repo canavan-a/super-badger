@@ -68,9 +68,11 @@ export interface HeaderInfo {
   tokenCount?: string;
   // `icon`, when set, renders as a compact icon-only button using `label`
   // only for its accessibility label — saves header space for actions that
-  // don't need to read as text (see StationDetailScreen's "Data" action,
-  // which opens the top-bar/data config).
+  // don't need to read as text (see StationDetailScreen's "Actions" menu).
   actions?: {label: string; onPress: () => void; destructive?: boolean; icon?: IconName}[];
+  // Makes the title area tappable, marked by a small chevron after the title
+  // row (as in super-chat) — a station opens its top-bar/data config here.
+  onPress?: () => void;
 }
 
 function AppInner(): React.JSX.Element {
@@ -418,7 +420,12 @@ function AppInner(): React.JSX.Element {
           </Pressable>
         )}
 
-        <View style={styles.headerTextArea}>
+        <Pressable
+          style={({pressed}) => [styles.headerTextArea, pressed && showingDetailHeader && headerInfo!.onPress && styles.headerPressed]}
+          disabled={!(showingDetailHeader && headerInfo!.onPress)}
+          onPress={() => headerInfo?.onPress?.()}
+          accessibilityRole={showingDetailHeader && headerInfo!.onPress ? 'button' : undefined}
+          accessibilityHint={showingDetailHeader && headerInfo!.onPress ? 'Opens the station settings' : undefined}>
           <View style={styles.headerTitleRow}>
             <Text style={styles.headerTitle} numberOfLines={1}>
               {showingDetailHeader ? headerInfo!.title : TITLES[route.name]}
@@ -432,6 +439,7 @@ function AppInner(): React.JSX.Element {
             {showingDetailHeader && headerInfo!.tokenCount ? (
               <Text style={styles.headerTokenCount}>{headerInfo!.tokenCount}</Text>
             ) : null}
+            {showingDetailHeader && headerInfo!.onPress ? <Icon name="chevron-right" size={16} color={theme.textMuted} /> : null}
           </View>
           {showingDetailHeader && headerInfo!.subtitle ? (
             <Text style={styles.headerSubtitle} numberOfLines={1}>
@@ -448,7 +456,7 @@ function AppInner(): React.JSX.Element {
               ))}
             </View>
           ) : null}
-        </View>
+        </Pressable>
 
         {showingDetailHeader && headerInfo!.actions ? (
           <View style={styles.headerActions}>
@@ -578,6 +586,9 @@ function makeStyles(theme: Theme) {
     headerTextArea: {
       flex: 1,
       minWidth: 0,
+    },
+    headerPressed: {
+      opacity: 0.6,
     },
     headerTitleRow: {
       flexDirection: 'row',
