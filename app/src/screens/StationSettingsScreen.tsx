@@ -65,15 +65,66 @@ export function StationSettingsScreen({
   const pointsRef = useRef(points);
   pointsRef.current = points;
 
+  // The 10s poll mustn't clobber local edits. Every local write bumps a
+  // generation counter and holds a pending count while in flight; a poll
+  // result is dropped if a write started after the poll did or is still
+  // running (it was read before the server saw the write). Points whose
+  // settings have been edited but not saved yet (typing a label) keep their
+  // local settings and only take the fresh value from the poll.
+  const stationWrites = useRef({gen: 0, pending: 0});
+  const pointWrites = useRef({gen: 0, pending: 0});
+  const dirtyPoints = useRef(new Set<string>());
+
   const refresh = useCallback(() => {
+    const stationGen = stationWrites.current.gen;
+    const pointGen = pointWrites.current.gen;
     Promise.all([getStation(stationId), getStationDataPoints(stationId)])
       .then(([st, pts]) => {
-        setStation(st);
-        setPoints(pts);
+        if (stationWrites.current.gen === stationGen && stationWrites.current.pending === 0) {
+          setStation(st);
+        }
+        if (pointWrites.current.gen === pointGen && pointWrites.current.pending === 0) {
+          setPoints(prev => mergePolledPoints(pts, prev, dirtyPoints.current));
+        }
       })
       .catch(err => setError(String(err)))
       .finally(() => setLoading(false));
   }, [stationId]);
+
+  // Runs a station PATCH with the guards above, applying `optimistic` right
+  // away. Only the last of overlapping writes applies the server's reply, so
+  // a slow earlier response can't undo a later toggle.
+  const writeStation = async (updates: Parameters<typeof updateStation>[1], optimistic?: Partial<Station>) => {
+    const w = stationWrites.current;
+    w.gen++;
+    w.pending++;
+    const gen = w.gen;
+    if (optimistic) {
+      setStation(prev => (prev ? {...prev, ...optimistic} : prev));
+    }
+    try {
+      const updated = await updateStation(stationId, updates);
+      if (w.gen === gen) {
+        setStation(updated);
+      }
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      w.pending--;
+    }
+  };
+
+  // Same guard for data point writes (settings, reorder, hide).
+  const trackPointWrite = async (write: Promise<unknown>) => {
+    const w = pointWrites.current;
+    w.gen++;
+    w.pending++;
+    try {
+      await write;
+    } finally {
+      w.pending--;
+    }
+  };
 
   useEffect(() => {
     refresh();
@@ -97,61 +148,24 @@ export function StationSettingsScreen({
     setAliasDraft(station?.alias ?? '');
   }, [station?.alias]);
 
-  const saveAlias = async () => {
-    const trimmed = aliasDraft.trim();
-    try {
-      const updated = await updateStation(stationId, {alias: trimmed || null});
-      setStation(updated);
-    } catch (err) {
-      setError(String(err));
-    }
-  };
+  const saveAlias = () => writeStation({alias: aliasDraft.trim() || null});
 
   useEffect(() => {
     setContinueDraft(station?.auto_continue_prompt ?? '');
   }, [station?.auto_continue_prompt]);
 
-  const toggleAutoMode = async (enabled: boolean) => {
-    if (!station) return;
-    setStation({...station, auto_mode: enabled});
-    try {
-      const updated = await updateStation(stationId, {auto_mode: enabled});
-      setStation(updated);
-    } catch (err) {
-      setError(String(err));
-    }
-  };
+  const toggleAutoMode = (enabled: boolean) => writeStation({auto_mode: enabled}, {auto_mode: enabled});
 
-  const saveContinuePrompt = async () => {
-    try {
-      const updated = await updateStation(stationId, {auto_continue_prompt: continueDraft.trim()});
-      setStation(updated);
-    } catch (err) {
-      setError(String(err));
-    }
-  };
+  const saveContinuePrompt = () => writeStation({auto_continue_prompt: continueDraft.trim()});
 
-  const saveColor = async (color: string) => {
-    try {
-      const updated = await updateStation(stationId, {color});
-      setStation(updated);
-    } catch (err) {
-      setError(String(err));
-    }
-  };
+  const saveColor = (color: string) => writeStation({color}, {color});
 
-  const toggleTopBarAction = async (key: TopBarActionKey, enabled: boolean) => {
+  const toggleTopBarAction = (key: TopBarActionKey, enabled: boolean) => {
     if (!station) return;
     const next = enabled
       ? [...station.top_bar_actions, key]
       : station.top_bar_actions.filter(a => a !== key);
-    setStation({...station, top_bar_actions: next});
-    try {
-      const updated = await updateStation(stationId, {top_bar_actions: next});
-      setStation(updated);
-    } catch (err) {
-      setError(String(err));
-    }
+    writeStation({top_bar_actions: next}, {top_bar_actions: next});
   };
 
   const hide = (key: string) => {
@@ -163,7 +177,7 @@ export function StationSettingsScreen({
       async () => {
         setPoints(prev => prev.filter(p => p.key !== key));
         try {
-          await hideStationDataPoint(stationId, key);
+          await trackPointWrite(hideStationDataPoint(stationId, key));
         } catch (err) {
           setError(String(err));
         }
@@ -177,7 +191,7 @@ export function StationSettingsScreen({
       const next = prev.slice();
       const [moved] = next.splice(from, 1);
       next.splice(to, 0, moved);
-      reorderStationDataPoints(stationId, next.map(p => p.key)).catch(err => setError(String(err)));
+      trackPointWrite(reorderStationDataPoints(stationId, next.map(p => p.key))).catch(err => setError(String(err)));
       return next;
     });
   };
@@ -198,7 +212,7 @@ export function StationSettingsScreen({
       next[slot] = reordered[i];
     });
     setPoints(next);
-    reorderStationDataPoints(stationId, next.map(p => p.key)).catch(err => {
+    trackPointWrite(reorderStationDataPoints(stationId, next.map(p => p.key))).catch(err => {
       setError(`Couldn't save: ${String(err)}`);
       setPoints(current);
     });
@@ -229,6 +243,7 @@ export function StationSettingsScreen({
   // save (e.g. tapping the decimals stepper) always persists the value just
   // set, not whatever was in `points` before React re-renders.
   const patch = (key: string, updates: Partial<StationDataPoint>) => {
+    dirtyPoints.current.add(key);
     setPoints(prev => prev.map(p => (p.key === key ? {...p, ...updates} : p)));
   };
 
@@ -244,15 +259,20 @@ export function StationSettingsScreen({
   };
 
   const save = async (point: StationDataPoint) => {
+    // Cleared now rather than on success: an edit made while this is in
+    // flight marks it dirty again, and the write guard covers the gap.
+    dirtyPoints.current.delete(point.key);
     try {
-      await updateStationDataPointSettings(stationId, point.key, {
-        label: point.label,
-        decimals: point.decimals,
-        show_on_top_bar: point.show_on_top_bar,
-        threshold_enabled: point.threshold_enabled,
-        threshold_value: point.threshold_value,
-        threshold_direction: point.threshold_direction,
-      });
+      await trackPointWrite(
+        updateStationDataPointSettings(stationId, point.key, {
+          label: point.label,
+          decimals: point.decimals,
+          show_on_top_bar: point.show_on_top_bar,
+          threshold_enabled: point.threshold_enabled,
+          threshold_value: point.threshold_value,
+          threshold_direction: point.threshold_direction,
+        }),
+      );
     } catch (err) {
       setError(String(err));
     }
@@ -443,6 +463,35 @@ export function StationSettingsScreen({
       )}
     </ScrollView>
   );
+}
+
+// Takes a poll's points, but for points with unsaved local edits keeps the
+// local settings so typing isn't reset mid-edit; their value and recency
+// still come from the poll.
+function mergePolledPoints(
+  polled: StationDataPoint[],
+  local: StationDataPoint[],
+  dirty: Set<string>,
+): StationDataPoint[] {
+  if (dirty.size === 0) {
+    return polled;
+  }
+  const byKey = new Map(local.map(p => [p.key, p]));
+  return polled.map(p => {
+    const mine = byKey.get(p.key);
+    if (!mine || !dirty.has(p.key)) {
+      return p;
+    }
+    return {
+      ...p,
+      label: mine.label,
+      decimals: mine.decimals,
+      show_on_top_bar: mine.show_on_top_bar,
+      threshold_enabled: mine.threshold_enabled,
+      threshold_value: mine.threshold_value,
+      threshold_direction: mine.threshold_direction,
+    };
+  });
 }
 
 const ROW_HEIGHT_ESTIMATE = 90;
