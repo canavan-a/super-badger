@@ -21,6 +21,59 @@ var wsUpgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
+// Keepalive for both sockets. A phone that changes network or sleeps can
+// leave a connection half-open: neither end gets a close, the client keeps
+// showing it as open and nothing ever arrives again. The ping frame lets this
+// side notice (client libraries answer pings with pongs on their own, and the
+// read deadline fails the reader once they stop). JavaScript can't see ping
+// frames, so a {"type":"heartbeat"} text frame rides along for the app's own
+// watchdog (see useStationChat and BackgroundMonitorService), which
+// reconnects after a long enough silence. Clients ignore the unknown type.
+//
+// The station socket is only open while its chat screen is in front of
+// someone, so it can afford a quick 20s beat. The notifications socket is
+// held open all day by the Android background service, where every frame
+// wakes the cellular radio — 60s still sits under typical carrier NAT idle
+// timeouts without keeping the radio up most of the time.
+const (
+	wsStationHeartbeat       = 20 * time.Second
+	wsNotificationsHeartbeat = 60 * time.Second
+	// Generous: a single frame can carry a multi-MB tool output, and a slow
+	// cellular link must not be mistaken for a dead client. Dead clients
+	// are caught by the pong deadline instead.
+	wsWriteWait = 30 * time.Second
+)
+
+var wsHeartbeat = gin.H{"type": "heartbeat"}
+
+// armKeepalive must run before the connection's reader goroutine starts.
+// Three missed pongs fail the reader. It returns a func the reader calls
+// before each read: pongs are only processed while a read is in progress,
+// so a reader that spent a while handling the last message (stationWS waits
+// on opencode for permission/question replies) would otherwise come back to
+// an already-expired deadline and fail on the spot.
+func armKeepalive(conn *websocket.Conn, interval time.Duration) (beforeRead func()) {
+	pongWait := 3 * interval
+	extend := func() error { return conn.SetReadDeadline(time.Now().Add(pongWait)) }
+	_ = extend()
+	conn.SetPongHandler(func(string) error { return extend() })
+	return func() { _ = extend() }
+}
+
+// wsWrite bounds every write, so a client that stopped reading can't block
+// the writer loop forever once the socket buffer fills.
+func wsWrite(conn *websocket.Conn, v any) error {
+	_ = conn.SetWriteDeadline(time.Now().Add(wsWriteWait))
+	return conn.WriteJSON(v)
+}
+
+func wsSendHeartbeat(conn *websocket.Conn) error {
+	if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(wsWriteWait)); err != nil {
+		return err
+	}
+	return wsWrite(conn, wsHeartbeat)
+}
+
 // wsClientMessage is what the app sends over a station's WebSocket:
 // {"type":"prompt","text":"..."} to queue a message (sent right away, even
 // mid-reply — see station.Service.Enqueue),
@@ -90,12 +143,17 @@ func stationWS(svc *station.Service, broker *opencode.EventBroker) gin.HandlerFu
 		defer unsubscribeStation()
 		done := make(chan struct{})
 
+		beforeRead := armKeepalive(conn, wsStationHeartbeat)
+		heartbeat := time.NewTicker(wsStationHeartbeat)
+		defer heartbeat.Stop()
+
 		// Reads run on their own goroutine so a slow/blocked write below
 		// never stalls picking up the next incoming prompt.
 		go func() {
 			defer close(done)
 			for {
 				var msg wsClientMessage
+				beforeRead()
 				if err := conn.ReadJSON(&msg); err != nil {
 					return
 				}
@@ -196,7 +254,7 @@ func stationWS(svc *station.Service, broker *opencode.EventBroker) gin.HandlerFu
 					events, unsubscribe = broker.Subscribe(sessionID)
 					continue
 				}
-				if err := conn.WriteJSON(m); err != nil {
+				if err := wsWrite(conn, m); err != nil {
 					unsubscribe()
 					return
 				}
@@ -207,12 +265,17 @@ func stationWS(svc *station.Service, broker *opencode.EventBroker) gin.HandlerFu
 				if evt.Type == "session.error" {
 					log.Printf("[station %d] opencode session.error: %s", id, string(evt.Properties))
 				}
-				if err := conn.WriteJSON(evt); err != nil {
+				if err := wsWrite(conn, evt); err != nil {
 					unsubscribe()
 					return
 				}
 			case w := <-writes:
-				if err := conn.WriteJSON(w); err != nil {
+				if err := wsWrite(conn, w); err != nil {
+					unsubscribe()
+					return
+				}
+			case <-heartbeat.C:
+				if err := wsSendHeartbeat(conn); err != nil {
 					unsubscribe()
 					return
 				}
@@ -240,12 +303,17 @@ func notificationsWS(svc *station.Service, broker *opencode.EventBroker, hub *no
 		}
 		defer conn.Close()
 
+		beforeRead := armKeepalive(conn, wsNotificationsHeartbeat)
+		heartbeat := time.NewTicker(wsNotificationsHeartbeat)
+		defer heartbeat.Stop()
+
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
 			for {
 				// The client never sends anything meaningful on this socket;
 				// this loop exists purely to notice when it disconnects.
+				beforeRead()
 				if _, _, err := conn.ReadMessage(); err != nil {
 					return
 				}
@@ -267,11 +335,15 @@ func notificationsWS(svc *station.Service, broker *opencode.EventBroker, hub *no
 			select {
 			case <-done:
 				return
+			case <-heartbeat.C:
+				if err := wsSendHeartbeat(conn); err != nil {
+					return
+				}
 			case msg, ok := <-extra:
 				if !ok {
 					return
 				}
-				if err := conn.WriteJSON(msg); err != nil {
+				if err := wsWrite(conn, msg); err != nil {
 					return
 				}
 			case evt, ok := <-events:
@@ -302,7 +374,7 @@ func notificationsWS(svc *station.Service, broker *opencode.EventBroker, hub *no
 				msg["station_id"] = st.ID
 				msg["station_name"] = st.Name
 				msg["station_color"] = st.Color
-				if err := conn.WriteJSON(msg); err != nil {
+				if err := wsWrite(conn, msg); err != nil {
 					return
 				}
 			}

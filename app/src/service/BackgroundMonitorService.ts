@@ -27,17 +27,39 @@ let backoffMs = 1000;
 const MAX_BACKOFF_MS = 120_000;
 let stopped = false;
 
+// Same half-open-socket watchdog as useStationChat's SOCKET_SILENCE_MS: the
+// server heartbeats this feed every 60s (server/api/ws.go's
+// wsNotificationsHeartbeat — slower than the chat socket's, to spare the
+// cellular radio), so this long without a frame means the socket died
+// without a close event (common across Android network changes and doze)
+// and would otherwise sit there forever delivering nothing.
+const SOCKET_SILENCE_MS = 150_000;
+let lastFrameAt = 0;
+let sawHeartbeat = false;
+let watchdog: ReturnType<typeof setInterval> | null = null;
+
 function connect(): void {
   if (stopped) return;
   const ws = new WebSocket(notificationsWsURL());
   socket = ws;
+  sawHeartbeat = false;
+  lastFrameAt = Date.now();
 
   ws.onopen = () => {
     backoffMs = 1000;
+    lastFrameAt = Date.now();
   };
   ws.onmessage = ev => {
+    if (socket !== ws) return;
+    lastFrameAt = Date.now();
     try {
       const msg = JSON.parse(ev.data);
+      if (msg.type === 'heartbeat') {
+        // Must never reach handleNotificationMsg, which clears the
+        // station's chat notifications before even looking at the type.
+        sawHeartbeat = true;
+        return;
+      }
       handleNotificationMsg(msg).catch(err => {
         // Fire-and-forget from a WS message handler — without this, a
         // rejection here (e.g. Notifee misbehaving) vanished with zero
@@ -49,7 +71,7 @@ function connect(): void {
     }
   };
   ws.onclose = () => {
-    if (stopped) return;
+    if (stopped || socket !== ws) return;
     reconnectTimer = setTimeout(connect, backoffMs);
     backoffMs = Math.min(backoffMs * 2, MAX_BACKOFF_MS);
   };
@@ -67,6 +89,19 @@ export function backgroundRunner(): Promise<void> {
     stopped = false;
     void ensureChannels();
     connect();
+    if (watchdog) clearInterval(watchdog);
+    watchdog = setInterval(() => {
+      const ws = socket;
+      if (stopped || ws?.readyState !== WebSocket.OPEN) return;
+      if (sawHeartbeat && Date.now() - lastFrameAt > SOCKET_SILENCE_MS) {
+        // Detach first so its late onclose doesn't schedule a second
+        // reconnect alongside this one.
+        socket = null;
+        ws.close();
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        connect();
+      }
+    }, 10_000);
   });
 }
 
@@ -100,6 +135,8 @@ export async function startMonitoring(): Promise<void> {
 export async function stopMonitoring(): Promise<void> {
   stopped = true;
   if (reconnectTimer) clearTimeout(reconnectTimer);
+  if (watchdog) clearInterval(watchdog);
+  watchdog = null;
   socket?.close();
   socket = null;
   await notifee.stopForegroundService();

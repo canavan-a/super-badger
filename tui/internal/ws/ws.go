@@ -84,6 +84,9 @@ func (c *Conn) pump(ctx context.Context, conn *websocket.Conn) {
 			if err != nil {
 				return
 			}
+			if isHeartbeat(b) {
+				continue
+			}
 			c.emit(ctx, Msg{Frame: b})
 		}
 	}()
@@ -100,6 +103,16 @@ func (c *Conn) pump(ctx context.Context, conn *websocket.Conn) {
 			}
 		}
 	}
+}
+
+// isHeartbeat spots the server's keepalive frame (server/api/ws.go's
+// wsHeartbeat), which only exists for the mobile app's dead-socket watchdog;
+// passing it on would just redraw the chat for nothing every 20s.
+func isHeartbeat(b []byte) bool {
+	var f struct {
+		Type string `json:"type"`
+	}
+	return len(b) < 64 && json.Unmarshal(b, &f) == nil && f.Type == "heartbeat"
 }
 
 // Send queues a JSON frame. Frames sent while disconnected are dropped

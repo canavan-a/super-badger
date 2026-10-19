@@ -22,7 +22,7 @@ import {
   Release,
   runUpdate,
 } from '../appUpdater';
-import {listStations} from '../api';
+import {listStations, withTimeout} from '../api';
 import {MetricSourcesSettings} from '../components/MetricSourcesSettings';
 import {StationLayoutSettings} from '../components/StationLayoutSettings';
 import {VpnSettings} from '../components/VpnSettings';
@@ -231,7 +231,8 @@ export function SettingsScreen(): React.JSX.Element {
   const testConnection = async (url: string) => {
     setTestState({status: 'testing'});
     try {
-      const res = await fetch(`${url.replace(/\/+$/, '')}/health`);
+      const healthURL = `${url.replace(/\/+$/, '')}/health`;
+      const res = await withTimeout('GET /health', 10_000, signal => fetch(healthURL, {signal}));
       setTestState(res.ok ? {status: 'ok'} : {status: 'error', message: `status ${res.status}`});
     } catch (err) {
       setTestState({status: 'error', message: String(err)});

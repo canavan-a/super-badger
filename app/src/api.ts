@@ -63,7 +63,49 @@ export interface OpencodeProvidersResponse {
   default: Record<string, string>;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+// React Native's fetch on Android runs on OkHttp with every timeout set to 0
+// (unlimited). A pooled keep-alive connection that died silently (network
+// switch, VPN reconnect, NAT expiry) then swallows the request forever: no
+// error, so the caller's spinner never clears and nothing retries. Aborting
+// after a bound turns that into a normal failure and cancels the OkHttp call,
+// which drops the dead connection so the next request dials a fresh one.
+// Matches the TUI's 30s http.Client bound in spirit, shorter since a phone
+// user is staring at a spinner.
+const DEFAULT_TIMEOUT_MS = 15_000;
+
+// The server holds a compact request open until opencode finishes
+// summarizing, which can take minutes on a slow local model — same bound as
+// the TUI's compactTimeout.
+const COMPACT_TIMEOUT_MS = 15 * 60_000;
+
+// A history page is only a few messages, but their tool outputs can add up
+// to megabytes, and the bound includes reading the body: at 15s a slow
+// cellular link would time out the same page on every retry, forever.
+const HISTORY_TIMEOUT_MS = 60_000;
+
+// Runs fn with an AbortSignal that fires after timeoutMs. The bound covers
+// everything fn awaits, body read included: a connection can just as well
+// die between the headers and the end of a large body (e.g. history pages).
+export async function withTimeout<T>(
+  label: string,
+  timeoutMs: number,
+  fn: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fn(controller.signal);
+  } catch (err) {
+    if (controller.signal.aborted) {
+      throw new Error(`${label}: timed out after ${timeoutMs / 1000}s`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function request<T>(path: string, init?: RequestInit, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<T> {
   const {serverUrl, authToken} = settingsStore.get();
   const headers: Record<string, string> = {'Content-Type': 'application/json'};
   // The server has no auth yet — sent ahead of time so the header is already
@@ -72,18 +114,22 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers.Authorization = `Bearer ${authToken}`;
   }
 
-  const res = await fetch(`${serverUrl}${path}`, {
-    headers,
-    ...init,
+  const label = `${init?.method ?? 'GET'} ${path}`;
+  return withTimeout(label, timeoutMs, async signal => {
+    const res = await fetch(`${serverUrl}${path}`, {
+      headers,
+      ...init,
+      signal,
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`${label}: ${res.status} ${body}`);
+    }
+    if (res.status === 204) {
+      return undefined as T;
+    }
+    return (await res.json()) as T;
   });
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`${init?.method ?? 'GET'} ${path}: ${res.status} ${body}`);
-  }
-  if (res.status === 204) {
-    return undefined as T;
-  }
-  return res.json() as Promise<T>;
 }
 
 export function listStations(): Promise<Station[]> {
@@ -106,7 +152,9 @@ export function updateStationLayout(active: number[], hidden: number[]): Promise
 // a station being unreachable (that's a live model, not the server).
 export async function checkServerHealth(): Promise<boolean> {
   try {
-    await request('/health');
+    // Under App.tsx's 10s poll interval, so a slow check can't land after
+    // the next one and flip the banner back to a stale answer.
+    await request('/health', undefined, 8_000);
     return true;
   } catch {
     return false;
@@ -159,7 +207,7 @@ export function resetStation(id: number): Promise<Station> {
 // the session alive; it just folds older turns into a summary so context
 // stays under the model's window.
 export function compactStation(id: number): Promise<void> {
-  return request<void>(`/stations/${id}/compact`, {method: 'POST'});
+  return request<void>(`/stations/${id}/compact`, {method: 'POST'}, COMPACT_TIMEOUT_MS);
 }
 
 // Cancels a station's session's in-flight turn — the same thing the CLI's
@@ -214,7 +262,7 @@ export function getStationHistory(id: number, before?: string, limit = 5): Promi
   // crashed the app the first time it fetched an older page.
   let q = `limit=${limit}`;
   if (before) q += `&before=${encodeURIComponent(before)}`;
-  return request<HistoryPage>(`/stations/${id}/history?${q}`);
+  return request<HistoryPage>(`/stations/${id}/history?${q}`, undefined, HISTORY_TIMEOUT_MS);
 }
 
 export function listProviders(): Promise<OpencodeProvidersResponse> {

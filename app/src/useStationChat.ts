@@ -39,6 +39,14 @@ const FLUSH_INTERVAL_MS = 150;
 // clearing busy outright.
 const BUSY_STALL_MS = 45_000;
 
+// The server sends a {"type":"heartbeat"} frame every 20s (see
+// server/api/ws.go's wsStationHeartbeat). A network change can leave the
+// socket half-open, still reporting OPEN with nothing ever arriving and no
+// close event to trigger the retry, so this long without any frame means
+// it's dead and gets replaced. Only armed once a heartbeat has arrived on
+// the socket, so an older server without them doesn't cause a reconnect loop.
+const SOCKET_SILENCE_MS = 50_000;
+
 // One message waiting to go to opencode. The queue itself lives on the
 // server (see server/station/queue.go) — shared with every other app/TUI on
 // this station, kept across app restarts, and sent by the server straight
@@ -190,17 +198,22 @@ export function useStationChat(stationId: number) {
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     let openedBefore = false;
+    // Per current socket — see SOCKET_SILENCE_MS.
+    let lastFrameAt = Date.now();
+    let sawHeartbeat = false;
 
     const connect = () => {
       if (cancelled) return;
       setStatus('connecting');
       const ws = new WebSocket(wsURL(stationId));
       wsRef.current = ws;
+      sawHeartbeat = false;
 
       ws.onopen = () => {
         if (cancelled || wsRef.current !== ws) return;
         setStatus('open');
         lastEventAt.current = Date.now();
+        lastFrameAt = Date.now();
         // Whatever happened while disconnected never arrived here — pick it
         // up from history. The first open just backs up the mount-time fetch
         // (nothing's been missed, so no need to restart the list).
@@ -215,13 +228,20 @@ export function useStationChat(stationId: number) {
       };
       ws.onmessage = ev => {
         if (cancelled || wsRef.current !== ws) return;
-        lastEventAt.current = Date.now();
+        lastFrameAt = Date.now();
         let msg: any;
         try {
           msg = JSON.parse(ev.data);
         } catch {
           return; // ignore malformed frames
         }
+        if (msg.type === 'heartbeat') {
+          // Proves the socket is alive, not that the reply is progressing,
+          // so it deliberately doesn't count toward the busy-stall check.
+          sawHeartbeat = true;
+          return;
+        }
+        lastEventAt.current = Date.now();
         if (msg.type === 'queue') {
           // Applied right away rather than batched: it's a whole snapshot,
           // and rare (one per queue change).
@@ -255,9 +275,17 @@ export function useStationChat(stationId: number) {
 
     connect();
 
+    const watchdog = setInterval(() => {
+      const ws = wsRef.current;
+      if (ws?.readyState === WebSocket.OPEN && sawHeartbeat && Date.now() - lastFrameAt > SOCKET_SILENCE_MS) {
+        reconnectNowRef.current();
+      }
+    }, 10_000);
+
     return () => {
       cancelled = true;
       clearTimeout(retryTimer);
+      clearInterval(watchdog);
       wsRef.current?.close();
     };
   }, [stationId, resync]);
