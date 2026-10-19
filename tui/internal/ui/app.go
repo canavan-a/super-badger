@@ -578,6 +578,8 @@ func (a *App) onNotification(raw json.RawMessage) tea.Cmd {
 		what, title, body = "needs permission", n.StationName+" needs permission", "Open superbadger to allow or reject."
 	case "question_requested":
 		what, title, body = "has a question", n.StationName+" has a question", "Open superbadger to answer."
+	case "auto_compacting":
+		what, title, body = "is compacting", n.StationName+" is compacting", "It hit its context limit — compacting, then continuing."
 	case "datapoint_threshold":
 		name := n.Label
 		if name == "" {

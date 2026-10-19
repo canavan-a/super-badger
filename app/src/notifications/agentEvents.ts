@@ -14,7 +14,12 @@ import {THEMES} from '../theme';
 import {CH_ALERTS, ensureChannels, PREFER_SMALL_ICON, PRESS_ACTION} from './channels';
 
 export interface NotificationMsg {
-  type: 'agent_idle' | 'permission_requested' | 'question_requested' | 'datapoint_threshold';
+  type:
+    | 'agent_idle'
+    | 'permission_requested'
+    | 'question_requested'
+    | 'auto_compacting'
+    | 'datapoint_threshold';
   station_id: number;
   station_name: string;
   station_color?: string;
@@ -29,7 +34,8 @@ export interface NotificationMsg {
 
 // Every notification is one of two kinds, tagged via `data.kind` so a later
 // notification's clearing pass can tell them apart (see below):
-//  - "chat": agent_idle / permission_requested / question_requested —
+//  - "chat": agent_idle / permission_requested / question_requested /
+//    auto_compacting —
 //    transient "come look at the conversation" pings, fine to replace with
 //    whatever's newest.
 //  - "data": datapoint_threshold — a temperature/usage/etc. threshold that
@@ -144,6 +150,25 @@ export async function handleNotificationMsg(msg: NotificationMsg): Promise<void>
         id: `question-${msg.station_id}`,
         title: 'Question asked',
         body: `${msg.station_name} needs an answer`,
+        data: data('chat'),
+        android: {
+          channelId: CH_ALERTS,
+          smallIcon: 'ic_notification',
+          pressAction: PRESS_ACTION,
+          timestamp: Date.now(),
+          showTimestamp: true,
+          color,
+        },
+      });
+      return;
+    // Auto mode hit the context limit and is compacting before it continues
+    // on its own (see server/station/automode.go) — nothing to do, just so
+    // the owner knows why the reply paused.
+    case 'auto_compacting':
+      await notifee.displayNotification({
+        id: `auto-compacting-${msg.station_id}`,
+        title: 'Compacting',
+        body: `${msg.station_name} hit its context limit — compacting, then continuing`,
         data: data('chat'),
         android: {
           channelId: CH_ALERTS,

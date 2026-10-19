@@ -18,10 +18,11 @@ import (
 // fakeOpencode stands in for the opencode HTTP API: it reports a settable
 // session status and records every prompt_async body it receives.
 type fakeOpencode struct {
-	mu      sync.Mutex
-	status  string // "" = idle (absent from /session/status, like opencode)
-	fail    bool
-	prompts [][]string
+	mu       sync.Mutex
+	status   string // "" = idle (absent from /session/status, like opencode)
+	fail     bool
+	prompts  [][]string
+	compacts int
 }
 
 func (f *fakeOpencode) handler(sessionID string) http.Handler {
@@ -55,6 +56,12 @@ func (f *fakeOpencode) handler(sessionID string) http.Handler {
 		f.prompts = append(f.prompts, texts)
 		f.status = "busy"
 		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("POST /session/{id}/summarize", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.compacts++
+		_, _ = w.Write([]byte("true"))
 	})
 	mux.HandleFunc("POST /session/{id}/abort", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

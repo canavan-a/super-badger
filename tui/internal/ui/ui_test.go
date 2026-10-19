@@ -1801,3 +1801,19 @@ func TestSendWhileDisconnectedWaitsForConnection(t *testing.T) {
 		t.Fatal("an unsent message should say it's waiting for the connection")
 	}
 }
+
+func TestModeLineUnderChat(t *testing.T) {
+	for _, tc := range []struct {
+		auto bool
+		want string
+	}{{false, "normal mode"}, {true, "auto mode"}} {
+		m := newChat(api.New("http://127.0.0.1:1", ""), NewStyles("burrow"), api.Station{ID: 1, Name: "alpha", Reachable: true, AutoMode: tc.auto}, 0, 1)
+		m.resize(70, 30)
+		lines := strings.Split(ansi.ReplaceAllString(m.View(), ""), "\n")
+		last := lines[len(lines)-1]
+		m.Close()
+		if !strings.Contains(last, tc.want) {
+			t.Errorf("auto=%v: last line %q, want it to say %q", tc.auto, last, tc.want)
+		}
+	}
+}

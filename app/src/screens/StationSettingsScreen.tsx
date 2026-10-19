@@ -56,6 +56,7 @@ export function StationSettingsScreen({
   const [error, setError] = useState<string | null>(null);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [aliasDraft, setAliasDraft] = useState('');
+  const [continueDraft, setContinueDraft] = useState('');
   // Top bar list drag: the held point's key and how far it's been dragged.
   // Mirrored into refs for the PanResponder callbacks (see TopBarRow).
   const [topBarDrag, setTopBarDrag] = useState<{key: string; dy: number} | null>(null);
@@ -100,6 +101,30 @@ export function StationSettingsScreen({
     const trimmed = aliasDraft.trim();
     try {
       const updated = await updateStation(stationId, {alias: trimmed || null});
+      setStation(updated);
+    } catch (err) {
+      setError(String(err));
+    }
+  };
+
+  useEffect(() => {
+    setContinueDraft(station?.auto_continue_prompt ?? '');
+  }, [station?.auto_continue_prompt]);
+
+  const toggleAutoMode = async (enabled: boolean) => {
+    if (!station) return;
+    setStation({...station, auto_mode: enabled});
+    try {
+      const updated = await updateStation(stationId, {auto_mode: enabled});
+      setStation(updated);
+    } catch (err) {
+      setError(String(err));
+    }
+  };
+
+  const saveContinuePrompt = async () => {
+    try {
+      const updated = await updateStation(stationId, {auto_continue_prompt: continueDraft.trim()});
       setStation(updated);
     } catch (err) {
       setError(String(err));
@@ -303,6 +328,38 @@ export function StationSettingsScreen({
             ))}
           </View>
         </View>
+      </View>
+
+      <View style={styles.card}>
+        <View style={styles.rowBetween}>
+          <Text style={styles.label}>Auto mode</Text>
+          <Switch value={station?.auto_mode ?? false} onValueChange={toggleAutoMode} />
+        </View>
+        <Text style={styles.hint}>
+          When a reply runs out of context, the server compacts the conversation and sends the continue
+          prompt below instead of stopping on the error. You'll get a notification while it compacts.
+        </Text>
+
+        {station?.auto_mode ? (
+          <>
+            <Text style={styles.subLabel}>Continue prompt</Text>
+            <TextInput
+              style={styles.promptInput}
+              value={continueDraft}
+              onChangeText={setContinueDraft}
+              onBlur={saveContinuePrompt}
+              placeholder="Continue where you left off."
+              placeholderTextColor={theme.textMuted}
+              multiline
+            />
+            <View style={styles.promptActions}>
+              <Text style={styles.hint}>Empty uses the default shown.</Text>
+              <Pressable style={styles.saveButton} onPress={saveContinuePrompt}>
+                <Text style={styles.saveButtonText}>Save</Text>
+              </Pressable>
+            </View>
+          </>
+        ) : null}
       </View>
 
       <View style={styles.card}>
@@ -699,6 +756,23 @@ function makeStyles(theme: Theme) {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 6,
+    },
+    promptInput: {
+      minHeight: 64,
+      borderWidth: 1,
+      borderColor: theme.border,
+      borderRadius: 6,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      fontSize: 13,
+      color: theme.text,
+      backgroundColor: theme.bg,
+      textAlignVertical: 'top',
+    },
+    promptActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
     },
     saveButton: {
       paddingHorizontal: 10,

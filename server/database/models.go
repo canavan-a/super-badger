@@ -46,10 +46,16 @@ type Station struct {
 	// and swipe rotation; Position is its owner-chosen order in those. Both
 	// are set together from the app's Settings → Stations tab (see
 	// UpdateStationLayout).
-	Hidden    bool      `gorm:"not null;default:false" json:"hidden"`
-	Position  int       `gorm:"not null;default:0" json:"position"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Hidden   bool `gorm:"not null;default:false" json:"hidden"`
+	Position int  `gorm:"not null;default:0" json:"position"`
+	// AutoMode has the server recover from a reply that outgrew the model's
+	// context window on its own: compact, then send AutoContinuePrompt (or
+	// station.DefaultContinuePrompt when that's empty) — see
+	// station.Service.RunAutoMode.
+	AutoMode           bool      `gorm:"not null;default:false" json:"auto_mode"`
+	AutoContinuePrompt string    `gorm:"not null;default:''" json:"auto_continue_prompt"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }
 
 // MetricSource is one external "Super Badger Station Standard API" endpoint
@@ -164,6 +170,14 @@ func UpdateStationLayout(db *gorm.DB, active, hidden []uint) error {
 func GetStation(db *gorm.DB, id uint) (Station, error) {
 	var s Station
 	err := db.First(&s, id).Error
+	return s, err
+}
+
+// GetStationBySession finds the Station whose current opencode session is
+// sessionID.
+func GetStationBySession(db *gorm.DB, sessionID string) (Station, error) {
+	var s Station
+	err := db.Where("opencode_session_id = ?", sessionID).First(&s).Error
 	return s, err
 }
 

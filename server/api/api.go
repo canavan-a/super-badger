@@ -206,10 +206,12 @@ func updateStation(svc *station.Service) gin.HandlerFunc {
 			return
 		}
 		var body struct {
-			Name          *string  `json:"name"`
-			Alias         *string  `json:"alias"`
-			Color         *string  `json:"color"`
-			TopBarActions []string `json:"top_bar_actions"`
+			Name               *string  `json:"name"`
+			Alias              *string  `json:"alias"`
+			Color              *string  `json:"color"`
+			TopBarActions      []string `json:"top_bar_actions"`
+			AutoMode           *bool    `json:"auto_mode"`
+			AutoContinuePrompt *string  `json:"auto_continue_prompt"`
 		}
 		if err := c.ShouldBindJSON(&body); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -243,6 +245,12 @@ func updateStation(svc *station.Service) gin.HandlerFunc {
 		if body.TopBarActions != nil {
 			encoded, _ := json.Marshal(body.TopBarActions)
 			updates["top_bar_actions"] = string(encoded)
+		}
+		if body.AutoMode != nil {
+			updates["auto_mode"] = *body.AutoMode
+		}
+		if body.AutoContinuePrompt != nil {
+			updates["auto_continue_prompt"] = strings.TrimSpace(*body.AutoContinuePrompt)
 		}
 		st, err := svc.Update(id, updates)
 		if err != nil {

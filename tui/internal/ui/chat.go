@@ -1195,11 +1195,28 @@ func (m *chatModel) bottom() string {
 		}
 		panel = append(panel, "", s.Muted.Render(hint))
 	default:
-		lines = append(lines, box(m.inputView(), m.w, s.T.Accent))
+		lines = append(lines, box(m.inputView(), m.w, s.T.Accent), m.modeLine())
 		return strings.Join(lines, "\n")
 	}
-	lines = append(lines, box(strings.Join(panel, "\n"), m.w, color))
+	lines = append(lines, box(strings.Join(panel, "\n"), m.w, color), m.modeLine())
 	return strings.Join(lines, "\n")
+}
+
+// modeLine sits under the message box: whether this station is in auto mode
+// (the server compacts and continues by itself when a reply runs out of
+// context) or normal mode (it stops on the error). The explanation is
+// dropped on terminals too narrow for it rather than wrapping.
+func (m *chatModel) modeLine() string {
+	s := m.st
+	if !m.station.AutoMode {
+		return s.Muted.PaddingLeft(1).Render("○ normal mode")
+	}
+	label := s.Success.PaddingLeft(1).Render("● auto mode")
+	const why = " · compacts and continues at the context limit"
+	if lipgloss.Width(label)+len(why) <= m.w {
+		label += s.Muted.Render(why)
+	}
+	return label
 }
 
 func (m *chatModel) View() string {

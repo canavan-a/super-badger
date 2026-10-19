@@ -91,6 +91,9 @@ type Event struct {
 	Properties map[string]any `json:"properties"`
 	Error      string         `json:"error"`
 	Text       string         `json:"text"`
+	// ClearError marks a notice as the server handling the current error
+	// itself (auto mode compacting after a context overflow).
+	ClearError bool `json:"clear_error"`
 }
 
 func ParseEvent(b []byte) (Event, error) {
@@ -332,6 +335,9 @@ func (s *State) Apply(e Event) {
 
 	case "notice":
 		s.Notice = e.Text
+		if e.ClearError {
+			s.Error = ""
+		}
 
 	case "session_reset":
 		notice := s.Notice

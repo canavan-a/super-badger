@@ -56,6 +56,10 @@ func main() {
 			"direction":     direction,
 		})
 	})
+	// Auto mode's "compacting" pings ride the same notification feed.
+	svc.SetNotifier(func(m map[string]any) { hub.Broadcast(notify.Msg(m)) })
+	go svc.RunAutoMode(ctx)
+
 	mm := metrics.NewManager(db, notifier)
 	mm.Start(ctx)
 

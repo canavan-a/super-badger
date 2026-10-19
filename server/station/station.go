@@ -23,6 +23,7 @@ type Service struct {
 	oc     *opencode.Client
 	broker *opencode.EventBroker
 	queue  *queueState
+	auto   *autoState
 }
 
 func NewService(db *gorm.DB, oc *opencode.Client, broker *opencode.EventBroker) *Service {
@@ -31,6 +32,7 @@ func NewService(db *gorm.DB, oc *opencode.Client, broker *opencode.EventBroker) 
 		oc:     oc,
 		broker: broker,
 		queue:  newQueueState(),
+		auto:   newAutoState(),
 	}
 }
 

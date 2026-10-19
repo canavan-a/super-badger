@@ -37,6 +37,11 @@ export interface Station {
   // owner's chosen order (the server already returns stations sorted by it).
   hidden: boolean;
   position: number;
+  // Auto mode: when a reply outgrows the model's context window, the server
+  // compacts the session and sends auto_continue_prompt (its own default
+  // when empty) instead of stopping on the error.
+  auto_mode: boolean;
+  auto_continue_prompt: string;
   created_at: string;
   updated_at: string;
 }
@@ -130,7 +135,14 @@ export function deleteStation(id: number): Promise<void> {
 
 export function updateStation(
   id: number,
-  updates: {name?: string; alias?: string | null; color?: string; top_bar_actions?: TopBarActionKey[]},
+  updates: {
+    name?: string;
+    alias?: string | null;
+    color?: string;
+    top_bar_actions?: TopBarActionKey[];
+    auto_mode?: boolean;
+    auto_continue_prompt?: string;
+  },
 ): Promise<Station> {
   return request<Station>(`/stations/${id}`, {
     method: 'PATCH',

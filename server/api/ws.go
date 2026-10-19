@@ -225,7 +225,8 @@ func stationWS(svc *station.Service, broker *opencode.EventBroker) gin.HandlerFu
 // worth a background push notification: a station going idle (the agent
 // finished, it's the user's turn again), a station asking for a tool
 // permission decision, and a station asking the user a question (opencode's
-// separate AskUserQuestion-style mechanism — see station.Service.PendingQuestions).
+// separate AskUserQuestion-style mechanism — see station.Service.PendingQuestions),
+// plus auto mode's "compacting" ping (station.Service.RunAutoMode, via hub).
 // Unlike stationWS (one connection per Station,
 // bidirectional, full event stream) this is one connection for the whole
 // app watching every Station at once — a mobile background service holds
@@ -291,6 +292,12 @@ func notificationsWS(svc *station.Service, broker *opencode.EventBroker, hub *no
 				st, found := cache.lookup(c.Request.Context(), evt.SessionID())
 				if !found {
 					continue // station deleted, or session belongs to nothing we track
+				}
+				// Mid auto-compaction the session idles between the failed
+				// turn, the summary and the continue prompt — not the agent
+				// finishing, and the "compacting" ping already went out.
+				if evt.Type == "session.idle" && svc.AutoCompacting(st.ID) {
+					continue
 				}
 				msg["station_id"] = st.ID
 				msg["station_name"] = st.Name

@@ -90,7 +90,7 @@ export const emptyChatState: ChatState = {
 // flat messages: {type:"error", error} when a prompt fails outright, and
 // {type:"notice", text} when it's transparently recovering something (e.g.
 // re-creating a session opencode dropped) — see server/api/ws.go.
-export type EventMsg = {id?: string; type: string; properties?: any; error?: string; text?: string};
+export type EventMsg = {id?: string; type: string; properties?: any; error?: string; text?: string; clear_error?: boolean};
 
 function ensureTurn(state: ChatState, messageID: string, role: 'user' | 'assistant'): ChatState {
   if (state.turnIndex[messageID] !== undefined) {
@@ -304,8 +304,10 @@ export function applyEvent(state: ChatState, evt: EventMsg): ChatState {
 
     // Server-synthesized: e.g. "Session expired — starting a new one…"
     // while promptWithRecovery transparently resets and retries.
+    // clear_error: the notice is the server handling that error itself (auto
+    // mode compacting after a context overflow), so its banner goes.
     case 'notice':
-      return {...state, notice: evt.text ?? null};
+      return {...state, notice: evt.text ?? null, ...(evt.clear_error ? {error: null} : {})};
 
     // Server-synthesized: sent right after an auto-recovery reset. The old
     // session (and everything shown from it) no longer exists, so it's

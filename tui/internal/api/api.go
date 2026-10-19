@@ -31,6 +31,9 @@ type Station struct {
 	Status            string   `json:"status"`
 	Reachable         bool     `json:"reachable"`
 	Hidden            bool     `json:"hidden"`
+	// AutoMode: the server compacts and continues by itself when a reply
+	// runs out of context (see server/station/automode.go).
+	AutoMode bool `json:"auto_mode"`
 }
 
 func (s Station) HasAction(a string) bool {
