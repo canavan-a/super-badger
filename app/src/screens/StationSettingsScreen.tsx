@@ -65,10 +65,11 @@ export function StationSettingsScreen({
   const pointsRef = useRef(points);
   pointsRef.current = points;
 
-  // The 10s poll mustn't clobber local edits. Every local write bumps a
+  // The poll mustn't clobber local edits. Every local write bumps a
   // generation counter and holds a pending count while in flight; a poll
-  // result is dropped if a write started after the poll did or is still
-  // running (it was read before the server saw the write). Points whose
+  // result is dropped if a write was in flight when the poll started, started
+  // after it, or is still running — in each case the server may have read the
+  // row before the write landed. Points whose
   // settings have been edited but not saved yet (typing a label) keep their
   // local settings and only take the fresh value from the poll.
   const stationWrites = useRef({gen: 0, pending: 0});
@@ -76,8 +77,8 @@ export function StationSettingsScreen({
   const dirtyPoints = useRef(new Set<string>());
 
   const refresh = useCallback(() => {
-    const stationGen = stationWrites.current.gen;
-    const pointGen = pointWrites.current.gen;
+    const stationGen = stationWrites.current.pending === 0 ? stationWrites.current.gen : -1;
+    const pointGen = pointWrites.current.pending === 0 ? pointWrites.current.gen : -1;
     Promise.all([getStation(stationId), getStationDataPoints(stationId)])
       .then(([st, pts]) => {
         if (stationWrites.current.gen === stationGen && stationWrites.current.pending === 0) {
