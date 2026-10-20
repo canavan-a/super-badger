@@ -1696,6 +1696,35 @@ func TestDiggingLineOnlyWhileThinking(t *testing.T) {
 	}
 }
 
+func TestAutoCompactingDetection(t *testing.T) {
+	prompt := &chat.Turn{Role: "user", PartOrder: []string{"p"}, Parts: map[string]*chat.Part{
+		"p": {Kind: chat.KindText, ID: "p", Text: "hello"},
+	}}
+	empty := &chat.Turn{Role: "user", Parts: map[string]*chat.Part{}}
+	reply := &chat.Turn{Role: "assistant", Parts: map[string]*chat.Part{}}
+	done := &chat.Turn{Role: "assistant", Done: true, Parts: map[string]*chat.Part{}}
+	started := &chat.Turn{Role: "assistant", PartOrder: []string{"r"}, Parts: map[string]*chat.Part{
+		"r": {Kind: chat.KindReasoning, ID: "r"},
+	}}
+	cases := []struct {
+		name  string
+		turns []*chat.Turn
+		want  bool
+	}{
+		{"empty pair in flight", []*chat.Turn{prompt, done, empty, reply}, true},
+		{"real prompt, reply not started", []*chat.Turn{prompt, reply}, false},
+		{"empty pair finished", []*chat.Turn{empty, done}, false},
+		{"empty prompt, reply streaming", []*chat.Turn{empty, started}, true},
+		{"real prompt, reply streaming", []*chat.Turn{prompt, started}, false},
+		{"just sent", []*chat.Turn{empty}, false},
+	}
+	for _, c := range cases {
+		if got := autoCompacting(c.turns); got != c.want {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
 // A frame taller or wider than the terminal makes it scroll, which tears the
 // layout and shows the shell behind it. Long bash commands were the trigger:
 // unbounded in the permission prompt, and tabs / carriage returns in the

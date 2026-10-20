@@ -1048,26 +1048,27 @@ const TurnView = React.memo(function TurnView({
       </>
     );
   }
-  const isCompactionReply = turn.partOrder.length === 0 && (compacting || isEmptyUserTurn(prevTurn));
+  // Compact (button, or opencode auto-compacting on its own) creates its own
+  // turn pair on the wire, and the reply streams the compaction agent's
+  // reasoning and summary — opening with an empty reasoning part, which left
+  // a blank bubble. Its parts are never shown: just the compaction chip.
+  const isCompactionReply = isEmptyUserTurn(prevTurn) || (compacting && turn.partOrder.length === 0);
+  if (isCompactionReply) {
+    return (
+      <View style={[styles.bubble, styles.bubbleAssistant]}>
+        <Text style={styles.chip}>{turn.done ? '⚙ Conversation compacted' : '⚙ Compaction triggered'}</Text>
+      </View>
+    );
+  }
   return (
     <Pressable style={[styles.bubble, styles.bubbleAssistant]} onLongPress={handleLongPress}>
       {turn.partOrder.map(id => (
         <PartView key={id} part={turn.parts[id]} styles={styles} theme={theme} />
       ))}
-      {isCompactionReply ? (
-        // Compact (button, or opencode auto-compacting on its own) creates
-        // its own empty turn pair on the wire with no parts ever streamed
-        // into it — so without this it rendered as an indefinite bare
-        // spinner with nothing to explain it ("a blank dot chat"). A
-        // normal in-flight reply's spinner (real content on the way) is
-        // unaffected by this check.
-        <Text style={styles.chip}>⚙ Compaction triggered</Text>
-      ) : (
-        // Sits on its own line at the tail of the bubble, but only while the
-        // model is thinking — not while it streams its answer or a tool runs,
-        // which show their own progress.
-        !turn.done && isThinking(turn) && <DiggingSpinner />
-      )}
+      {/* Sits on its own line at the tail of the bubble, but only while the
+          model is thinking — not while it streams its answer or a tool runs,
+          which show their own progress. */}
+      {!turn.done && isThinking(turn) && <DiggingSpinner />}
     </Pressable>
   );
 });

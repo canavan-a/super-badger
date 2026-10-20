@@ -56,3 +56,32 @@ func thinking(turns []*chat.Turn, busy bool) bool {
 	}
 	return true
 }
+
+// compactionPrompt mirrors the app's isEmptyUserTurn
+// (app/src/screens/StationDetailScreen.tsx): a compaction — /compact, or
+// opencode compacting on its own when context fills up — streams as a
+// user+assistant turn pair whose user turn has no text at all, a signature
+// no real prompt produces (send trims and bails on empty). The reply after
+// it is the compaction agent's reasoning and summary, never shown.
+func compactionPrompt(t *chat.Turn) bool {
+	if t == nil || t.Role != "user" {
+		return false
+	}
+	for _, id := range t.PartOrder {
+		if p := t.Parts[id]; p != nil && p.Kind == chat.KindText && p.Text != "" {
+			return false
+		}
+	}
+	return true
+}
+
+// autoCompacting reports a compaction reply still in flight, whoever
+// started it — the compacting line shows in place of the digging line.
+func autoCompacting(turns []*chat.Turn) bool {
+	n := len(turns)
+	if n < 2 {
+		return false
+	}
+	reply := turns[n-1]
+	return reply.Role == "assistant" && !reply.Done && compactionPrompt(turns[n-2])
+}

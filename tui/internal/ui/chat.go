@@ -283,7 +283,7 @@ func (m *chatModel) Update(msg tea.Msg) tea.Cmd {
 
 	case flushMsg:
 		// Re-render each tick while either animated status line is up.
-		if m.compacting || thinking(m.state.Turns, m.state.Busy) {
+		if m.isCompacting() || thinking(m.state.Turns, m.state.Busy) {
 			m.dirty = true
 		}
 		cmd := m.flush()
@@ -835,7 +835,7 @@ func (m *chatModel) topBar() string {
 	// Second row: directory + enabled action buttons. No model/provider here
 	// (wasted space), and the row is dropped entirely when there's nothing.
 	var row2 []string
-	if m.compacting {
+	if m.isCompacting() {
 		// Shown regardless of the station's top-bar buttons: compaction is a
 		// long silent wait on the server, so it must never go unannounced.
 		row2 = append(row2, s.Primary.Bold(true).Render("◆ compacting…"))
@@ -923,7 +923,15 @@ func (m *chatModel) transcript() string {
 	tw := max(10, m.w-6)
 	wrap := lipgloss.NewStyle().Width(tw)
 	var b strings.Builder
-	for _, t := range m.state.Turns {
+	for i, t := range m.state.Turns {
+		if t.Role == "assistant" && i > 0 && compactionPrompt(m.state.Turns[i-1]) {
+			// The compaction agent's reasoning and summary: while it runs the
+			// compacting line below stands in for it, after that a marker.
+			if t.Done {
+				b.WriteString(" " + m.st.Muted.Render("◆ conversation compacted") + "\n\n")
+			}
+			continue
+		}
 		if len(t.PartOrder) == 0 {
 			continue
 		}
@@ -950,19 +958,26 @@ func (m *chatModel) transcript() string {
 		m.queueRows = append(m.queueRows, queueRow{start, start + lipgloss.Height(block), i})
 		b.WriteString(block + "\n\n")
 	}
-	if thinking(m.state.Turns, m.state.Busy) {
+	// Compacting replaces the digging line: an auto-compaction's empty reply
+	// otherwise looks just like a reply that hasn't started thinking yet.
+	if m.isCompacting() {
+		dots := strings.Repeat(".", int(time.Now().UnixMilli()/400%4))
+		b.WriteString(" " + m.st.Primary.Render("◆ ") + m.st.Text.Render("compacting") + m.st.Muted.Render(dots+"  summarizing older messages to free up context") + "\n")
+	} else if thinking(m.state.Turns, m.state.Busy) {
 		now := time.Now()
 		dirt := lipgloss.NewStyle().Foreground(lipgloss.Color("#8B5A2B")).Render(digDots(now))
 		b.WriteString(" " + m.st.Primary.Render("◆ ") + m.st.Muted.Italic(true).Render(digWord(now)) + " " + dirt + "\n")
-	}
-	if m.compacting {
-		dots := strings.Repeat(".", int(time.Now().UnixMilli()/400%4))
-		b.WriteString(" " + m.st.Primary.Render("◆ ") + m.st.Text.Render("compacting") + m.st.Muted.Render(dots+"  summarizing older messages to free up context") + "\n")
 	}
 	if b.Len() == 0 {
 		b.WriteString("\n " + m.st.Muted.Render("nothing here yet — say something."))
 	}
 	return b.String()
+}
+
+// isCompacting covers both a compaction this view started (/compact, ⌥c)
+// and one opencode started on its own (see autoCompacting).
+func (m *chatModel) isCompacting() bool {
+	return m.compacting || autoCompacting(m.state.Turns)
 }
 
 // userBlock is "my" text: a full-width raised panel with a cyan rail.
