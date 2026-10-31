@@ -219,6 +219,7 @@ func (c *Client) Prompt(ctx context.Context, sessionID, text string) (json.RawMe
 		"parts": []map[string]any{
 			{"type": "text", "text": text},
 		},
+		"tools": promptTools,
 	}
 	var raw json.RawMessage
 	if err := c.doWith(ctx, c.longHTTP, "POST", fmt.Sprintf("/session/%s/message", sessionID), body, &raw); err != nil {
@@ -226,6 +227,12 @@ func (c *Client) Prompt(ctx context.Context, sessionID, text string) (json.RawMe
 	}
 	return raw, nil
 }
+
+// promptTools is sent with every prompt to switch individual opencode tools
+// off for that turn. "task" is opencode's subagent tool — the local models
+// we run serve one request at a time, so a subagent call would just queue
+// behind (and deadlock on) the parent turn that spawned it.
+var promptTools = map[string]bool{"task": false}
 
 // PromptAsync sends a text prompt into an existing session and returns
 // immediately (opencode responds 204) — the reply streams in as events on
@@ -242,7 +249,7 @@ func (c *Client) PromptAsyncParts(ctx context.Context, sessionID string, texts [
 	for i, t := range texts {
 		parts[i] = map[string]any{"type": "text", "text": t}
 	}
-	body := map[string]any{"parts": parts}
+	body := map[string]any{"parts": parts, "tools": promptTools}
 	return c.do(ctx, "POST", fmt.Sprintf("/session/%s/prompt_async", sessionID), body, nil)
 }
 
