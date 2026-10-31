@@ -210,9 +210,9 @@ in
         export CGO_ENABLED=0
         mkdir -p /var/lib/superbadger/bin ${goCache}
         cd ${self}/server
-        ${pkgs.go}/bin/go build -o ${serverBin}.new ./cmd/superbadger-server
+        ${pkgs.go}/bin/go build -buildvcs=false -o ${serverBin}.new ./cmd/superbadger-server
         mv -f ${serverBin}.new ${serverBin}
-        ${pkgs.go}/bin/go build -o ${badgerBin}.new ./cmd/badger
+        ${pkgs.go}/bin/go build -buildvcs=false -o ${badgerBin}.new ./cmd/badger
         mv -f ${badgerBin}.new ${badgerBin}
       '' + lib.optionalString cfg.web.enable ''
         # Same rebuild-from-source-every-activation tradeoff as the Go build
@@ -234,6 +234,10 @@ in
         rm -rf "$appBuild"
         mkdir -p "$appBuild"
         cp -r ${self}/app/. "$appBuild"/
+        # Store files copy over read-only; Vite needs to clear/write dist.
+        chmod -R u+w "$appBuild"
+        # Not needed for the web build, and the bulk of the copy.
+        rm -rf "$appBuild/android"
         cd "$appBuild"
         ${pkgs.nodejs_22}/bin/npm ci
         ${pkgs.nodejs_22}/bin/npm run build:web

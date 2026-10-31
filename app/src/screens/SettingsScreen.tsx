@@ -229,6 +229,10 @@ export function SettingsScreen(): React.JSX.Element {
   };
 
   const testConnection = async (url: string) => {
+    if (!url.trim()) {
+      setTestState({status: 'idle'});
+      return;
+    }
     setTestState({status: 'testing'});
     try {
       const healthURL = `${url.replace(/\/+$/, '')}/health`;

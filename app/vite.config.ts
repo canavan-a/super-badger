@@ -85,5 +85,10 @@ export default defineConfig(({mode}) => ({
   define: {
     // react-native-web checks this at runtime.
     'process.env.NODE_ENV': JSON.stringify(mode === 'production' ? 'production' : 'development'),
+    // react-native-web's vendored Animated code calls
+    // global.cancelAnimationFrame() when an animation is stopped — `global`
+    // exists under Node/Metro but not in a browser, so without this every
+    // Animated .stop() throws "ReferenceError: global is not defined".
+    global: 'globalThis',
   },
 }));

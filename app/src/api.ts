@@ -105,8 +105,15 @@ export async function withTimeout<T>(
   }
 }
 
+const SERVER_URL_UNSET = 'No server URL set (Settings → Server URL)';
+
 async function request<T>(path: string, init?: RequestInit, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<T> {
   const {serverUrl, authToken} = settingsStore.get();
+  // Fail fast instead of fetching a relative path against whatever origin
+  // served the page (see settings.ts's DEFAULT_WEB_URL).
+  if (!serverUrl) {
+    throw new Error(SERVER_URL_UNSET);
+  }
   const headers: Record<string, string> = {'Content-Type': 'application/json'};
   // The server has no auth yet — sent ahead of time so the header is already
   // wired up once it does; harmless no-op until then.
@@ -518,6 +525,9 @@ export function runCommand(
   onLog: (line: string) => void,
 ): Promise<CommandResult> {
   const {serverUrl, authToken} = settingsStore.get();
+  if (!serverUrl) {
+    return Promise.reject(new Error(SERVER_URL_UNSET));
+  }
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     let consumed = 0;

@@ -4,7 +4,11 @@ import {Platform} from 'react-native';
 // Android emulators reach the host machine via 10.0.2.2, not localhost — the
 // standard emulator-to-host loopback alias. Overridable at runtime from the
 // Settings screen (e.g. for a physical device pointed at a LAN IP).
-const DEFAULT_WEB_URL = 'http://localhost:8080';
+//
+// Web starts unset: the static client can be served from anywhere, so there's
+// no address worth guessing, and a wrong guess only fills the console with
+// failed fetches. Requests are skipped until one is entered (see api.ts).
+const DEFAULT_WEB_URL = '';
 const DEFAULT_ANDROID_URL = 'http://10.0.2.2:8080';
 const DEFAULT_URL = Platform.OS === 'web' ? DEFAULT_WEB_URL : DEFAULT_ANDROID_URL;
 

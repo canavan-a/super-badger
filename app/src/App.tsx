@@ -92,6 +92,9 @@ function AppInner(): React.JSX.Element {
   // null = "haven't checked yet" — deliberately distinct from false, so the
   // banner doesn't flash on for an instant on every fresh load.
   const [serverOnline, setServerOnline] = useState<boolean | null>(null);
+  // No Server URL at all (the web default, see settings.ts) gets its own
+  // banner instead of "can't reach": there's nothing to reach yet.
+  const [serverConfigured, setServerConfigured] = useState(true);
   // Hidden stations (Settings → Stations) stay configured but are left off
   // the home list and swipe rotation.
   const visibleStations = useMemo(() => stations.filter(s => !s.hidden), [stations]);
@@ -158,6 +161,11 @@ function AppInner(): React.JSX.Element {
       cancelled = true;
       clearInterval(interval);
     };
+  }, []);
+
+  useEffect(() => {
+    settingsStore.load().then(s => setServerConfigured(!!s.serverUrl));
+    return settingsStore.subscribe(s => setServerConfigured(!!s.serverUrl));
   }, []);
 
   // useCallback (stable identity) matters here: it's passed down as
@@ -396,7 +404,13 @@ function AppInner(): React.JSX.Element {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle={theme.name === 'light' || theme.name === 'sepia' ? 'dark-content' : 'light-content'} />
 
-      {serverOnline === false && (
+      {!serverConfigured ? (
+        <View style={styles.offlineBanner}>
+          <Text style={styles.offlineBannerText}>
+            No server configured — set the Server URL in Settings.
+          </Text>
+        </View>
+      ) : serverOnline === false && (
         <View style={styles.offlineBanner}>
           <Text style={styles.offlineBannerText}>
             Can't reach superbadger server — check it's running and the address in Settings.
