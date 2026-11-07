@@ -55,6 +55,7 @@ export function StationSettingsScreen({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
+  const [nameDraft, setNameDraft] = useState('');
   const [aliasDraft, setAliasDraft] = useState('');
   const [continueDraft, setContinueDraft] = useState('');
   // Top bar list drag: the held point's key and how far it's been dragged.
@@ -144,6 +145,21 @@ export function StationSettingsScreen({
     });
     return () => onHeaderChange(null);
   }, [station, stationId, onHeaderChange, onNavigate]);
+
+  useEffect(() => {
+    setNameDraft(station?.name ?? '');
+  }, [station?.name]);
+
+  // The title shown on the home list and the chat screen's top bar. Blank or
+  // unchanged: put the current name back rather than saving it.
+  const saveName = () => {
+    const name = nameDraft.trim();
+    if (!station || !name || name === station.name) {
+      setNameDraft(station?.name ?? '');
+      return;
+    }
+    writeStation({name}, {name});
+  };
 
   useEffect(() => {
     setAliasDraft(station?.alias ?? '');
@@ -314,6 +330,26 @@ export function StationSettingsScreen({
 
       <View style={styles.card}>
         <Text style={styles.label}>Station identity</Text>
+
+        <View style={styles.rowBetween}>
+          <Text style={styles.subLabel}>Name</Text>
+          <View style={styles.aliasInputRow}>
+            <TextInput
+              style={styles.labelInput}
+              value={nameDraft}
+              onChangeText={setNameDraft}
+              onBlur={saveName}
+              placeholder="station name"
+              placeholderTextColor={theme.textMuted}
+            />
+            <Pressable style={styles.saveButton} onPress={saveName}>
+              <Text style={styles.saveButtonText}>Save</Text>
+            </Pressable>
+          </View>
+        </View>
+        <Text style={styles.hint}>
+          The title on the home list and at the top of the chat. Metrics keep finding the station by its tag.
+        </Text>
 
         <View style={styles.rowBetween}>
           <Text style={styles.subLabel}>Alias / tag</Text>

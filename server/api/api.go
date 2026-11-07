@@ -229,7 +229,12 @@ func updateStation(svc *station.Service) gin.HandlerFunc {
 		}
 		updates := map[string]any{}
 		if body.Name != nil {
-			updates["name"] = *body.Name
+			name := strings.TrimSpace(*body.Name)
+			if name == "" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "name must not be empty"})
+				return
+			}
+			updates["name"] = name
 		}
 		if body.Alias != nil {
 			alias := *body.Alias
