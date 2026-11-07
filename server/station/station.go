@@ -438,7 +438,7 @@ func reachable(ctx context.Context, ep providerEndpoint, ok bool) bool {
 	}
 	ctx, cancel := context.WithTimeout(ctx, reachabilityTimeout)
 	defer cancel()
-	return opencode.TestModelConnection(ctx, ep.BaseURL, ep.APIKey) == nil
+	return opencode.ModelEndpointAlive(ctx, ep.BaseURL, ep.APIKey)
 }
 
 // Reachable live-pings the model backend behind a single provider (via the
