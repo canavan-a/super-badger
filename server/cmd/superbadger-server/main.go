@@ -73,7 +73,7 @@ func main() {
 	}
 
 	router := api.NewRouter(svc, oc, mv, broker, db, mm, hub)
-	log.Printf("superbadger listening on %s, opencode at %s", cfg.ListenAddr, cfg.OpencodeBaseURL)
+	log.Printf("super galleon server listening on %s, opencode at %s", cfg.ListenAddr, cfg.OpencodeBaseURL)
 	if err := router.Run(cfg.ListenAddr); err != nil {
 		log.Fatalf("server error: %v", err)
 	}

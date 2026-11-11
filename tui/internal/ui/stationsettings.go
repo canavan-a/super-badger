@@ -20,9 +20,13 @@ type stationSettingsModel struct {
 	st      Styles
 	station api.Station
 	dps     []api.DataPoint
-	form    form
-	msg     string
-	err     string
+	// limit is the station model's row of GET /limits (nil until loaded,
+	// or when the server doesn't list the model); limitErr why it isn't.
+	limit    *api.ModelLimit
+	limitErr string
+	form     form
+	msg      string
+	err      string
 
 	editingDP bool
 	dpKey     string
@@ -60,6 +64,7 @@ func (m *stationSettingsModel) rebuild() {
 		}
 		fields = append(fields, field{key: "act:" + a, label: a, kind: fToggle, on: m.station.HasAction(a), note: note})
 	}
+	fields = append(fields, m.limitFields()...)
 	fields = append(fields, field{kind: fHeader, label: "Data points"})
 	if len(m.dps) == 0 {
 		fields = append(fields, field{key: "nodp", label: "(none reported yet)", kind: fHeader})
@@ -83,7 +88,110 @@ func (m *stationSettingsModel) rebuild() {
 	}
 }
 
-func (m *stationSettingsModel) Init() tea.Cmd { return m.load() }
+// limitFields is the model's context window: what opencode uses now, where
+// that comes from, and an override. Limits are per provider/model, so the
+// section says it reaches every station on the model.
+func (m *stationSettingsModel) limitFields() []field {
+	if m.station.ProviderID == "" || m.station.ModelID == "" {
+		return nil
+	}
+	fields := []field{{kind: fHeader, label: "Context limit · shared by every station on " + m.station.ProviderID + "/" + m.station.ModelID}}
+	l := m.limit
+	if l == nil {
+		label := "(loading…)"
+		if m.limitErr != "" {
+			label = "(unavailable: " + m.limitErr + ")"
+		}
+		return append(fields, field{key: "lim:none", label: label, kind: fHeader})
+	}
+	ctxVal, outVal := "", ""
+	if l.Override != nil && l.Override.Context != nil {
+		ctxVal = strconv.Itoa(*l.Override.Context)
+	}
+	if l.Override != nil && l.Override.Output != nil {
+		outVal = strconv.Itoa(*l.Override.Output)
+	}
+	ctxNote := "in use " + limitTokens(l.Context) + " · " + l.Source
+	if l.Detected > 0 && l.Source != "detected" {
+		ctxNote += " (engine reports " + limitTokens(l.Detected) + ")"
+	}
+	ctxNote += " · blank = auto"
+	fields = append(fields,
+		field{key: "lim:context", label: "Context override", kind: fText, value: ctxVal, note: ctxNote},
+		field{key: "lim:output", label: "Output override", kind: fText, value: outVal, note: "in use " + limitTokens(l.Output) + " · blank = auto"},
+	)
+	if l.Override != nil {
+		fields = append(fields, field{key: "lim:clear", label: "Clear override", kind: fAction})
+	}
+	return fields
+}
+
+func limitTokens(n int) string {
+	if n <= 0 {
+		return "unknown"
+	}
+	return api.FormatTokens(n)
+}
+
+// parseLimit reads a token count: blank (nil, no override), a number, or a
+// number with a k suffix meaning a plain thousand ("32k" = 32000).
+func parseLimit(s string) (*int, error) {
+	s = strings.ToLower(strings.TrimSpace(strings.ReplaceAll(s, ",", "")))
+	if s == "" {
+		return nil, nil
+	}
+	mul := 1
+	if strings.HasSuffix(s, "k") {
+		s, mul = strings.TrimSuffix(s, "k"), 1000
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil || f <= 0 {
+		return nil, fmt.Errorf("enter a token count, e.g. 32768 or 32k")
+	}
+	n := int(f * float64(mul))
+	return &n, nil
+}
+
+func (m *stationSettingsModel) Init() tea.Cmd { return tea.Batch(m.load(), m.loadLimit()) }
+
+func (m *stationSettingsModel) loadLimit() tea.Cmd {
+	c, prov, model := m.client, m.station.ProviderID, m.station.ModelID
+	if prov == "" || model == "" {
+		return nil
+	}
+	return func() tea.Msg {
+		ls, err := c.ListLimits(prov, model)
+		if err != nil {
+			return opMsg{"limit", err, nil}
+		}
+		for i := range ls {
+			if ls[i].ProviderID == prov && ls[i].ModelID == model {
+				return opMsg{"limit", nil, &ls[i]}
+			}
+		}
+		return opMsg{"limit", fmt.Errorf("model not listed"), nil}
+	}
+}
+
+// saveLimit stores the form's context/output overrides (both blank clears it).
+func (m *stationSettingsModel) saveLimit() tea.Cmd {
+	ctx, err := parseLimit(m.form.get("lim:context").value)
+	if err == nil {
+		var out *int
+		out, err = parseLimit(m.form.get("lim:output").value)
+		if err == nil {
+			return m.putLimit(ctx, out)
+		}
+	}
+	m.err = err.Error()
+	m.rebuild() // drop the bad edit
+	return nil
+}
+
+func (m *stationSettingsModel) putLimit(ctx, out *int) tea.Cmd {
+	c, prov, model := m.client, m.station.ProviderID, m.station.ModelID
+	return func() tea.Msg { return opMsg{"limitsave", c.SetLimit(prov, model, ctx, out), nil} }
+}
 
 func (m *stationSettingsModel) load() tea.Cmd {
 	c, id := m.client, m.station.ID
@@ -120,15 +228,26 @@ func (m *stationSettingsModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 	switch msg := msg.(type) {
 	case opMsg:
 		if msg.err != nil {
+			if msg.tag == "limit" {
+				m.limit, m.limitErr = nil, msg.err.Error()
+				m.rebuild()
+				return m, nil
+			}
 			m.err = msg.err.Error()
 			m.msg = ""
-			if msg.tag == "patch" {
+			if msg.tag == "patch" || msg.tag == "limitsave" {
 				m.rebuild() // drop the unsaved edit from the form
 			}
 			return m, nil
 		}
 		m.err = ""
 		switch msg.tag {
+		case "limit":
+			m.limit, m.limitErr = msg.val.(*api.ModelLimit), ""
+			m.rebuild()
+		case "limitsave":
+			m.msg = "saved · every station on this model picks it up within ~10s"
+			return m, m.loadLimit()
 		case "dps":
 			m.dps = msg.val.([]api.DataPoint)
 			m.rebuild()
@@ -186,6 +305,10 @@ func (m *stationSettingsModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 				acts = []string{}
 			}
 			return m, m.patch(api.StationUpdate{TopBarActions: &acts})
+		case ev.key == "lim:context" || ev.key == "lim:output":
+			return m, m.saveLimit()
+		case ev.key == "lim:clear":
+			return m, m.putLimit(nil, nil)
 		case strings.HasPrefix(ev.key, dpPrefix):
 			m.openDP(strings.TrimPrefix(ev.key, dpPrefix))
 		}

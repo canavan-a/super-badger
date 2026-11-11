@@ -1,4 +1,4 @@
-// Handlers for the Super Badger Station Standard API: per-station data
+// Handlers for the Super Galleon Station Standard API: per-station data
 // points (read-only, populated by server/metrics's poller) and their display
 // / threshold-notification settings, plus CRUD for the MetricSource configs
 // that tell the poller what to poll and how often (see server/metrics.Manager).

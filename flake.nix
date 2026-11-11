@@ -3,14 +3,18 @@
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-26.05";
+    # opencode 2 (super-badger needs >= 2.2; 26.05 ships 1.15). Pinned to the
+    # revision super-badger was ported and tested against (opencode 2.2.5).
+    nixpkgs-unstable.url = "github:nixos/nixpkgs/nixpkgs-unstable";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs = { self, nixpkgs, nixpkgs-unstable, flake-utils }:
     let
       perSystem = flake-utils.lib.eachDefaultSystem (system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
+          opencode = nixpkgs-unstable.legacyPackages.${system}.opencode;
 
           # $PWD is resolved at runtime, so these scripts must be run from the
           # repo root (i.e. always `cd` into super-badger/ before `nix develop`).
@@ -26,13 +30,11 @@
           # Basic auth (SUPERBADGER_OPENCODE_PASSWORD, see server/config).
           opencodePassword = "password";
 
-          # opencode (1.18.30 as installed here) crashes at startup trying to
-          # use a legacy `opencode-stable.db` compat path it detects under
-          # ~/.local/share/opencode — confirmed live; this env var (which
-          # opencode's own error message names) disables that check.
+          # The super-badger plugin (opencode-plugin/) is loaded from the
+          # checkout, with the same compaction setting the NixOS module uses.
           opencodeEnv = ''
-            export OPENCODE_SERVER_PASSWORD="${opencodePassword}"
-            export NIXPKGS_OPENCODE_DISABLE_LEGACY_DB_WORKAROUND=1
+            export OPENCODE_PASSWORD="${opencodePassword}"
+            export OPENCODE_CONFIG_CONTENT="{\"plugins\":[{\"package\":\"$PWD/opencode-plugin\",\"options\":{\"superbadgerURL\":\"http://127.0.0.1${superbadgerAddr}\"}}],\"compaction\":{\"keep\":{\"tokens\":6000}}}"
           '';
 
           db-reset = pkgs.writeShellScriptBin "db-reset" ''
@@ -44,7 +46,7 @@
           run-opencode = pkgs.writeShellScriptBin "run-opencode" ''
             set -e
             ${opencodeEnv}
-            exec opencode serve --port ${opencodePort} --hostname 127.0.0.1
+            exec ${opencode}/bin/opencode serve --port ${opencodePort} --hostname 127.0.0.1
           '';
 
           # foreground, hot-reload via air (see server/.air.toml)
@@ -71,7 +73,7 @@
             echo "starting opencode + superbadger in background (logs in $data_dir/logs)"
 
             (${opencodeEnv}
-             opencode serve --port ${opencodePort} --hostname 127.0.0.1 > "$data_dir/logs/opencode.log" 2>&1 &)
+             ${opencode}/bin/opencode serve --port ${opencodePort} --hostname 127.0.0.1 > "$data_dir/logs/opencode.log" 2>&1 &)
             sleep 1
             (cd "${repoRoot}/server" && \
               SUPERBADGER_LISTEN_ADDR="${superbadgerAddr}" \
@@ -195,10 +197,15 @@
         {
           packages.default = superbadger-tui;
           packages.superbadger = superbadger-tui;
+          # The opencode super-badger is built and tested against; the NixOS
+          # module's default services.superbadger.opencode.package.
+          packages.opencode = opencode;
 
           devShells.default = pkgs.mkShell {
             buildInputs = [
               pkgs.go
+              opencode
+              pkgs.bun # opencode-plugin tests: bun test opencode-plugin
               pkgs.gopls
               pkgs.air
               pkgs.sqlite

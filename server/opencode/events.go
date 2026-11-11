@@ -2,228 +2,187 @@ package opencode
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"log"
-	"strings"
+	"slices"
 	"sync"
 	"time"
 )
 
-// Event is an opencode SSE event, kept generic (raw Properties) rather than
-// modeled per-type — super-badger just forwards these to a station's
-// WebSocket client, which cares about `type` and `properties.part`/`info`
-// (message.part.updated / message.updated), not the full event catalogue.
-type Event struct {
-	ID         string          `json:"id,omitempty"`
-	Type       string          `json:"type"`
-	Properties json.RawMessage `json:"properties"`
-}
-
-// SessionID extracts properties.sessionID, present on every session-scoped
-// event type we care about (message.updated, message.part.updated, ...).
-func (e Event) SessionID() string {
-	var p struct {
-		SessionID string `json:"sessionID"`
-	}
-	_ = json.Unmarshal(e.Properties, &p)
-	return p.SessionID
-}
-
-// historyLimit caps how many distinct message/part entities are kept per
-// session — enough to reconstruct many turns of transcript on reconnect, not
-// a full unbounded log. Keyed by session ID, so a Station reset (new session
-// ID) naturally starts empty rather than inheriting the old session's
-// history; ClearHistory additionally drops the old entry outright so it
-// doesn't just sit there unused.
+// EventBroker holds one long-lived subscription to opencode's global
+// /api/event stream, translates it into super-badger events (Translator) and
+// fans those out to per-session subscribers, so N station WebSockets share
+// one upstream connection.
 //
-// This counts structural entities (one slot per message, one per part), not
-// raw events: message.part.delta events (tens per second while a reply
-// streams) are folded into the part they target in place rather than each
-// taking their own slot — see mergeDelta. Counting raw events was the
-// original design, and it meant one sufficiently long streamed reply could
-// burn through the entire cap in delta events alone, evicting every earlier
-// turn's message.updated/message.part.updated entries — confirmed live as
-// "only the last reply is ever visible after a reconnect." It also meant
-// refreshing mid-generation could lose the in-progress reply entirely: if
-// its own message.part.updated (the entry deltas merge into) had already
-// been evicted by its own deltas, replay had nothing to merge them onto.
-const historyLimit = 500
-
-// EventBroker holds one long-lived subscription to opencode's global /event
-// SSE stream and fans events out to per-session subscribers, so N station
-// WebSocket connections share a single upstream connection to opencode
-// rather than each opening their own. It also keeps a small recent-events
-// cache per session so a client that navigates away and back (or a fresh
-// page load) can restore a bit of transcript instead of starting blank.
+// There is no transcript cache: opencode stores every session's messages,
+// and History pages through them (FromMessages), so history survives
+// restarts of either process. The only in-memory transcript state is text
+// still streaming, which History overlays so a client opening a station
+// mid-reply sees the reply so far.
 type EventBroker struct {
 	client *Client
 
-	mu           sync.Mutex
-	subs         map[string]map[chan Event]struct{} // sessionID -> subscriber channels
-	allSubs      map[chan Event]struct{}            // subscribers to every session's events, regardless of ID
-	history      map[string][]Event                 // sessionID -> recent events, capped at historyLimit
-	historyIndex map[string]map[string]int          // sessionID -> entity key -> index into history[sessionID]
+	mu      sync.Mutex
+	tr      *Translator
+	subs    map[string]map[chan Event]struct{} // sessionID -> subscriber channels
+	allSubs map[chan Event]struct{}
+	// connected counts successful stream connects; any after the first
+	// means events may have been missed, so subscribers get a resync.
+	connected int
+
+	// markerMu guards markers and orders compaction-marker deliveries
+	// (see compactionMarker).
+	markerMu sync.Mutex
+	markers  map[string]*markerState
+
+	limitsMu  sync.Mutex
+	limits    map[ModelRef]int
+	limitsAt  time.Time
+	limitsTTL time.Duration
 }
 
 func NewEventBroker(client *Client) *EventBroker {
 	return &EventBroker{
-		client:       client,
-		subs:         make(map[string]map[chan Event]struct{}),
-		allSubs:      make(map[chan Event]struct{}),
-		history:      make(map[string][]Event),
-		historyIndex: make(map[string]map[string]int),
+		client:    client,
+		tr:        NewTranslator(),
+		subs:      make(map[string]map[chan Event]struct{}),
+		allSubs:   make(map[chan Event]struct{}),
+		markers:   make(map[string]*markerState),
+		limitsTTL: 15 * time.Second,
 	}
 }
 
-// HistoryPage returns one page of sessionID's cached history, paged by
-// message rather than by raw event: the events belonging to the newest
-// limit messages strictly older than message `before` (or the newest limit
-// overall when before is ""), in their original order. A tool-heavy session
-// can cache several MB of part snapshots, so sending all of it on every
-// station open is what made restoring chat slow — clients now fetch the
-// tail first and pull older pages on scroll-up.
-//
-// cursor is the oldest message ID included (pass it back as before for the
-// next page); hasMore reports whether anything older is still cached. A
-// before that's no longer cached (evicted, or history cleared by a reset)
-// yields an empty page with hasMore false — eviction trims from the front,
-// so nothing older than it can still be there either.
-//
-// Unkeyed events (session.idle, permission.*, ...) are live state rather
-// than transcript, so only the first page carries them, and only those
-// recorded at or after its oldest message — older ones would just replay
-// long-stale state on top of the current one.
-func (b *EventBroker) HistoryPage(sessionID, before string, limit int) (events []Event, cursor string, hasMore bool) {
+// Forget drops a session's translator state (deleted or replaced).
+func (b *EventBroker) Forget(sessionID string) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	h := b.history[sessionID]
+	b.tr.Forget(sessionID)
+	b.mu.Unlock()
+	b.markerMu.Lock()
+	delete(b.markers, sessionID)
+	b.markerMu.Unlock()
+}
 
-	// Message IDs in order of first appearance — counting part events too,
-	// so a part whose message.updated was evicted still lands on a page.
-	order := []string{}
-	pos := map[string]int{}
-	owner := make([]string, len(h))
-	for i, evt := range h {
-		id := eventMessageID(evt)
-		owner[i] = id
-		if id == "" {
-			continue
-		}
-		if _, seen := pos[id]; !seen {
-			pos[id] = len(order)
-			order = append(order, id)
-		}
+// History returns one page of sessionID's transcript as events, oldest
+// first: the newest limit messages when cursor is "", else the page cursor
+// (a previous call's next) points at. hasMore reports whether an older page
+// may exist.
+func (b *EventBroker) History(ctx context.Context, sessionID, cursor string, limit int) (events []Event, next string, hasMore bool, err error) {
+	page, err := b.client.Messages(ctx, sessionID, MessagesParams{Limit: limit, Cursor: cursor})
+	if err != nil {
+		return nil, "", false, err
 	}
+	msgs := slices.Clone(page.Messages)
+	slices.Reverse(msgs)
+	events = FromMessages(sessionID, msgs)
+	if cursor == "" {
+		// Text that hasn't finished streaming isn't stored yet.
+		b.mu.Lock()
+		streaming := b.tr.Streaming(sessionID)
+		b.mu.Unlock()
+		events = append(events, streaming...)
+	}
+	if events == nil {
+		events = []Event{}
+	}
+	hasMore = len(page.Messages) >= limit && page.Next != ""
+	if !hasMore {
+		page.Next = ""
+	}
+	return events, page.Next, hasMore, nil
+}
 
-	end := len(order)
-	if before != "" {
-		p, ok := pos[before]
-		if !ok {
-			return []Event{}, "", false
+// Usage is sessionID's current context usage: from the live stream when a
+// step has finished since super-badger started, else from stored messages.
+func (b *EventBroker) Usage(ctx context.Context, sessionID string) (*Event, error) {
+	b.mu.Lock()
+	u, model := b.tr.Usage(sessionID)
+	b.mu.Unlock()
+	if u == nil {
+		sess, err := b.client.GetSession(ctx, sessionID)
+		if err != nil {
+			return nil, err
 		}
-		end = p
-	}
-	start := max(end-limit, 0)
-	if start >= end {
-		return []Event{}, "", false
-	}
-	want := make(map[string]bool, end-start)
-	for _, id := range order[start:end] {
-		want[id] = true
-	}
-
-	firstIdx := -1
-	out := []Event{}
-	for i, evt := range h {
-		if id := owner[i]; id != "" {
-			if want[id] {
-				if firstIdx < 0 {
-					firstIdx = i
+		page, err := b.client.Messages(ctx, sessionID, MessagesParams{Limit: 10})
+		if err != nil {
+			return nil, err
+		}
+		u = LastUsage(sessionID, page.Messages, sess.Cost)
+		if u == nil {
+			c := sess.Cost
+			u = &Event{Type: "usage", SessionID: sessionID, Cost: &c}
+		}
+		if model.ID == "" {
+			for _, m := range page.Messages {
+				if m.Model != nil {
+					model = *m.Model
+					break
 				}
-				out = append(out, evt)
 			}
-			continue
-		}
-		if before == "" && firstIdx >= 0 {
-			out = append(out, evt)
 		}
 	}
-	return out, order[start], start > 0
+	u.ContextLimit = b.ContextLimit(ctx, model)
+	return u, nil
 }
 
-// eventMessageID is the message an event belongs to: info.id for
-// message.updated, part.messageID for message.part.updated, "" otherwise.
-func eventMessageID(evt Event) string {
-	switch evt.Type {
-	case "message.updated":
-		var p struct {
-			Info struct {
-				ID string `json:"id"`
-			} `json:"info"`
-		}
-		_ = json.Unmarshal(evt.Properties, &p)
-		return p.Info.ID
-	case "message.part.updated":
-		var p struct {
-			Part struct {
-				MessageID string `json:"messageID"`
-			} `json:"part"`
-		}
-		_ = json.Unmarshal(evt.Properties, &p)
-		return p.Part.MessageID
-	default:
-		return ""
+// ContextLimit is the context window opencode uses for model (cached
+// briefly), or 0 when unknown.
+func (b *EventBroker) ContextLimit(ctx context.Context, model ModelRef) int {
+	if model.ID == "" {
+		return 0
 	}
-}
-
-// ClearHistory drops any cached events for sessionID — called when a Station
-// replaces a session (manual reset or auto-recovery) so the old session's
-// transcript doesn't linger in memory once nothing references it, and can
-// never be served as if it were still current.
-func (b *EventBroker) ClearHistory(sessionID string) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	delete(b.history, sessionID)
-	delete(b.historyIndex, sessionID)
+	b.limitsMu.Lock()
+	defer b.limitsMu.Unlock()
+	if b.limits == nil || time.Since(b.limitsAt) > b.limitsTTL {
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		if models, err := b.client.Models(ctx); err == nil {
+			b.limits = make(map[ModelRef]int, len(models))
+			for _, m := range models {
+				b.limits[ModelRef{ID: m.ID, ProviderID: m.ProviderID}] = m.Limit.Context
+			}
+			b.limitsAt = time.Now()
+		}
+	}
+	return b.limits[model]
 }
 
 // Run connects to opencode's event stream and dispatches events until ctx is
-// done, reconnecting with backoff on failure. Meant to run for the lifetime
-// of the process in its own goroutine (see cmd/superbadger-server/main.go).
+// done, reconnecting with backoff on failure.
 func (b *EventBroker) Run(ctx context.Context) {
 	backoff := time.Second
 	for {
+		start := time.Now()
+		err := b.connectOnce(ctx)
+		if ctx.Err() != nil {
+			return
+		}
+		if time.Since(start) > time.Minute {
+			backoff = time.Second
+		}
+		log.Printf("opencode event stream: %v (retrying in %s)", err, backoff)
 		select {
 		case <-ctx.Done():
 			return
-		default:
+		case <-time.After(backoff):
 		}
-
-		if err := b.connectOnce(ctx); err != nil {
-			log.Printf("opencode event stream: %v (retrying in %s)", err, backoff)
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(backoff):
-			}
-			if backoff < 30*time.Second {
-				backoff *= 2
-			}
-			continue
+		if backoff < 30*time.Second {
+			backoff *= 2
 		}
-		backoff = time.Second
 	}
 }
 
-// heartbeatTimeout bounds how long connectOnce tolerates silence from
-// opencode before treating the connection as dead. opencode sends its own
-// "server.heartbeat" events on this stream specifically so a consumer can
-// detect this; without this watchdog, an already-open TCP connection to a
-// killed/restarted opencode process can sit forever waiting on a read that
-// will never return (confirmed live: killing and restarting opencode left a
-// stale broker connection that silently never reconnected).
+// heartbeatTimeout bounds how long connectOnce tolerates silence before
+// treating the connection as dead. opencode sends ": heartbeat" comment
+// lines on this stream; without the watchdog an open TCP connection to a
+// killed opencode can wait on a read forever.
 const heartbeatTimeout = 45 * time.Second
+
+// maxLineBytes caps one SSE line. A frame past it (a huge tool result) is
+// dropped, not the connection.
+const maxLineBytes = 32 << 20
 
 func (b *EventBroker) connectOnce(parentCtx context.Context) error {
 	ctx, cancel := context.WithCancel(parentCtx)
@@ -235,218 +194,237 @@ func (b *EventBroker) connectOnce(parentCtx context.Context) error {
 	}
 	defer resp.Body.Close()
 
+	b.mu.Lock()
+	b.connected++
+	reconnect := b.connected > 1
+	b.mu.Unlock()
+	if reconnect {
+		b.resync()
+	}
+
 	watchdog := time.NewTimer(heartbeatTimeout)
 	defer watchdog.Stop()
+	timedOut := make(chan struct{})
 	go func() {
 		select {
 		case <-watchdog.C:
-			cancel() // unblocks the scanner's read with a context error
+			close(timedOut)
+			cancel() // unblocks the read
 		case <-ctx.Done():
 		}
 	}()
 
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		if !watchdog.Stop() {
-			<-watchdog.C
-		}
-		watchdog.Reset(heartbeatTimeout)
-
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data:") {
-			continue
-		}
-		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if payload == "" {
-			continue
-		}
-		var evt Event
-		if err := json.Unmarshal([]byte(payload), &evt); err != nil {
-			continue
-		}
-		b.dispatch(evt)
+	err = readSSE(resp.Body, func() { watchdog.Reset(heartbeatTimeout) }, b.handleFrame)
+	select {
+	case <-timedOut:
+		return context.DeadlineExceeded
+	default:
 	}
-	return scanner.Err()
+	return err
 }
 
-func (b *EventBroker) dispatch(evt Event) {
-	sessionID := evt.SessionID()
-	if sessionID == "" {
+// readSSE reads server-sent events from r, calling activity on every line
+// (comments included) and frame with each event's data.
+func readSSE(r io.Reader, activity func(), frame func([]byte)) error {
+	br := bufio.NewReaderSize(r, 64*1024)
+	var line, data []byte
+	tooLong := false
+	for {
+		line = line[:0]
+		tooLong = false
+		var err error
+		for {
+			var frag []byte
+			frag, err = br.ReadSlice('\n')
+			if len(line)+len(frag) <= maxLineBytes {
+				line = append(line, frag...)
+			} else {
+				tooLong = true
+			}
+			if err != bufio.ErrBufferFull {
+				break
+			}
+			activity()
+		}
+		if err != nil {
+			return err
+		}
+		activity()
+		line = bytes.TrimRight(line, "\r\n")
+		switch {
+		case tooLong:
+			log.Printf("opencode event stream: dropped an event line over %d bytes", maxLineBytes)
+			data = nil
+		case len(line) == 0: // end of frame
+			if len(data) > 0 {
+				frame(data)
+			}
+			data = data[:0]
+		case line[0] == ':': // comment: ": heartbeat"
+		case bytes.HasPrefix(line, []byte("data:")):
+			if len(data) > 0 {
+				data = append(data, '\n')
+			}
+			data = append(data, bytes.TrimPrefix(line[5:], []byte(" "))...)
+		}
+	}
+}
+
+func (b *EventBroker) handleFrame(payload []byte) {
+	var env Envelope
+	if err := json.Unmarshal(payload, &env); err != nil {
 		return
 	}
+	b.Dispatch(env)
+}
+
+// Dispatch translates one opencode event and delivers the result.
+func (b *EventBroker) Dispatch(env Envelope) {
+	b.mu.Lock()
+	events := b.tr.Translate(env)
+	var model ModelRef
+	if len(events) > 0 {
+		_, model = b.tr.Usage(events[0].SessionID)
+	}
+	b.mu.Unlock()
+
+	for _, e := range events {
+		switch e.Type {
+		case "usage":
+			e.ContextLimit = b.ContextLimit(context.Background(), model)
+		case "compaction":
+			// The compaction's transcript marker comes from its stored
+			// message, so live and history markers share an ID.
+			since := b.markCompaction(e.SessionID, e.Phase, env.Created)
+			go b.compactionMarker(e.SessionID, since)
+		}
+		b.deliver(e)
+	}
+}
+
+// markerState tracks the compaction a session is in, so the only marker
+// delivered live is that compaction's.
+type markerState struct {
+	// since is when the current compaction started (opencode's clock, ms),
+	// 0 if its start wasn't seen.
+	since int64
+	// finished holds compaction messages already delivered as completed or
+	// failed, so a slow "running" fetch can't land after them.
+	finished map[string]bool
+}
+
+// markerSlack allows for the compaction message being stored a little
+// before its started event is stamped.
+const markerSlack = 1000 // ms
+
+// markerFallbackAge bounds how old a compaction whose start wasn't seen
+// (super-badger started mid-compaction) may be and still get a live marker.
+const markerFallbackAge = 15 * 60 * 1000 // ms
+
+// markCompaction records a compaction event for sessionID and returns the
+// earliest creation time the compaction message its marker shows may have.
+func (b *EventBroker) markCompaction(sessionID, phase string, created int64) (since int64) {
+	b.markerMu.Lock()
+	defer b.markerMu.Unlock()
+	m := b.markers[sessionID]
+	if m == nil {
+		m = &markerState{finished: map[string]bool{}}
+		b.markers[sessionID] = m
+	}
+	if phase == "started" {
+		m.since = created
+	}
+	since = m.since
+	if since == 0 {
+		since = created - markerFallbackAge
+	}
+	return since - markerSlack
+}
+
+// compactionMarker delivers the transcript marker of sessionID's current
+// compaction: its newest stored compaction message, unless that is an
+// older one (the current one isn't stored yet). An older compaction must
+// not go out live: a client that hasn't paged back that far appends it at
+// the bottom of the transcript, where it stays.
+func (b *EventBroker) compactionMarker(sessionID string, since int64) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	page, err := b.client.Messages(ctx, sessionID, MessagesParams{Limit: 1, Type: "compaction"})
+	if err != nil || len(page.Messages) == 0 {
+		return
+	}
+	m := page.Messages[0]
+	if m.Time.Created < since {
+		return
+	}
+	b.markerMu.Lock()
+	defer b.markerMu.Unlock()
+	st := b.markers[sessionID]
+	if st == nil {
+		return // session forgotten meanwhile
+	}
+	if m.Status == "running" {
+		if st.finished[m.ID] {
+			return // stale: this compaction's outcome already went out
+		}
+	} else {
+		st.finished[m.ID] = true
+	}
+	for _, e := range FromMessages(sessionID, []Message{m}) {
+		b.deliver(e)
+	}
+}
+
+// Publish delivers a server-made event to its session's subscribers.
+func (b *EventBroker) Publish(e Event) { b.deliver(e) }
+
+func (b *EventBroker) deliver(e Event) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-
-	b.record(sessionID, evt)
-
-	for ch := range b.subs[sessionID] {
+	for ch := range b.subs[e.SessionID] {
 		select {
-		case ch <- evt:
+		case ch <- e:
 		default:
-			// Slow subscriber: drop rather than block the shared dispatcher
-			// (and every other station's stream) on one stuck client.
+			// Slow subscriber: drop rather than block every station's
+			// stream on one stuck client. Clients rebuild from history on
+			// reconnect.
 		}
 	}
 	for ch := range b.allSubs {
 		select {
-		case ch <- evt:
+		case ch <- e:
 		default:
 		}
 	}
 }
 
-// record folds evt into sessionID's history. message.updated and
-// message.part.updated occupy one slot each, keyed by their own message/part
-// ID and overwritten in place on repeat updates (a tool part alone can
-// update several times as it runs); message.part.delta is merged into the
-// part slot it targets rather than taking a slot of its own — see
-// historyLimit's doc comment for why. mu must already be held.
-func (b *EventBroker) record(sessionID string, evt Event) {
-	if evt.Type == "message.part.delta" {
-		b.mergeDelta(sessionID, evt)
-		return
-	}
-
-	// session.error is a one-off notification, not conversation state — if
-	// it were cached, every later History() replay (e.g. a client
-	// reopening the station or reconnecting) would re-deliver the same
-	// stale error and re-trigger the client's error banner indefinitely,
-	// even long after the client dismissed it and the underlying problem
-	// (if any) passed. Live subscribers still see it via dispatch; it's
-	// only excluded from the replay cache.
-	if evt.Type == "session.error" {
-		return
-	}
-
-	key, keyed := historyKey(evt)
-	if keyed {
-		if idx, exists := b.historyIndex[sessionID][key]; exists {
-			b.history[sessionID][idx] = evt
-			return
+// resync tells every session subscriber that events may have been missed
+// while the opencode stream was down.
+func (b *EventBroker) resync() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	// Prompt texts and tool state from before the gap may be stale.
+	b.tr = NewTranslator()
+	for sid, chans := range b.subs {
+		for ch := range chans {
+			select {
+			case ch <- Event{Type: "resync", SessionID: sid}:
+			default:
+			}
 		}
 	}
-	b.appendHistory(sessionID, evt)
-	if keyed {
-		if b.historyIndex[sessionID] == nil {
-			b.historyIndex[sessionID] = make(map[string]int)
-		}
-		b.historyIndex[sessionID][key] = len(b.history[sessionID]) - 1
-	}
-}
-
-// historyKey identifies the entity a structural event belongs to, so a later
-// update to the same message/part replaces its history slot instead of
-// growing it. Other event types (session.*, permission.*, ...) have no
-// natural single owner to overwrite and are just appended as-is.
-func historyKey(evt Event) (string, bool) {
-	switch evt.Type {
-	case "message.updated":
-		var p struct {
-			Info struct {
-				ID string `json:"id"`
-			} `json:"info"`
-		}
-		if err := json.Unmarshal(evt.Properties, &p); err != nil || p.Info.ID == "" {
-			return "", false
-		}
-		return "message:" + p.Info.ID, true
-	case "message.part.updated":
-		var p struct {
-			Part struct {
-				ID string `json:"id"`
-			} `json:"part"`
-		}
-		if err := json.Unmarshal(evt.Properties, &p); err != nil || p.Part.ID == "" {
-			return "", false
-		}
-		return "part:" + p.Part.ID, true
-	default:
-		return "", false
-	}
-}
-
-// mergeDelta appends a streamed text delta onto the message.part.updated
-// entry already recorded for its part, rather than storing the delta as its
-// own history entry — a streaming reply can emit hundreds of these per part,
-// and this is what keeps the ring buffer bounded by actual conversation
-// structure instead of by token count. If the target part isn't in history
-// (evicted, or history was cleared mid-stream), the delta is simply dropped
-// from history — the live subscriber still gets it; only reconnect replay
-// would miss it, and there's nothing sensible to merge it onto in that case.
-func (b *EventBroker) mergeDelta(sessionID string, evt Event) {
-	var d struct {
-		PartID string `json:"partID"`
-		Field  string `json:"field"`
-		Delta  string `json:"delta"`
-	}
-	if err := json.Unmarshal(evt.Properties, &d); err != nil || d.PartID == "" || d.Field != "text" {
-		return
-	}
-	idx, ok := b.historyIndex[sessionID]["part:"+d.PartID]
-	if !ok {
-		return
-	}
-
-	var props map[string]json.RawMessage
-	if err := json.Unmarshal(b.history[sessionID][idx].Properties, &props); err != nil {
-		return
-	}
-	var part map[string]json.RawMessage
-	if err := json.Unmarshal(props["part"], &part); err != nil {
-		return
-	}
-	var text string
-	_ = json.Unmarshal(part["text"], &text)
-	text += d.Delta
-	textJSON, err := json.Marshal(text)
-	if err != nil {
-		return
-	}
-	part["text"] = textJSON
-	partJSON, err := json.Marshal(part)
-	if err != nil {
-		return
-	}
-	props["part"] = partJSON
-	propsJSON, err := json.Marshal(props)
-	if err != nil {
-		return
-	}
-
-	stored := b.history[sessionID][idx]
-	stored.Properties = propsJSON
-	b.history[sessionID][idx] = stored
-}
-
-// appendHistory adds evt to sessionID's history, trimming from the front and
-// rebuilding historyIndex (cheap — bounded by historyLimit) whenever that
-// trim would otherwise leave historyIndex pointing at stale slice positions.
-func (b *EventBroker) appendHistory(sessionID string, evt Event) {
-	h := append(b.history[sessionID], evt)
-	if len(h) > historyLimit {
-		h = h[len(h)-historyLimit:]
-		b.history[sessionID] = h
-		b.rebuildIndex(sessionID)
-		return
-	}
-	b.history[sessionID] = h
-}
-
-func (b *EventBroker) rebuildIndex(sessionID string) {
-	idx := make(map[string]int, len(b.history[sessionID]))
-	for i, evt := range b.history[sessionID] {
-		if key, ok := historyKey(evt); ok {
-			idx[key] = i
+	for ch := range b.allSubs {
+		select {
+		case ch <- Event{Type: "resync"}:
+		default:
 		}
 	}
-	b.historyIndex[sessionID] = idx
 }
 
 // Subscribe returns a channel of events for sessionID. The caller must call
-// the returned unsubscribe func when done (e.g. on WebSocket disconnect).
+// the returned unsubscribe func when done.
 func (b *EventBroker) Subscribe(sessionID string) (<-chan Event, func()) {
-	ch := make(chan Event, 32)
+	ch := make(chan Event, 256)
 	b.mu.Lock()
 	if b.subs[sessionID] == nil {
 		b.subs[sessionID] = make(map[chan Event]struct{})
@@ -454,34 +432,40 @@ func (b *EventBroker) Subscribe(sessionID string) (<-chan Event, func()) {
 	b.subs[sessionID][ch] = struct{}{}
 	b.mu.Unlock()
 
-	unsubscribe := func() {
-		b.mu.Lock()
-		delete(b.subs[sessionID], ch)
-		if len(b.subs[sessionID]) == 0 {
-			delete(b.subs, sessionID)
-		}
-		b.mu.Unlock()
-		close(ch)
+	var once sync.Once
+	return ch, func() {
+		once.Do(func() {
+			b.mu.Lock()
+			delete(b.subs[sessionID], ch)
+			if len(b.subs[sessionID]) == 0 {
+				delete(b.subs, sessionID)
+			}
+			b.mu.Unlock()
+		})
 	}
-	return ch, unsubscribe
 }
 
-// SubscribeAll returns a channel of every dispatched event regardless of
-// session — used for the cross-station notification feed (see
-// api.notificationsWS), which needs to know about session.idle/
-// permission.asked across every Station, not just one. The caller must call
-// the returned unsubscribe func when done.
+// SubscribeAll returns a channel of every session's events, for the
+// cross-station notification feed and auto mode.
 func (b *EventBroker) SubscribeAll() (<-chan Event, func()) {
-	ch := make(chan Event, 32)
+	ch := make(chan Event, 256)
 	b.mu.Lock()
 	b.allSubs[ch] = struct{}{}
 	b.mu.Unlock()
-
-	unsubscribe := func() {
-		b.mu.Lock()
-		delete(b.allSubs, ch)
-		b.mu.Unlock()
-		close(ch)
+	var once sync.Once
+	return ch, func() {
+		once.Do(func() {
+			b.mu.Lock()
+			delete(b.allSubs, ch)
+			b.mu.Unlock()
+		})
 	}
-	return ch, unsubscribe
+}
+
+// InvalidateLimits makes the next ContextLimit re-read opencode's models
+// (after an override changed).
+func (b *EventBroker) InvalidateLimits() {
+	b.limitsMu.Lock()
+	b.limitsAt = time.Time{}
+	b.limitsMu.Unlock()
 }

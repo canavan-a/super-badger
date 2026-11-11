@@ -117,7 +117,7 @@ func Clean(s string, max int) string {
 func prepare(title, body string) (string, string) {
 	title, body = Clean(title, maxTitle), Clean(body, maxBody)
 	if title == "" {
-		title = "superbadger"
+		title = "Super Galleon"
 	}
 	return title, body
 }
@@ -142,7 +142,7 @@ func (n *linuxSend) Notify(ctx context.Context, title, body string) error {
 	// Every value is its own argument (no shell), and "--" ends option parsing
 	// so a title starting with "-" can't be read as a flag.
 	out, err := n.e.run(ctx, "notify-send",
-		"--app-name=superbadger", "--urgency=normal", "--expire-time=8000", "--", title, body)
+		"--app-name=Super Galleon", "--urgency=normal", "--expire-time=8000", "--", title, body)
 	if err != nil {
 		return failure("notify-send", err, out)
 	}

@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"regexp"
 	"strings"
@@ -18,12 +21,13 @@ import (
 	"superbadger-tui/internal/chat"
 	"superbadger-tui/internal/config"
 	"superbadger-tui/internal/notify"
+	"superbadger-tui/internal/ws"
 )
 
 var ansi = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 func TestPaintKeepsBackgroundAfterResets(t *testing.T) {
-	s := NewStyles("burrow")
+	s := NewStyles("harbor")
 	out := s.Paint(s.Primary.Render("hi")+" plain\n"+s.Danger.Render("x"), 20, 3)
 	lines := strings.Split(out, "\n")
 	if len(lines) != 3 {
@@ -73,13 +77,13 @@ func TestFrameIsExactlyScreenSized(t *testing.T) {
 }
 
 func TestBatchedUserPartsShownAsSeparateMessages(t *testing.T) {
-	m := newChat(api.New("http://127.0.0.1:1", ""), NewStyles("burrow"), api.Station{ID: 1, Name: "alpha", Reachable: true}, 0, 1)
+	m := newChat(api.New("http://127.0.0.1:1", ""), NewStyles("harbor"), api.Station{ID: 1, Name: "alpha", Reachable: true}, 0, 1)
 	defer m.Close()
 	m.resize(70, 30)
 	for _, raw := range []string{
-		`{"type":"message.updated","properties":{"info":{"id":"u1","role":"user"}}}`,
-		`{"type":"message.part.updated","properties":{"part":{"id":"p1","messageID":"u1","type":"text","text":"first thing"}}}`,
-		`{"type":"message.part.updated","properties":{"part":{"id":"p2","messageID":"u1","type":"text","text":"second thing"}}}`,
+		`{"type":"msg","messageID":"u1","role":"user","done":true}`,
+		`{"type":"part","messageID":"u1","partID":"p1","kind":"text","text":"first thing"}`,
+		`{"type":"part","messageID":"u1","partID":"p2","kind":"text","text":"second thing"}`,
 	} {
 		e, _ := chat.ParseEvent([]byte(raw))
 		m.state.Apply(e)
@@ -94,15 +98,15 @@ func TestBatchedUserPartsShownAsSeparateMessages(t *testing.T) {
 }
 
 func TestUserAndModelTurnsLookDifferent(t *testing.T) {
-	st := NewStyles("burrow")
+	st := NewStyles("harbor")
 	m := newChat(api.New("http://127.0.0.1:1", ""), st, api.Station{ID: 1, Name: "alpha", Color: "#34C759", Reachable: true}, 0, 1)
 	defer m.Close()
 	m.resize(70, 30)
 	m.state.AddLocalUserTurn("u1", "how do I reverse a string in go?\nkeep it short")
 	for _, raw := range []string{
-		`{"type":"message.updated","properties":{"info":{"id":"a1","role":"assistant"}}}`,
-		`{"type":"message.part.updated","properties":{"part":{"id":"p1","messageID":"a1","type":"text","text":"Convert to runes, then swap:\n` + "```go" + `\nr := []rune(s)\n` + "```" + `"}}}`,
-		`{"type":"message.part.updated","properties":{"part":{"id":"t1","messageID":"a1","type":"tool","tool":"read","state":{"status":"completed","title":"main.go","output":"package main"}}}}`,
+		`{"type":"msg","messageID":"a1","role":"assistant"}`,
+		`{"type":"part","messageID":"a1","partID":"p1","kind":"text","text":"Convert to runes, then swap:\n` + "```go" + `\nr := []rune(s)\n` + "```" + `"}`,
+		`{"type":"part","messageID":"a1","partID":"t1","kind":"tool","tool":"read","status":"completed","input":{"filePath":"main.go"},"output":"package main"}`,
 	} {
 		e, _ := chat.ParseEvent([]byte(raw))
 		m.state.Apply(e)
@@ -210,7 +214,7 @@ func TestSplashHasNoNestedWindow(t *testing.T) {
 			t.Errorf("splash still contains %q", bad)
 		}
 	}
-	if !strings.Contains(plain, "press any key to burrow in") {
+	if !strings.Contains(plain, "press any key to set sail") {
 		t.Error("prompt line missing")
 	}
 	for i, l := range splashRows {
@@ -229,7 +233,7 @@ func TestSplashShowsFirstEvenWithoutAReachableServer(t *testing.T) {
 	// The station load fails, which would normally drop us on Settings.
 	a.Update(stationsMsg{err: fmt.Errorf("connection refused")})
 	plain := ansi.ReplaceAllString(a.View(), "")
-	if !strings.Contains(plain, "press any key to burrow in") {
+	if !strings.Contains(plain, "press any key to set sail") {
 		t.Fatalf("splash not shown while server is down:\n%s", plain)
 	}
 	if strings.Contains(plain, "Settings") {
@@ -253,7 +257,7 @@ func TestSplashShowsForAFreshUnconfiguredInstall(t *testing.T) {
 	}
 	a := New(cfg)
 	a.Update(tea.WindowSizeMsg{Width: 90, Height: 24})
-	if !strings.Contains(ansi.ReplaceAllString(a.View(), ""), "press any key to burrow in") {
+	if !strings.Contains(ansi.ReplaceAllString(a.View(), ""), "press any key to set sail") {
 		t.Fatal("splash missing on a fresh install")
 	}
 }
@@ -317,8 +321,8 @@ func TestSlashSettingsOpensSettings(t *testing.T) {
 	}
 }
 
-func TestSplashKeepsTheBadger(t *testing.T) {
-	// The badger is drawn in colored half-blocks; only page-colored ones are
+func TestSplashKeepsTheGalleon(t *testing.T) {
+	// The galleon is drawn in colored sextant cells; only page-colored ones are
 	// background. A wrong "blank" test once cropped the whole picture away.
 	pixels := 0
 	for y := 0; y < splashGap; y++ {
@@ -328,8 +332,8 @@ func TestSplashKeepsTheBadger(t *testing.T) {
 			}
 		}
 	}
-	if pixels < 250 {
-		t.Fatalf("only %d picture cells survived; the badger is missing", pixels)
+	if pixels < 120 { // the 22x12-cell galleon fills ~150 of its cells
+		t.Fatalf("only %d picture cells survived; the galleon is missing", pixels)
 	}
 	if splashH < 20 {
 		t.Fatalf("splash is only %d rows tall; the picture was cropped", splashH)
@@ -342,10 +346,10 @@ func TestSplashCursorBlinks(t *testing.T) {
 	last := len(splashGrid) - 1
 	on := plainRow(splashFrameRows(0)[last])
 	off := plainRow(splashFrameRows(blinkFrames)[last])
-	if !strings.Contains(on, "burrow in _") {
+	if !strings.Contains(on, "set sail _") {
 		t.Fatalf("cursor should show on frame 0: %q", on)
 	}
-	if strings.Contains(off, "_") || !strings.Contains(off, "burrow in") {
+	if strings.Contains(off, "_") || !strings.Contains(off, "set sail") {
 		t.Fatalf("cursor should be hidden (text kept) half a period later: %q", off)
 	}
 	if lipgloss.Width(on) != lipgloss.Width(off) {
@@ -423,7 +427,9 @@ func TestSplashTicksAdvanceAndStopWhenDismissed(t *testing.T) {
 	}
 }
 
-func TestBadgerEyeIsFoundAndOnlyItGlints(t *testing.T) {
+func TestGalleonTrimIsFoundAndOnlyItGlints(t *testing.T) {
+	// The galleon's gold trim is drawn in the art's accent cyan, which the
+	// splash treats as the "eye": the one part the shine makes glint.
 	eye, y0, y1 := 0, 99, -1
 	for y, row := range splashGrid {
 		if splashWordRow(y) {
@@ -436,11 +442,11 @@ func TestBadgerEyeIsFoundAndOnlyItGlints(t *testing.T) {
 			}
 		}
 	}
-	if eye < 8 || eye > 40 {
-		t.Fatalf("expected a small eye cluster, found %d cells", eye)
+	if eye < 3 || eye > 40 {
+		t.Fatalf("expected a small cluster of trim cells, found %d", eye)
 	}
 	if y0 < 0 || y1 >= splashGap {
-		t.Fatalf("eye should be in the badger rows (0-%d), got rows %d-%d", splashGap-1, y0, y1)
+		t.Fatalf("trim should be in the galleon rows (0-%d), got rows %d-%d", splashGap-1, y0, y1)
 	}
 	// Find a frame where the band is over the eye and check it is brighter,
 	// while every non-eye cell in the same rows is byte-identical.
@@ -633,38 +639,38 @@ func TestSplashCommandReplaysTheTitleScreen(t *testing.T) {
 // ---- themed title screen ----
 
 func TestBurrowSplashIsTheOriginalArt(t *testing.T) {
-	set := splashFor(themes["burrow"])
+	set := splashFor(themes["harbor"])
 	for y := range splashRows {
 		if set.rows[y] != splashRows[y] {
-			t.Fatalf("burrow row %d was altered", y)
+			t.Fatalf("harbor row %d was altered", y)
 		}
 	}
 }
 
 func TestEveryThemeRecolorsTheSplashWithoutChangingTheShape(t *testing.T) {
-	burrow := splashFor(themes["burrow"])
+	harbor := splashFor(themes["harbor"])
 	for name, th := range themes {
 		set := splashFor(th)
-		if len(set.rows) != len(burrow.rows) {
+		if len(set.rows) != len(harbor.rows) {
 			t.Fatalf("%s: row count changed", name)
 		}
 		for y := range set.rows {
-			if plainRow(set.rows[y]) != plainRow(burrow.rows[y]) {
+			if plainRow(set.rows[y]) != plainRow(harbor.rows[y]) {
 				t.Fatalf("%s row %d: recoloring changed the glyphs", name, y)
 			}
-			if lipgloss.Width(set.rows[y]) != splashW && lipgloss.Width(set.rows[y]) != lipgloss.Width(burrow.rows[y]) {
+			if lipgloss.Width(set.rows[y]) != splashW && lipgloss.Width(set.rows[y]) != lipgloss.Width(harbor.rows[y]) {
 				t.Fatalf("%s row %d changed width", name, y)
 			}
 		}
-		if name != "burrow" && strings.Join(set.rows, "") == strings.Join(burrow.rows, "") {
-			t.Errorf("%s: the splash still has the burrow colors", name)
+		if name != "harbor" && strings.Join(set.rows, "") == strings.Join(harbor.rows, "") {
+			t.Errorf("%s: the splash still has the harbor colors", name)
 		}
 	}
 }
 
 func TestSplashPageAndAccentMapToTheTheme(t *testing.T) {
 	for name, th := range themes {
-		if name == "burrow" {
+		if name == "harbor" {
 			continue
 		}
 		set := splashFor(th)
@@ -729,7 +735,7 @@ func TestSplashViewUsesTheChosenThemesBackground(t *testing.T) {
 		t.Fatal("the title screen should be painted on the ember page color")
 	}
 	if strings.Contains(view, "48;2;16;20;34") {
-		t.Fatal("the burrow navy leaked into the ember title screen")
+		t.Fatal("the harbor navy leaked into the ember title screen")
 	}
 	// Switching theme changes it.
 	cfg2 := config.Default()
@@ -1054,7 +1060,7 @@ func TestCompactingIsAlwaysVisible(t *testing.T) {
 		t.Fatalf("the transcript should show a compacting line:\n%s", plainRow(c.transcript()))
 	}
 	// Events arriving mid-compaction clear notices; the indicator must not go with them.
-	e, _ := chat.ParseEvent([]byte(`{"type":"message.part.updated","properties":{"part":{"id":"p","messageID":"m","type":"text","text":"x"}}}`))
+	e, _ := chat.ParseEvent([]byte(`{"type":"part","messageID":"m","partID":"p","kind":"text","text":"x"}`))
 	c.pending = append(c.pending, e)
 	c.flush()
 	if !c.compacting || !strings.Contains(plainRow(c.transcript()), "compacting") {
@@ -1120,21 +1126,126 @@ func TestCompactWhileCompactingDoesNotStartASecond(t *testing.T) {
 func TestStepLineShowsTheSameNumberAsTheTopBar(t *testing.T) {
 	_, c := busyChat(t)
 	c.state.Busy = false
-	// The top bar's ctx comes from the usage endpoint: input+output+cache.
+	// The top bar's ctx and the step line both read the step's tokens.ctx.
 	c.station.TopBarActions = []string{"tokens"}
-	c.usage = api.TokenUsage{Input: 1000, Output: 2000, Reasoning: 7500, CacheRead: 69000, CacheWrite: 600}
-	top := plainRow(c.topBar())
-	e, _ := chat.ParseEvent([]byte(`{"type":"message.part.updated","properties":{"part":{"id":"sf","messageID":"m","type":"step-finish","tokens":{"total":80100,"input":1000,"output":2000,"reasoning":7500,"cache":{"read":69000,"write":600}}}}}`))
-	c.state.Apply(e)
-	step := plainRow(c.transcript())
-	if !strings.Contains(top, "72.6k") {
-		t.Fatalf("top bar should show 72.6k ctx:\n%s", top)
+	tokens := `{"input":1000,"output":2000,"reasoning":7500,"cacheRead":69000,"cacheWrite":600,"ctx":72600}`
+	for _, raw := range []string{
+		`{"type":"part","messageID":"m","partID":"m/step","kind":"step","tokens":` + tokens + `}`,
+		`{"type":"usage","tokens":` + tokens + `,"cost":0.5,"contextLimit":128000}`,
+	} {
+		e, _ := chat.ParseEvent([]byte(raw))
+		c.pending = append(c.pending, e)
+	}
+	c.flush()
+	top, step := plainRow(c.topBar()), plainRow(c.transcript())
+	if !strings.Contains(top, "ctx 72.6k/128.0k") {
+		t.Fatalf("top bar should show ctx 72.6k/128.0k:\n%s", top)
 	}
 	if !strings.Contains(step, "72.6k context") || !strings.Contains(step, "7.5k thinking") {
 		t.Fatalf("the step line should show the same 72.6k plus the 7.5k thinking:\n%s", step)
 	}
-	if strings.Contains(step, "80.1k") {
-		t.Fatalf("the step line must not show the different provider total:\n%s", step)
+}
+
+func TestUsageEventsUpdateTheGaugeLive(t *testing.T) {
+	_, c := busyChat(t)
+	c.station.TopBarActions = []string{"tokens"}
+	// The REST snapshot on open.
+	c.Update(usageMsg{c.gen, api.TokenUsage{Tokens: &api.Tokens{Ctx: 7100}, ContextLimit: 12000}})
+	if top := plainRow(c.topBar()); !strings.Contains(top, "ctx 7.1k/12.0k") {
+		t.Fatalf("REST usage not shown:\n%s", top)
+	}
+	// A live event without contextLimit keeps the known limit.
+	e, _ := chat.ParseEvent([]byte(`{"type":"usage","tokens":{"ctx":9500},"cost":0.1}`))
+	c.pending = append(c.pending, e)
+	c.flush()
+	if top := plainRow(c.topBar()); !strings.Contains(top, "ctx 9.5k/12.0k") {
+		t.Fatalf("live usage not shown:\n%s", top)
+	}
+	// A compaction makes the old figure stale: the gauge hides until the
+	// next step reports.
+	e, _ = chat.ParseEvent([]byte(`{"type":"compaction","phase":"ended","reason":"auto"}`))
+	c.pending = append(c.pending, e)
+	c.flush()
+	if top := plainRow(c.topBar()); strings.Contains(top, "ctx ") {
+		t.Fatalf("stale ctx after compaction:\n%s", top)
+	}
+}
+
+func TestServerCompactionShowsTheCompactingLine(t *testing.T) {
+	_, c := busyChat(t)
+	c.state.Busy = false
+	e, _ := chat.ParseEvent([]byte(`{"type":"compaction","phase":"started","reason":"auto"}`))
+	c.pending = append(c.pending, e)
+	c.flush()
+	if !c.isCompacting() || !strings.Contains(plainRow(c.transcript()), "summarizing older") {
+		t.Fatal("a server-reported compaction should show the compacting line")
+	}
+	e, _ = chat.ParseEvent([]byte(`{"type":"compaction","phase":"ended","reason":"auto"}`))
+	c.pending = append(c.pending, e)
+	c.flush()
+	if c.isCompacting() || strings.Contains(plainRow(c.transcript()), "summarizing older") {
+		t.Fatal("the compacting line should go when it ends")
+	}
+	// History's compaction marker renders as one dim line, not a message.
+	c.state.Seed([]json.RawMessage{
+		json.RawMessage(`{"type":"msg","messageID":"c1","role":"assistant","done":true}`),
+		json.RawMessage(`{"type":"part","messageID":"c1","partID":"c1/compaction","kind":"compaction","status":"completed","reason":"auto"}`),
+	})
+	tr := plainRow(c.transcript())
+	if !strings.Contains(tr, "◆ Conversation compacted") || strings.Contains(tr, "◆ "+c.station.Name) {
+		t.Fatalf("compaction marker:\n%s", tr)
+	}
+}
+
+func TestResyncFrameRebuildsFromHistory(t *testing.T) {
+	_, c := busyChat(t)
+	// The page loaded on open, then a turn the gap will make stale.
+	c.Update(historyMsg{gen: c.gen, seq: c.histSeq, page: api.HistoryPage{Events: []json.RawMessage{
+		json.RawMessage(`{"type":"msg","messageID":"u0","role":"user","done":true}`),
+	}}})
+	c.state.AddLocalUserTurn("stale", "from before the gap")
+	c.state.PendingPermission = &chat.PendingPermission{ID: "r1", Permission: "bash"}
+	cmd := c.Update(wsMsg{c.gen, ws.Msg{Frame: json.RawMessage(`{"type":"resync"}`)}})
+	if cmd == nil {
+		t.Fatal("resync should fetch history and status")
+	}
+	if len(c.pending) != 0 {
+		t.Fatal("resync is a control frame, not a transcript event")
+	}
+	// The fetch's result replaces the transcript but keeps prompts.
+	c.Update(historyMsg{gen: c.gen, seq: c.histSeq, rebuild: true, page: api.HistoryPage{Events: []json.RawMessage{
+		json.RawMessage(`{"type":"msg","messageID":"u9","role":"user","done":true}`),
+		json.RawMessage(`{"type":"part","messageID":"u9","partID":"u9/text/0","kind":"text","text":"fresh"}`),
+	}}})
+	if c.state.Turn("stale") != nil || c.state.Turn("u9") == nil {
+		t.Fatalf("transcript not rebuilt: %d turns", len(c.state.Turns))
+	}
+	if c.state.PendingPermission == nil {
+		t.Fatal("a pending permission must survive the rebuild")
+	}
+	c.Update(runStatusMsg{c.gen, "idle"})
+	if c.state.Busy {
+		t.Fatal("re-fetched status should drive busy")
+	}
+}
+
+func TestMultiQuestionAnswersAreSentTogether(t *testing.T) {
+	_, c := busyChat(t)
+	e, _ := chat.ParseEvent([]byte(`{"type":"question.asked","id":"q1","questions":[
+		{"key":"lang","question":"Language?","header":"Lang","options":[{"label":"Go","value":"go"},{"label":"Rust","value":"rust"}]},
+		{"key":"why","question":"Why?","header":"Why","options":[{"label":"speed"}]}]}`))
+	c.state.Apply(e)
+	q := c.state.PendingQuestion
+	c.answerQuestion(q, []string{"Go"})
+	if c.state.PendingQuestion == nil || q.Key != "why" || q.Index() != 1 {
+		t.Fatalf("should move on to the second question: %+v", q)
+	}
+	if !strings.Contains(plainRow(c.bottom()), "(2/2)") {
+		t.Fatalf("progress not shown:\n%s", plainRow(c.bottom()))
+	}
+	c.answerQuestion(q, []string{"speed"})
+	if c.state.PendingQuestion != nil {
+		t.Fatal("answering the last question should close the prompt")
 	}
 }
 
@@ -1263,11 +1374,11 @@ func TestWindowFrameTopEdgeIsAContinuousBorderWithNoDots(t *testing.T) {
 		if !strings.HasPrefix(top, "╭─") || !strings.HasSuffix(top, "─╮") {
 			t.Fatalf("width %d: the border should run right up to both corners: %q", w, top)
 		}
-		if !strings.Contains(top, " superbadger ") {
+		if !strings.Contains(top, " super galleon ") {
 			t.Fatalf("width %d: the title is missing: %q", w, top)
 		}
 		// Everything except the title and its two spaces is the border line.
-		rest := strings.Replace(top, " superbadger ", "", 1)
+		rest := strings.Replace(top, " super galleon ", "", 1)
 		if strings.Trim(rest, "╭╮─") != "" {
 			t.Fatalf("width %d: something other than border line in the top edge: %q", w, top)
 		}
@@ -1479,7 +1590,7 @@ func TestAFailingSendIsReportedOnceThenStops(t *testing.T) {
 func TestSettingsShowsAvailabilityAndTheTestButtonReportsBothOutcomes(t *testing.T) {
 	cfg := config.Default()
 	f := &fakeDesk{}
-	m := newSettings(&cfg, api.New("http://127.0.0.1:1", ""), NewStyles("burrow"), f, nil)
+	m := newSettings(&cfg, api.New("http://127.0.0.1:1", ""), NewStyles("harbor"), f, nil)
 	if !strings.Contains(m.form.View(m.st), "via fake-send") {
 		t.Fatalf("settings should say which tool is used:\n%s", m.form.View(m.st))
 	}
@@ -1509,7 +1620,7 @@ func TestSettingsShowsAvailabilityAndTheTestButtonReportsBothOutcomes(t *testing
 	}
 
 	// With no notifier the switch says why, and the test button reports it.
-	un := newSettings(&cfg, api.New("http://127.0.0.1:1", ""), NewStyles("burrow"), nil, &notify.Unavailable{Reason: "notify-send was not found"})
+	un := newSettings(&cfg, api.New("http://127.0.0.1:1", ""), NewStyles("harbor"), nil, &notify.Unavailable{Reason: "notify-send was not found"})
 	if !strings.Contains(un.form.View(un.st), "unavailable") || !strings.Contains(un.form.View(un.st), "notify-send was not found") {
 		t.Fatalf("settings should explain the missing tool:\n%s", un.form.View(un.st))
 	}
@@ -1614,7 +1725,7 @@ func TestKillTopBarButton(t *testing.T) {
 // An older history page lands above the transcript without moving the lines
 // being read, and is requested only once the view reaches the top.
 func TestOlderHistoryPrependsAndKeepsViewAnchored(t *testing.T) {
-	st := NewStyles("burrow")
+	st := NewStyles("harbor")
 	m := newChat(api.New("http://127.0.0.1:1", ""), st, api.Station{ID: 1, Name: "alpha", Reachable: true}, 0, 1)
 	defer m.Close()
 	m.resize(70, 20)
@@ -1623,8 +1734,8 @@ func TestOlderHistoryPrependsAndKeepsViewAnchored(t *testing.T) {
 		var p api.HistoryPage
 		for i := from; i < to; i++ {
 			p.Events = append(p.Events,
-				[]byte(fmt.Sprintf(`{"type":"message.updated","properties":{"info":{"id":"m%02d","role":"assistant"}}}`, i)),
-				[]byte(fmt.Sprintf(`{"type":"message.part.updated","properties":{"part":{"id":"p%02d","messageID":"m%02d","type":"text","text":"line %02d"}}}`, i, i, i)))
+				[]byte(fmt.Sprintf(`{"type":"msg","messageID":"m%02d","role":"assistant","done":true}`, i)),
+				[]byte(fmt.Sprintf(`{"type":"part","messageID":"m%02d","partID":"p%02d","kind":"text","text":"line %02d"}`, i, i, i)))
 		}
 		p.Cursor = fmt.Sprintf("m%02d", from)
 		p.HasMore = from > 0
@@ -1662,7 +1773,7 @@ func TestOlderHistoryPrependsAndKeepsViewAnchored(t *testing.T) {
 	}
 }
 
-func TestDiggingLineOnlyWhileThinking(t *testing.T) {
+func TestSailingLineOnlyWhileThinking(t *testing.T) {
 	reply := func(done bool, parts ...*chat.Part) *chat.Turn {
 		t := &chat.Turn{Role: "assistant", Done: done, Parts: map[string]*chat.Part{}}
 		for _, p := range parts {
@@ -1674,6 +1785,7 @@ func TestDiggingLineOnlyWhileThinking(t *testing.T) {
 	think := &chat.Part{Kind: chat.KindReasoning, ID: "r"}
 	text := &chat.Part{Kind: chat.KindText, ID: "x"}
 	tool := &chat.Part{Kind: chat.KindTool, ID: "t", Status: "running"}
+	step := &chat.Part{Kind: chat.KindStepFinish, ID: "s"}
 	user := &chat.Turn{Role: "user"}
 	cases := []struct {
 		name  string
@@ -1683,43 +1795,17 @@ func TestDiggingLineOnlyWhileThinking(t *testing.T) {
 	}{
 		{"sent, nothing back yet", []*chat.Turn{user}, true, true},
 		{"thinking", []*chat.Turn{user, reply(false, think)}, true, true},
-		{"thinking, reopened (not busy)", []*chat.Turn{user, reply(false, think)}, false, true},
+		// Busy comes from the server's status events (sent on connect too),
+		// so an unfinished turn alone no longer means a reply is running.
+		{"unfinished turn, not busy", []*chat.Turn{user, reply(false, think)}, false, false},
 		{"text output", []*chat.Turn{user, reply(false, think, text)}, true, false},
 		{"tool call hanging", []*chat.Turn{user, reply(false, think, tool)}, true, false},
+		{"step done, next not started", []*chat.Turn{user, reply(true, tool, step)}, true, true},
 		{"finished reply", []*chat.Turn{user, reply(true, think)}, false, false},
 		{"idle", []*chat.Turn{user}, false, false},
 	}
 	for _, c := range cases {
 		if got := thinking(c.turns, c.busy); got != c.want {
-			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
-		}
-	}
-}
-
-func TestAutoCompactingDetection(t *testing.T) {
-	prompt := &chat.Turn{Role: "user", PartOrder: []string{"p"}, Parts: map[string]*chat.Part{
-		"p": {Kind: chat.KindText, ID: "p", Text: "hello"},
-	}}
-	empty := &chat.Turn{Role: "user", Parts: map[string]*chat.Part{}}
-	reply := &chat.Turn{Role: "assistant", Parts: map[string]*chat.Part{}}
-	done := &chat.Turn{Role: "assistant", Done: true, Parts: map[string]*chat.Part{}}
-	started := &chat.Turn{Role: "assistant", PartOrder: []string{"r"}, Parts: map[string]*chat.Part{
-		"r": {Kind: chat.KindReasoning, ID: "r"},
-	}}
-	cases := []struct {
-		name  string
-		turns []*chat.Turn
-		want  bool
-	}{
-		{"empty pair in flight", []*chat.Turn{prompt, done, empty, reply}, true},
-		{"real prompt, reply not started", []*chat.Turn{prompt, reply}, false},
-		{"empty pair finished", []*chat.Turn{empty, done}, false},
-		{"empty prompt, reply streaming", []*chat.Turn{empty, started}, true},
-		{"real prompt, reply streaming", []*chat.Turn{prompt, started}, false},
-		{"just sent", []*chat.Turn{empty}, false},
-	}
-	for _, c := range cases {
-		if got := autoCompacting(c.turns); got != c.want {
 			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
 		}
 	}
@@ -1739,14 +1825,14 @@ func TestLongBashCommandsStayInsideTheFrame(t *testing.T) {
 	}
 	for name, cmd := range commands {
 		for _, asking := range []bool{false, true} {
-			m := newChat(api.New("http://127.0.0.1:1", ""), NewStyles("burrow"), api.Station{ID: 1, Name: "a", Reachable: true}, 0, 1)
+			m := newChat(api.New("http://127.0.0.1:1", ""), NewStyles("harbor"), api.Station{ID: 1, Name: "a", Reachable: true}, 0, 1)
 			m.resize(w, h)
 			m.showTools = true
 			in, _ := json.Marshal(map[string]any{"command": cmd})
 			out, _ := json.Marshal(cmd)
 			for _, raw := range []string{
-				`{"type":"message.updated","properties":{"info":{"id":"a1","role":"assistant"}}}`,
-				`{"type":"message.part.updated","properties":{"part":{"id":"t1","messageID":"a1","type":"tool","tool":"bash","state":{"status":"running","title":"run it","input":` + string(in) + `,"output":` + string(out) + `}}}}`,
+				`{"type":"msg","messageID":"a1","role":"assistant"}`,
+				`{"type":"part","messageID":"a1","partID":"t1","kind":"tool","tool":"bash","status":"running","input":` + string(in) + `,"output":` + string(out) + `}`,
 			} {
 				e, _ := chat.ParseEvent([]byte(raw))
 				m.state.Apply(e)
@@ -1774,7 +1860,7 @@ func TestServerQueueFrameIsShownAndClickRemovesIt(t *testing.T) {
 	if !c.applyQueueFrame([]byte(`{"type":"queue","items":[{"id":7,"text":"first follow-up"},{"id":9,"text":"second follow-up"}]}`)) {
 		t.Fatal("queue frame not recognised")
 	}
-	if c.applyQueueFrame([]byte(`{"type":"message.updated","properties":{}}`)) {
+	if c.applyQueueFrame([]byte(`{"type":"msg","messageID":"m"}`)) {
 		t.Fatal("non-queue frames must fall through to the event stream")
 	}
 	view := ansi.ReplaceAllString(c.View(), "")
@@ -1836,7 +1922,7 @@ func TestModeLineUnderChat(t *testing.T) {
 		auto bool
 		want string
 	}{{false, "normal mode"}, {true, "auto mode"}} {
-		m := newChat(api.New("http://127.0.0.1:1", ""), NewStyles("burrow"), api.Station{ID: 1, Name: "alpha", Reachable: true, AutoMode: tc.auto}, 0, 1)
+		m := newChat(api.New("http://127.0.0.1:1", ""), NewStyles("harbor"), api.Station{ID: 1, Name: "alpha", Reachable: true, AutoMode: tc.auto}, 0, 1)
 		m.resize(70, 30)
 		lines := strings.Split(ansi.ReplaceAllString(m.View(), ""), "\n")
 		last := lines[len(lines)-1]
@@ -1844,5 +1930,108 @@ func TestModeLineUnderChat(t *testing.T) {
 		if !strings.Contains(last, tc.want) {
 			t.Errorf("auto=%v: last line %q, want it to say %q", tc.auto, last, tc.want)
 		}
+	}
+}
+
+func TestStationSettingsShowsAndSetsTheModelContextLimit(t *testing.T) {
+	var put map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/limits" && r.Method == "PUT":
+			b, _ := io.ReadAll(r.Body)
+			json.Unmarshal(b, &put)
+			w.WriteHeader(204)
+		case r.URL.Path == "/limits":
+			w.Write([]byte(`[{"provider_id":"local","model_id":"qwen","name":"Qwen","context":32768,"output":4096,"detected":32768,"override":null,"source":"detected"}]`))
+		default:
+			w.Write([]byte(`[]`))
+		}
+	}))
+	defer srv.Close()
+	st := NewStyles("harbor")
+	m := newStationSettings(api.New(srv.URL, ""), st, api.Station{ID: 1, Name: "a", ProviderID: "local", ModelID: "qwen", Color: "#34C759"})
+	m.resize(140, 40)
+	m.Update(m.loadLimit()())
+	view := ansi.ReplaceAllString(m.View(), "")
+	for _, want := range []string{"every station on local/qwen", "in use 32.8k · detected", "Context override"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("missing %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "Clear override") {
+		t.Fatal("nothing to clear without an override")
+	}
+	// Type an override into the context field and commit it.
+	for m.form.fields[m.form.cursor].key != "lim:context" {
+		m.form.move(1)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m.form.ti.SetValue("16k")
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("committing the override should save it")
+	}
+	m.Update(cmd())
+	if put["context"] != float64(16000) || put["output"] != nil || put["provider_id"] != "local" {
+		t.Fatalf("put = %v", put)
+	}
+	if !strings.Contains(m.msg, "every station") {
+		t.Fatalf("msg = %q", m.msg)
+	}
+	// A bad value is refused without a request.
+	put = nil
+	m.form.set("lim:context", func(f *field) { f.value = "lots" })
+	if m.saveLimit() != nil || put != nil || m.err == "" {
+		t.Fatalf("bad value: err=%q", m.err)
+	}
+}
+
+func TestStaleOlderPageAfterRebuildIsDropped(t *testing.T) {
+	_, c := busyChat(t)
+	c.Update(historyMsg{gen: c.gen, seq: c.histSeq, page: api.HistoryPage{Cursor: "deep", HasMore: true, Events: []json.RawMessage{
+		json.RawMessage(`{"type":"msg","messageID":"m5","role":"user","done":true}`),
+	}}})
+	// An older-page fetch goes out, then a resync replaces the transcript
+	// before it returns.
+	staleSeq := c.histSeq
+	c.Update(wsMsg{c.gen, ws.Msg{Frame: json.RawMessage(`{"type":"resync"}`)}})
+	c.Update(historyMsg{gen: c.gen, seq: c.histSeq, rebuild: true, page: api.HistoryPage{Cursor: "c9", HasMore: true, Events: []json.RawMessage{
+		json.RawMessage(`{"type":"msg","messageID":"m9","role":"user","done":true}`),
+	}}})
+	c.Update(historyMsg{gen: c.gen, seq: staleSeq, older: true, page: api.HistoryPage{Cursor: "c0", Events: []json.RawMessage{
+		json.RawMessage(`{"type":"msg","messageID":"m0","role":"user","done":true}`),
+	}}})
+	if c.state.Turn("m0") != nil {
+		t.Fatal("an older page fetched before the rebuild was spliced in")
+	}
+	if c.histCursor != "c9" {
+		t.Fatalf("cursor = %q, want the rebuild's c9", c.histCursor)
+	}
+}
+
+func TestSessionResetFrameClearsAndReloads(t *testing.T) {
+	_, c := busyChat(t)
+	c.Update(historyMsg{gen: c.gen, seq: c.histSeq, page: api.HistoryPage{Cursor: "old", HasMore: true, Events: []json.RawMessage{
+		json.RawMessage(`{"type":"msg","messageID":"o1","role":"user","done":true}`),
+	}}})
+	c.state.Usage.ContextLimit = 32768
+	seq := c.histSeq
+	cmd := c.Update(wsMsg{c.gen, ws.Msg{Frame: json.RawMessage(`{"type":"session_reset"}`)}})
+	if cmd == nil || c.histSeq == seq {
+		t.Fatal("session_reset should reload history")
+	}
+	if len(c.state.Turns) != 0 || c.histCursor != "" || c.histMore {
+		t.Fatalf("old session left over: turns=%d cursor=%q more=%v", len(c.state.Turns), c.histCursor, c.histMore)
+	}
+	if c.state.Usage.ContextLimit != 32768 {
+		t.Fatal("the context limit should survive a session reset")
+	}
+	// The new session's history: the carried-over context.
+	c.Update(historyMsg{gen: c.gen, seq: c.histSeq, rebuild: true, page: api.HistoryPage{Events: []json.RawMessage{
+		json.RawMessage(`{"type":"msg","messageID":"s1","role":"user","done":true}`),
+		json.RawMessage(`{"type":"part","messageID":"s1","partID":"s1/notice","kind":"notice","text":"Context carried over from the previous session"}`),
+	}}})
+	if c.state.Turn("s1") == nil {
+		t.Fatal("new session history not shown")
 	}
 }

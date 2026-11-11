@@ -1,9 +1,10 @@
-// Chat transcript state, built from opencode's own event stream (forwarded
-// verbatim by the server's per-station WebSocket — see
-// server/api/ws.go / server/opencode/events.go). This mirrors what the
-// opencode TUI itself shows: not just the final reply, but every part of the
-// harness's work — reasoning, tool calls (with live status), step
-// boundaries, file changes, etc. — rather than a single text bubble.
+// Chat transcript state, built from super-badger's own event schema (see
+// server/opencode/translate.go's Event). The server translates opencode's
+// live events and its stored messages into the same flat events, so live
+// and restored transcripts are built by this one reducer. This mirrors what
+// the opencode TUI itself shows: not just the final reply, but every part of
+// the harness's work — reasoning, tool calls (with live status), step
+// boundaries, compaction markers — rather than a single text bubble.
 //
 // react-native's global WebSocket works the same on native and web, so this
 // one hook drives both — no platform split needed (unlike SSE, which has no
@@ -39,30 +40,81 @@ export interface Turn {
 
 // A pending tool-permission request opencode is blocked on — until this is
 // answered (see useStationChat's replyPermission), that session's agent loop
-// is paused entirely. This is what "stuck on read" was: nothing was ever
-// showing this or letting the user respond to it.
+// is paused entirely.
 export interface PendingPermission {
   id: string;
   permission: string;
   patterns: string[];
 }
 
-// A pending question from opencode's separate AskUserQuestion-style tool —
-// structurally similar to a permission request (opencode pauses the agent
-// loop until answered) but a different mechanism/API entirely
-// (question.asked/question.replied, GET /question, POST /question/{id}/reply
-// — see server/opencode/client.go). A QuestionRequest can technically carry
-// more than one question at once; only the first is surfaced here, which
-// covers how this tool is actually used in practice.
-export interface PendingQuestion {
-  id: string;
+export interface QuestionOption {
+  label: string;
+  description: string;
+  value?: string;
+}
+
+// One question of a question request.
+export interface QuestionItem {
+  key: string;
   question: string;
   header: string;
-  options: {label: string; description: string}[];
+  options: QuestionOption[];
   multiple: boolean;
   // Whether opencode will accept a free-text answer not among `options` —
   // surfaced as an "Other…" field in the UI.
   custom: boolean;
+}
+
+// A pending question request (opencode's form) — structurally similar to a
+// permission request (opencode pauses the agent loop until answered) but a
+// different mechanism. One request can ask several questions; they're shown
+// one at a time. The flat QuestionItem fields are the question showing
+// (number `index` of `questions.length`), `answers` those answered so far.
+// All answers go back together once the last is answered, as the chosen
+// option labels (or free text) — see answerQuestion and useStationChat's
+// replyQuestion.
+export interface PendingQuestion extends QuestionItem {
+  id: string;
+  index: number;
+  questions: QuestionItem[];
+  answers: string[][];
+}
+
+function showQuestion(id: string, questions: QuestionItem[], answers: string[][]): PendingQuestion {
+  return {...questions[answers.length], id, index: answers.length, questions, answers};
+}
+
+// Records the answer to the question showing. Returns the next question to
+// show, or — once every question is answered — null and all the answers,
+// one array per question, in order.
+export function answerQuestion(
+  q: PendingQuestion,
+  labels: string[],
+): {next: PendingQuestion | null; all: string[][] | null} {
+  const answers = [...q.answers, labels];
+  if (answers.length >= q.questions.length) return {next: null, all: answers};
+  return {next: showQuestion(q.id, q.questions, answers), all: null};
+}
+
+// One step's token usage (see translate.go's Tokens). ctx is what the
+// context window holds after the step — the figure the gauge shows.
+export interface StepTokens {
+  input: number;
+  output: number;
+  reasoning: number;
+  cacheRead: number;
+  cacheWrite: number;
+  ctx: number;
+}
+
+// The live context gauge: sent as a `usage` event after every step (and on
+// connect), and returned by GET /stations/:id/usage in the same shape.
+// tokens is absent before the first step and right after a compaction
+// (until the next step reports the compacted size).
+export interface UsageInfo {
+  tokens?: StepTokens;
+  cost?: number;
+  contextLimit?: number;
 }
 
 export interface ChatState {
@@ -73,6 +125,12 @@ export interface ChatState {
   notice: string | null;
   pendingPermission: PendingPermission | null;
   pendingQuestion: PendingQuestion | null;
+  usage: UsageInfo | null;
+  // Every turn held arrived live since the transcript was last emptied (on
+  // open, or a session reset) — none is left over from an older load, so a
+  // history snapshot that doesn't have them yet must keep them (see
+  // rebuildFromHistory).
+  fresh: boolean;
 }
 
 export const emptyChatState: ChatState = {
@@ -83,14 +141,51 @@ export const emptyChatState: ChatState = {
   notice: null,
   pendingPermission: null,
   pendingQuestion: null,
+  usage: null,
+  fresh: true,
 };
 
-// Most messages on this socket are opencode's own events (nested under
-// `properties`), but the server also sends a couple of its own synthetic,
-// flat messages: {type:"error", error} when a prompt fails outright, and
-// {type:"notice", text} when it's transparently recovering something (e.g.
-// re-creating a session opencode dropped) — see server/api/ws.go.
-export type EventMsg = {id?: string; type: string; properties?: any; error?: string; text?: string; clear_error?: boolean};
+// One flat event from the station WebSocket or a history page — see
+// translate.go's Event for the authoritative field list. The server's own
+// messages (notice, error, queue, session_reset, heartbeat) share the shape.
+export type EventMsg = {
+  type: string;
+  sessionID?: string;
+  messageID?: string;
+  partID?: string;
+  role?: 'user' | 'assistant';
+  done?: boolean;
+  finish?: string;
+  time?: number;
+  kind?: string;
+  text?: string;
+  delta?: string;
+  tool?: string;
+  status?: string;
+  input?: unknown;
+  output?: string;
+  error?: string;
+  phase?: string;
+  reason?: string;
+  attempt?: number;
+  at?: number;
+  tokens?: StepTokens;
+  cost?: number;
+  contextLimit?: number;
+  id?: string;
+  permission?: string;
+  patterns?: string[];
+  metadata?: unknown;
+  questions?: {
+    key?: string;
+    question: string;
+    header: string;
+    options?: QuestionOption[];
+    multiple?: boolean;
+    custom?: boolean;
+  }[];
+  clear_error?: boolean;
+};
 
 function ensureTurn(state: ChatState, messageID: string, role: 'user' | 'assistant'): ChatState {
   if (state.turnIndex[messageID] !== undefined) {
@@ -106,8 +201,11 @@ function updateTurn(state: ChatState, messageID: string, fn: (t: Turn) => Turn):
   if (idx === undefined) {
     return state;
   }
+  const prev = state.turns[idx];
+  const next = fn(prev);
+  if (next === prev) return state;
   const turns = state.turns.slice();
-  turns[idx] = fn(turns[idx]);
+  turns[idx] = next;
   return {...state, turns};
 }
 
@@ -120,187 +218,215 @@ function upsertPart(turn: Turn, part: Part): Turn {
   };
 }
 
-function partFromRaw(raw: any): Part | null {
-  const id: string = raw.id;
-  switch (raw.type) {
-    case 'text':
-      return {kind: 'text', id, text: raw.text ?? ''};
-    case 'reasoning':
-      return {kind: 'reasoning', id, text: raw.text ?? ''};
-    case 'tool': {
-      const state = raw.state ?? {};
-      return {
-        kind: 'tool',
-        id,
-        tool: raw.tool ?? 'tool',
-        status: state.status ?? 'pending',
-        title: state.title,
-        input: state.input,
-        output: state.output,
-        error: state.error,
-      };
-    }
-    case 'step-finish':
-      return {kind: 'step-finish', id, tokens: raw.tokens?.total};
-    case 'step-start':
-      return null; // no useful content to show; step-finish carries the summary
-    case 'file':
-    case 'patch':
-    case 'snapshot':
-      return {kind: 'file', id, label: raw.filename ?? raw.path ?? raw.type};
-    case 'agent':
-    case 'subtask':
-      return {kind: 'subtask', id, label: raw.description ?? raw.agent ?? 'subtask'};
-    case 'retry':
-      return {kind: 'notice', id, text: 'Retrying…'};
-    case 'compaction':
-      return {kind: 'notice', id, text: 'Conversation compacted'};
+function compactionText(status: string | undefined, error: string | undefined): string {
+  switch (status) {
+    case 'running':
+      return 'Compacting…';
+    case 'failed':
+      return error ? `Compaction failed: ${error}` : 'Compaction failed';
     default:
-      return {kind: 'notice', id, text: `[${raw.type}]`};
+      return 'Conversation compacted';
   }
 }
 
-function isFinalFinish(finish: string | undefined): boolean {
-  return finish !== 'tool-calls' && finish !== 'unknown';
+// Maps a non-text `part` event to the Part the UI renders. text/reasoning
+// are handled separately (they stream). null: nothing to show.
+function partFromEvent(evt: EventMsg, id: string): Part | null {
+  switch (evt.kind) {
+    case 'tool': {
+      const status = evt.status as ToolStatus | undefined;
+      return {
+        kind: 'tool',
+        id,
+        tool: evt.tool || 'tool',
+        status: status ?? 'pending',
+        input: evt.input,
+        output: evt.output,
+        error: evt.error,
+      };
+    }
+    case 'step':
+      // ctx (input + output + cache) is the closest match to opencode 1.x's
+      // tokens.total that this Part used to carry.
+      return {kind: 'step-finish', id, tokens: evt.tokens?.ctx};
+    case 'compaction':
+      return {kind: 'notice', id, text: compactionText(evt.status, evt.error)};
+    case 'notice':
+      return {kind: 'notice', id, text: evt.text ?? ''};
+    default:
+      return null;
+  }
+}
+
+// Whether `next` would only move a text part backward to a prefix of what's
+// already shown — see applyPart.
+function isStalePrefix(existing: string, next: string): boolean {
+  return existing.length > next.length && existing.startsWith(next);
+}
+
+const RETRY_PREFIX = 'Retrying (attempt';
+const COMPACTING_NOTICE = 'Compacting…';
+
+// Notices that track run state (set/cleared by status and compaction
+// events) rather than a one-off message — content arriving doesn't clear
+// these the way it does a server notice.
+function isProgressNotice(notice: string): boolean {
+  return notice === COMPACTING_NOTICE || notice.startsWith(RETRY_PREFIX);
+}
+
+function applyPart(state: ChatState, evt: EventMsg): ChatState {
+  const {messageID, partID} = evt;
+  if (!messageID || !partID) return state;
+  // A part can arrive before its turn's msg (a delta for a turn this client
+  // joined mid-reply) — assume assistant; a later msg corrects the role.
+  let next = ensureTurn(state, messageID, 'assistant');
+  const existing = next.turns[next.turnIndex[messageID]].parts[partID];
+
+  if (evt.kind === 'text' || evt.kind === 'reasoning') {
+    const kind = evt.kind;
+    const prevText = existing && 'text' in existing ? existing.text : undefined;
+    if (evt.delta !== undefined && evt.text === undefined) {
+      // A delta for a part this client never saw start creates it.
+      const text = (prevText ?? '') + evt.delta;
+      return updateTurn(next, messageID, t => upsertPart(t, {kind, id: partID, text}));
+    }
+    if (evt.text === undefined) {
+      // "started" (or an "ended" carrying no text): make sure the part
+      // exists, but never blank out what has already streamed into it.
+      if (existing) return next;
+      return updateTurn(next, messageID, t => upsertPart(t, {kind, id: partID, text: ''}));
+    }
+    // Full text. seedFromHistory replays history events through this same
+    // reducer, and can resolve after live deltas have already grown this
+    // part past what the history snapshot had at fetch time (the snapshot is
+    // always some prefix of the eventually-live text). Applying that stale
+    // prefix would visibly snap the text backward and then forward again as
+    // later deltas continue, plus yank the scroll position. Checking for an
+    // actual prefix (not just "shorter") keeps this from also swallowing a
+    // genuine rewrite that happens to be shorter than what's there.
+    if (prevText !== undefined && isStalePrefix(prevText, evt.text)) {
+      return next;
+    }
+    const text = evt.text;
+    next = updateTurn(next, messageID, t => upsertPart(t, {kind, id: partID, text}));
+    return next.notice && !isProgressNotice(next.notice) ? {...next, notice: null} : next;
+  }
+
+  const part = partFromEvent(evt, partID);
+  if (!part) return next;
+  return updateTurn(next, messageID, t => upsertPart(t, part));
 }
 
 export function applyEvent(state: ChatState, evt: EventMsg): ChatState {
-  const p = evt.properties ?? {};
-
   switch (evt.type) {
-    case 'message.updated': {
-      const info = p.info;
-      if (!info) return state;
-      let next = ensureTurn(state, info.id, info.role);
-      if (info.time?.completed) {
-        next = updateTurn(next, info.id, t => ({...t, done: true}));
-        // session.idle is opencode's dedicated "done" signal, but it isn't
-        // reliably the thing that fires here (or reliably survives a
-        // reconnect's history replay) — a completed assistant message is
-        // just as good a "the reply is finished" signal and is what was
-        // actually leaving the send button stuck showing its busy spinner
-        // indefinitely when session.idle didn't arrive. But opencode
-        // completes one message per step, and a step that ended in tool
-        // calls is followed by another, so only a final step counts.
-        if (info.role === 'assistant' && isFinalFinish(info.finish)) {
-          next = {...next, busy: false};
+    case 'msg': {
+      const {messageID} = evt;
+      if (!messageID) return state;
+      const role = evt.role === 'user' ? 'user' : 'assistant';
+      const next = ensureTurn(state, messageID, role);
+      return updateTurn(next, messageID, t => {
+        let turn = t;
+        if (turn.role !== role) turn = {...turn, role};
+        // done only ever goes false -> true: history and live can deliver a
+        // turn's start after its end.
+        if (evt.done && !turn.done) turn = {...turn, done: true};
+        // A failed step carries its error here — the only trace of it in
+        // history, so it's kept on the turn rather than just the banner.
+        if (evt.error && evt.finish !== 'aborted') {
+          turn = upsertPart(turn, {kind: 'notice', id: `${messageID}/error`, text: `Error: ${evt.error}`});
         }
-      } else if (info.role === 'assistant' && !next.busy) {
-        // A reply has started — the server sent the queue on its own (see
-        // server/station/queue.go), so there's no local send to mark busy.
-        // Assistant only: opencode updates user messages again after the
-        // reply ends (summaries), which would wrongly flip busy back on.
-        next = {...next, busy: true};
+        return turn;
+      });
+    }
+
+    case 'part':
+      return applyPart(state, evt);
+
+    // The one source of truth for busy: sent live as runs start and end, by
+    // the server on every socket connect (see server/api/ws.go), and
+    // re-fetched on resync — so a reply whose end this client missed can't
+    // leave the send button spinning.
+    case 'status': {
+      const busy = evt.status === 'busy' || evt.status === 'retry';
+      let next = state.busy === busy ? state : {...state, busy};
+      if (evt.status === 'retry') {
+        const n = evt.attempt ? ` ${evt.attempt}` : '';
+        next = {...next, notice: `${RETRY_PREFIX}${n})${evt.error ? `: ${evt.error}` : ''}`};
+      } else if (next.notice?.startsWith(RETRY_PREFIX)) {
+        next = {...next, notice: null};
       }
       return next;
     }
 
-    case 'message.part.updated': {
-      const rawPart = p.part;
-      if (!rawPart) return state;
-      const part = partFromRaw(rawPart);
-      if (!part) return state;
-      // messageID's role isn't known yet if message.updated hasn't arrived
-      // first — assume assistant, corrected (harmlessly, same messageID) if
-      // a later message.updated says otherwise.
-      let next = ensureTurn(state, rawPart.messageID, 'assistant');
-      // seedFromHistory (below) replays cached history events through this
-      // same reducer, and can resolve after live message.part.delta events
-      // have already grown this part past what the history snapshot had at
-      // fetch time (server merges deltas into the part's slot rather than
-      // caching them separately, so the snapshot is always some prefix of
-      // the eventually-live text). Applying that stale prefix would visibly
-      // snap the text backward and then forward again as later deltas
-      // continue, plus yank the scroll position via the resulting
-      // content-height dip. Checking for an actual prefix (not just
-      // "shorter") is what keeps this from also swallowing a genuine
-      // rewrite/revert that happens to be shorter than what's there.
-      const existingPart = next.turns[next.turnIndex[rawPart.messageID]]?.parts[part.id];
-      if (
-        existingPart &&
-        'text' in existingPart &&
-        'text' in part &&
-        (existingPart.text ?? '').length > (part.text ?? '').length &&
-        (existingPart.text ?? '').startsWith(part.text ?? '')
-      ) {
-        return next.notice ? {...next, notice: null} : next;
+    // Live compaction progress. The transcript marker itself is a
+    // `compaction` part (history); this drives the banner meanwhile.
+    case 'compaction':
+      switch (evt.phase) {
+        case 'started':
+          return {...state, notice: COMPACTING_NOTICE};
+        case 'ended':
+          // The old context figure overstates the compacted one; the next
+          // step's usage reports the real size.
+          return {
+            ...state,
+            notice: 'Conversation compacted',
+            usage: state.usage ? {...state.usage, tokens: undefined} : state.usage,
+          };
+        default:
+          // failed: the server sends its own notice/error for this.
+          return state.notice === COMPACTING_NOTICE ? {...state, notice: null} : state;
       }
-      next = updateTurn(next, rawPart.messageID, t => upsertPart(t, part));
-      return next.notice ? {...next, notice: null} : next;
-    }
 
-    case 'message.part.delta': {
-      const {messageID, partID, field, delta} = p;
-      if (!messageID || !partID) return state;
-      const idx = state.turnIndex[messageID];
-      if (idx === undefined) return state;
-      if (field !== 'text') return state; // the only delta field opencode sends today
-      return updateTurn(state, messageID, t => {
-        const existing = t.parts[partID];
-        if (!existing || !('text' in existing)) return t;
-        return upsertPart(t, {...existing, text: (existing.text ?? '') + delta} as Part);
-      });
-    }
-
-    case 'session.idle':
-      return {...state, busy: false};
-
-    // opencode's own run state, sent live and also by the server on every
-    // socket connect (see server/api/ws.go) — the one source of truth for
-    // busy, so a reply whose end this client missed can't leave the send
-    // button spinning and new messages queueing behind nothing.
-    case 'session.status': {
-      const type = p.status?.type;
-      if (!type) return state;
-      const busy = type !== 'idle';
-      return state.busy === busy ? state : {...state, busy};
-    }
+    case 'usage':
+      return {
+        ...state,
+        usage: {
+          tokens: evt.tokens,
+          cost: evt.cost ?? state.usage?.cost,
+          contextLimit: evt.contextLimit || state.usage?.contextLimit,
+        },
+      };
 
     case 'permission.asked': {
-      const {id, permission, patterns} = p;
+      const {id, permission, patterns} = evt;
       if (!id) return state;
-      return {...state, pendingPermission: {id, permission, patterns: patterns ?? []}};
+      return {...state, pendingPermission: {id, permission: permission ?? '', patterns: patterns ?? []}};
     }
 
+    // Only the request it's for: parallel tool calls can ask more than one,
+    // and the newer replaces the older here, so a reply to the older must
+    // not clear it. (No id: an older server; clear.)
     case 'permission.replied':
-      // Clears regardless of which request this was for — a station only
-      // ever has one session, so only one permission can be pending at once.
+      if (!state.pendingPermission || (evt.id && evt.id !== state.pendingPermission.id)) return state;
       return {...state, pendingPermission: null};
 
     case 'question.asked': {
-      const {id, questions} = p;
-      const q = questions?.[0];
-      if (!id || !q) return state;
-      return {
-        ...state,
-        pendingQuestion: {
-          id,
-          question: q.question,
-          header: q.header,
-          options: q.options ?? [],
-          multiple: !!q.multiple,
-          custom: !!q.custom,
-        },
-      };
+      const {id, questions} = evt;
+      if (!id || !questions?.length) return state;
+      // The same request again (re-pushed on reconnect): keep the answers
+      // already given.
+      if (state.pendingQuestion?.id === id) return state;
+      const items: QuestionItem[] = questions.map(q => ({
+        key: q.key ?? '',
+        question: q.question,
+        header: q.header,
+        options: q.options ?? [],
+        multiple: !!q.multiple,
+        custom: !!q.custom,
+      }));
+      return {...state, pendingQuestion: showQuestion(id, items, [])};
     }
 
     case 'question.replied':
     case 'question.rejected':
+      if (!state.pendingQuestion || (evt.id && evt.id !== state.pendingQuestion.id)) return state;
       return {...state, pendingQuestion: null};
 
-    case 'session.error': {
-      const message = p.error?.message ?? p.message ?? 'session error';
-      // Logged (not just surfaced in the UI) so the raw event is visible in
-      // `adb logcat`/Metro without having to reproduce it against the
-      // server directly — this is opencode's own error payload verbatim.
-      console.log('[chat] session.error', JSON.stringify(evt));
-      return {...state, busy: false, error: message};
-    }
-
-    // Server-synthesized (see server/api/ws.go), not an opencode event.
+    // Both opencode's errors ({error, kind}) and the server's own (a prompt
+    // failing outright). Only the banner: busy follows `status`.
     case 'error':
       console.log('[chat] error', JSON.stringify(evt));
-      return {...state, busy: false, error: evt.error ?? 'unknown error'};
+      return {...state, error: evt.error ?? 'unknown error'};
 
     // Server-synthesized: e.g. "Session expired — starting a new one…"
     // while promptWithRecovery transparently resets and retries.
@@ -309,13 +435,22 @@ export function applyEvent(state: ChatState, evt: EventMsg): ChatState {
     case 'notice':
       return {...state, notice: evt.text ?? null, ...(evt.clear_error ? {error: null} : {})};
 
-    // Server-synthesized: sent right after an auto-recovery reset. The old
-    // session (and everything shown from it) no longer exists, so it's
-    // discarded outright rather than left mixed in with the new session's
-    // turns — matches what a manual reset already does client-side.
+    // Server-synthesized: sent right after the station moved to a new
+    // session (rollover, or an expired one replaced). The old session's
+    // turns are discarded rather than left mixed in with the new session's —
+    // matches what a manual reset already does client-side. The model (so
+    // its context limit) is unchanged. useStationChat then reloads the new
+    // session's history, which has what was sent before this arrived (the
+    // carried-over context).
     case 'session_reset':
-      return {...emptyChatState, notice: state.notice};
+      return {
+        ...emptyChatState,
+        notice: state.notice,
+        usage: state.usage?.contextLimit ? {contextLimit: state.usage.contextLimit} : null,
+      };
 
+    // title: no place to show it. resync: handled by useStationChat (it
+    // needs fetches, not a state change).
     default:
       return state;
   }
@@ -371,61 +506,87 @@ export function turnText(turn: Turn): string {
 }
 
 // Throws away whatever's held locally and rebuilds from a fresh newest page
-// of history — used whenever the socket (re)connects or the app comes back
-// to the foreground. Anything that happened while disconnected never reached
-// this client live, and patching it in on top of stale local state is what
-// left chats half-loaded, out of order or flashing until the app was
-// restarted; a clean rebuild is the same state a fresh open would have.
-// Older pages are dropped too and come back through loadOlder on scroll.
+// of history — used whenever the socket (re)connects, the app comes back to
+// the foreground, or the server reports its upstream stream reconnected
+// (`resync`). Anything that happened meanwhile never reached this client
+// live, and patching it in on top of stale local state is what left chats
+// half-loaded, out of order or flashing until the app was restarted; a
+// clean rebuild is the same state a fresh open would have. Older pages are
+// dropped too and come back through loadOlder on scroll.
 //
-// Two things from local state survive: turns that arrived live after the
-// history snapshot was taken (anything after the newest turn both share),
-// and live text that's grown past the snapshot's prefix of the same part
-// (see applyEvent's message.part.updated comment).
+// What survives from local state is what arrived live after the history
+// snapshot was taken:
+// - turns the snapshot doesn't have yet: those after the newest turn both
+//   share, or all of them while the state is `fresh` (nothing in it is left
+//   over from an older load, so a turn missing from the snapshot is newer);
+// - in a turn both have: live text that's grown past the snapshot's prefix
+//   of the same part (see applyPart's stale-prefix comment), parts that
+//   started after the snapshot, and a done the snapshot hadn't seen.
 export function rebuildFromHistory(prev: ChatState, events: EventMsg[]): ChatState {
   const base = seedFromHistory(emptyChatState, events);
   const turns = base.turns.map(t => {
     const old = getTurn(prev, t.messageID);
     if (!old) return t;
     let parts = t.parts;
-    for (const id of t.partOrder) {
-      const fresh = t.parts[id];
+    let partOrder = t.partOrder;
+    for (const id of old.partOrder) {
+      const snap = t.parts[id];
       const live = old.parts[id];
-      if (
-        live &&
-        'text' in live &&
-        'text' in fresh &&
-        live.text.length > fresh.text.length &&
-        live.text.startsWith(fresh.text)
-      ) {
+      if (!snap) {
+        parts = {...parts, [id]: live};
+        partOrder = [...partOrder, id];
+      } else if ('text' in live && 'text' in snap && isStalePrefix(live.text, snap.text)) {
         parts = {...parts, [id]: live};
       }
     }
-    return parts === t.parts ? t : {...t, parts};
+    const done = t.done || old.done;
+    return parts === t.parts && done === t.done ? t : {...t, parts, partOrder, done};
   });
 
   let lastShared = -1;
   prev.turns.forEach((t, i) => {
     if (base.turnIndex[t.messageID] !== undefined) lastShared = i;
   });
-  if (lastShared >= 0) {
-    for (const t of prev.turns.slice(lastShared + 1)) {
-      if (base.turnIndex[t.messageID] === undefined) turns.push(t);
-    }
+  // Nothing shared and not fresh: all of prev is from before the snapshot.
+  const live = prev.fresh ? prev.turns : lastShared >= 0 ? prev.turns.slice(lastShared + 1) : [];
+  for (const t of live) {
+    if (base.turnIndex[t.messageID] === undefined) turns.push(t);
   }
   const turnIndex: Record<string, number> = {};
   turns.forEach((t, i) => {
     turnIndex[t.messageID] = i;
   });
 
+  // The "Compacting…" banner is cleared by the compaction's end event; if
+  // that was missed, history says whether it's still running.
+  const notice = prev.notice === COMPACTING_NOTICE && !compactionRunning(turns) ? null : prev.notice;
+
   // busy is deliberately left alone: guessing it from the newest turn here
-  // got it wrong (stuck spinner). The session.status the server sends on
-  // every connect sets it instead.
+  // got it wrong (stuck spinner). The `status` the server sends on every
+  // connect (or the status fetch on resync) sets it instead.
   return {
     ...prev,
     turns,
     turnIndex,
+    notice,
+    // Still fresh until a snapshot has something in it to anchor on.
+    fresh: prev.fresh && base.turns.length === 0,
     pendingPermission: prev.pendingPermission ?? base.pendingPermission,
     pendingQuestion: prev.pendingQuestion ?? base.pendingQuestion,
   };
+}
+
+// Whether the newest compaction marker among turns is still running.
+function compactionRunning(turns: Turn[]): boolean {
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const t = turns[i];
+    for (let j = t.partOrder.length - 1; j >= 0; j--) {
+      const id = t.partOrder[j];
+      if (id.endsWith('/compaction')) {
+        const p = t.parts[id];
+        return p?.kind === 'notice' && p.text === COMPACTING_NOTICE;
+      }
+    }
+  }
+  return false;
 }

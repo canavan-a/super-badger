@@ -1,13 +1,13 @@
-# super-badger
+# Super Galleon
 
 <p align="center">
-  <img src="docs/superbadger.png" alt="Super Badger: a pixel-art badger above a blackletter wordmark" width="720">
+  <img src="docs/supergalleon.png" alt="Super Galleon: a pixel-art galleon above a blackletter wordmark" width="720">
 </p>
 
 A self-hosted control plane for coding agents running on **your own models**.
 
-super-badger is **not a harness**. It doesn't run an agent loop; it sits in front
-of `opencode serve` (which does) and adds what running agents against local
+Super Galleon is **not a harness**. It doesn't run an agent loop; it sits in front
+of `opencode serve` (opencode 2.2 or later) (which does) and adds what running agents against local
 hardware needs and hosted-API tools don't bother with. You then use those agents
 from a terminal client, a phone app, or a browser.
 
@@ -15,20 +15,29 @@ from a terminal client, a phone app, or a browser.
 
 Most agent harnesses assume a hosted API: the model is always up, the context
 window is huge, and you watch the agent at your desk. Local inference breaks all
-three assumptions. super-badger is built around that:
+three assumptions. Super Galleon is built around that:
 
 - **Is the model actually up?** Every station live-pings its model's endpoint
   (the `baseURL` from your opencode provider config: llama.cpp, vLLM, Ollama,
   …) whenever it's listed. If you stop the GPU box, the station shows
   unreachable right away, not after a prompt hangs. Hosted providers are skipped.
-- **Your hardware's metrics next to the chat.** Point super-badger at any HTTP
+- **Your hardware's metrics next to the chat.** Point Super Galleon at any HTTP
   endpoint returning `{"<station>": {"gpu_temp": 71, "tok_s": 38.2, …}}` and
   those numbers show up on the station's top bar, with history and threshold
   alerts ("VRAM over 95%", "GPU over 85°C"). Bring your own exporter; no
   agent-side plugin needed.
-- **Context you can see.** Small local context windows fill fast. Each station
-  shows its live context size after every step, with thinking tokens counted
-  separately, and `/compact` is one keystroke away.
+- **Context that fits.** Small local context windows fill fast, and opencode
+  can only compact in time if it knows the real window. Super Galleon's opencode
+  plugin (`opencode-plugin/`) reads it from each llama.cpp or Strata engine
+  (`/props`), follows it live when the engine or its context changes, and
+  lets you override it per model from the app or terminal. Each station shows
+  its context against that window after every step, and `/compact` is one
+  keystroke away.
+- **Compaction that can't get stuck.** If a compaction's summary fails, the
+  plugin redoes it at once with a simpler, tool-free summary; if that fails
+  too, the station moves to a fresh session seeded with the last summary and
+  the newest turns. With auto mode on, the interrupted turn then continues by
+  itself.
 - **Walk away from long runs.** Local models are slow, so runs are long. When a
   station finishes, asks for permission, asks a question, or crosses a metric
   threshold, you get a notification (Android background push, desktop, or
@@ -62,6 +71,11 @@ superbadger --server http://badger-host:8080 --token <token>   # or set both in 
 
 ## Running it
 
+> Super Galleon was called super-badger. Commands (`superbadger`, `badger`), the
+> NixOS module (`services.superbadger`), `SUPERBADGER_*` environment variables,
+> data paths and the Android package keep that name, so existing installs and
+> phones upgrade in place.
+
 On NixOS:
 
 ```nix
@@ -76,14 +90,15 @@ services.superbadger = {
 Then mint a client token on that machine with `badger token generate <label>`.
 Auth kicks in once the first token exists.
 
-Models are configured in **opencode's** provider config, not in super-badger.
+Models are configured in **opencode's** provider config, not in Super Galleon.
 Stations pick from whatever `GET /providers` reports.
 
 For development, `nix develop` then `dev-up` / `dev-down` (opencode + server with
 hot reload, logs in `.data/logs`); `dev-help` lists the rest. Server config is
 environment variables: `SUPERBADGER_LISTEN_ADDR` (`:8080`),
 `SUPERBADGER_DB_PATH`, `SUPERBADGER_OPENCODE_URL` (`http://127.0.0.1:4096`),
-`SUPERBADGER_OPENCODE_PASSWORD`, `SUPERBADGER_STATIC_DIR`.
+`SUPERBADGER_OPENCODE_PASSWORD` (or `SUPERBADGER_OPENCODE_PASSWORD_FILE`; opencode 2
+always requires it, and the NixOS module generates one), `SUPERBADGER_STATIC_DIR`.
 
 ## Layout
 
@@ -91,4 +106,6 @@ environment variables: `SUPERBADGER_LISTEN_ADDR` (`:8080`),
   CLI (`cmd/badger`)
 - `tui/`: terminal client (its own Go module)
 - `app/`: React Native + web client
+- `opencode-plugin/`: the opencode plugin the module loads (context limits,
+  compaction recovery); `bun test` runs its tests
 - `flake.nix`, `module.nix`: dev shell, packages, NixOS module

@@ -15,6 +15,7 @@ import {
   OpencodeProvider,
   testProviderConnection,
 } from '../api';
+import {ModelLimitSettings} from '../components/ModelLimitSettings';
 import {Route} from '../routes';
 import {Theme, useTheme} from '../theme';
 
@@ -64,17 +65,16 @@ export function AddStationScreen({
   };
 
   const runTest = async () => {
-    const baseURL = selectedProvider?.options?.baseURL;
+    const baseURL = selectedProvider?.baseURL;
     if (!baseURL) {
       setTestState({status: 'error', message: 'This provider has no baseURL to test.'});
       return;
     }
     setTestState({status: 'testing'});
     try {
-      const res = await testProviderConnection({
-        base_url: baseURL,
-        api_key: selectedProvider?.options?.apiKey,
-      });
+      // GET /providers no longer exposes API keys, so this checks
+      // reachability without one.
+      const res = await testProviderConnection({base_url: baseURL});
       setTestState(res.ok ? {status: 'ok'} : {status: 'error', message: res.error ?? 'unreachable'});
     } catch (err) {
       setTestState({status: 'error', message: String(err)});
@@ -162,9 +162,14 @@ export function AddStationScreen({
           {testState.status === 'error' && (
             <Text style={styles.testError}>✗ {testState.message}</Text>
           )}
-          {selectedProvider.options?.baseURL && (
-            <Text style={styles.hint}>{selectedProvider.options.baseURL}</Text>
-          )}
+          {selectedProvider.baseURL && <Text style={styles.hint}>{selectedProvider.baseURL}</Text>}
+        </View>
+      )}
+
+      {providerId && modelId && (
+        <View style={styles.field}>
+          <Text style={styles.label}>Context limit</Text>
+          <ModelLimitSettings providerId={providerId} modelId={modelId} />
         </View>
       )}
 

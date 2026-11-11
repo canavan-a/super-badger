@@ -37,8 +37,8 @@ type Logo struct {
 }
 
 // SliceCount is how many pieces the wordmark is cut into (one per letter of
-// "superbadger", so the reveal reads letter by letter).
-const SliceCount = 11
+// "supergalleon", so the reveal reads letter by letter).
+const SliceCount = 12
 
 // Span is a half-open column range [X0, X1).
 type Span struct{ X0, X1 int }
@@ -189,38 +189,77 @@ func ExtractLogo(ansi string) (*Logo, error) {
 	}
 	l.S = Span{first, x}
 
-	// Slices: cut where the cumulative ink reaches k/SliceCount of the total (so
-	// each slice holds about one letter's worth, and the space between the two
-	// words doesn't produce an empty slice), nudged to the emptiest nearby column.
-	total := 0
-	for _, n := range ink {
-		total += n
-	}
-	cuts := []int{first}
-	run := 0
-	for x := first; x <= last && len(cuts) < SliceCount; x++ {
-		run += ink[x]
-		if run*SliceCount >= total*len(cuts) {
-			best, bestScore := x+1, 1<<30
-			for c := x - 3; c <= x+4; c++ {
-				if c <= cuts[len(cuts)-1] || c >= last {
-					continue
-				}
-				if score := ink[c]*100 + abs(c-(x+1)); score < bestScore {
-					best, bestScore = c, score
-				}
-			}
-			cuts = append(cuts, best)
+	l.Slices = sliceWord(ink, first, last)
+	return l, nil
+}
+
+// sliceWord picks SliceCount-1 cut columns in [first+1, last] so that each
+// slice holds about one letter's worth of ink (the space between the words
+// can't become a slice of its own) and the cuts fall in the emptiest columns,
+// i.e. between letters. It is a small dynamic program over every column:
+// cost = Σ (slice ink − mean)² / mean + cutWeight·(ink in the cut column).
+func sliceWord(ink []int, first, last int) []Span {
+	const cutWeight = 6.0
+	n := last + 2 // columns are cut *before* x, so x ranges first..last+1
+	pre := make([]int, n+1)
+	for x := 0; x < n; x++ {
+		if x < len(ink) {
+			pre[x+1] = pre[x] + ink[x]
+		} else {
+			pre[x+1] = pre[x]
 		}
 	}
-	for len(cuts) < SliceCount { // degenerate art: pad so there are always SliceCount slices
-		cuts = append(cuts, min(last, cuts[len(cuts)-1]+1))
+	sum := func(a, b int) float64 { return float64(pre[b] - pre[a]) } // ink in [a, b)
+	mean := sum(first, last+1) / SliceCount
+	if mean == 0 {
+		mean = 1
 	}
-	cuts = append(cuts, last+1)
-	for k := 0; k < SliceCount; k++ {
-		l.Slices = append(l.Slices, Span{cuts[k], cuts[k+1]})
+	inf := math.Inf(1)
+	// best[k][x]: cheapest way to end slice k (0-based) at cut x; from[k][x] its start.
+	best := make([][]float64, SliceCount)
+	from := make([][]int, SliceCount)
+	for k := range best {
+		best[k] = make([]float64, n)
+		from[k] = make([]int, n)
+		for x := range best[k] {
+			best[k][x] = inf
+		}
 	}
-	return l, nil
+	cutCost := func(x int) float64 {
+		if x > last {
+			return 0 // the final edge isn't a real cut
+		}
+		return cutWeight * float64(ink[x])
+	}
+	for x := first + 1; x < n; x++ {
+		d := sum(first, x) - mean
+		best[0][x] = d*d/mean + cutCost(x)
+		from[0][x] = first
+	}
+	for k := 1; k < SliceCount; k++ {
+		for x := first + k + 1; x < n; x++ {
+			for p := first + k; p < x; p++ {
+				if best[k-1][p] == inf {
+					continue
+				}
+				d := sum(p, x) - mean
+				if c := best[k-1][p] + d*d/mean + cutCost(x); c < best[k][x] {
+					best[k][x], from[k][x] = c, p
+				}
+			}
+		}
+	}
+	spans := make([]Span, SliceCount)
+	x := last + 1
+	for k := SliceCount - 1; k >= 0; k-- {
+		p := from[k][x]
+		if best[k][x] == inf { // degenerate art (fewer columns than slices): fall back to single columns
+			p = max(first, x-1)
+		}
+		spans[k] = Span{p, x}
+		x = p
+	}
+	return spans
 }
 
 // ---- tones ----

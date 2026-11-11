@@ -27,7 +27,7 @@ export const PRESS_ACTION = {id: 'default', launchActivity: 'com.superbadgerapp.
 // shows the app's launcher icon instead of the small icon, and for us that's
 // the light theme's, whatever theme is set (Android can't change the app icon
 // at runtime). This is Notification.EXTRA_PREFER_SMALL_ICON, asking for the
-// small icon instead: the S, tinted with the notification's color. Older
+// small icon instead: the galleon, tinted with the notification's color. Older
 // Android ignores it. Notifee copies `data` into the notification's extras as
 // is, but Android reads this one as a boolean, which Notifee's types and
 // validator only allow strings/numbers/objects for; patches/ relaxes the

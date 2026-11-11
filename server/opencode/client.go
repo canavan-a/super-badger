@@ -1,38 +1,33 @@
 // Package opencode is a thin typed client over the subset of the opencode
-// HTTP API (v2) that super-badger needs: session lifecycle, prompting, and
-// provider/model listing. It intentionally does not wrap the full opencode
-// surface (pty, mcp, lsp, vcs, tui control, ...) — super-badger only proxies
-// what a Station needs.
+// HTTP API that super-badger needs. It targets opencode >= 2.2 only: every
+// route lives under /api, responses are wrapped as {location?, data}, and
+// HTTP Basic auth (user "opencode", password from OPENCODE_PASSWORD on the
+// opencode process) is always required.
 //
-// Deliberately NOT supported: registering a provider at runtime via
-// PATCH /config. Confirmed live against a real opencode server (1.18.30)
-// that this never actually wires into prompt-time model resolution — session
-// creation succeeds, but every prompt fails with ProviderModelNotFoundError,
-// regardless of directory scoping or call order. Stations must reference a
-// provider/model already declared in opencode's own config file.
+// Stations must reference a provider/model already declared in opencode's
+// own config; super-badger never registers providers at runtime.
 package opencode
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 )
 
 type Client struct {
-	baseURL string
-	// password is sent as HTTP Basic auth (any username — confirmed live
-	// that opencode only checks the password) when opencode was launched
-	// with OPENCODE_SERVER_PASSWORD set. Empty means opencode is unsecured.
+	baseURL  string
 	password string
 	http     *http.Client
 	// longHTTP has no fixed timeout, for calls that legitimately run long
-	// (a model reply, or a held-open SSE stream) — bounded only by the
-	// caller's context instead.
+	// (waiting on a reply, or a held-open SSE stream), bounded only by the
+	// caller's context.
 	longHTTP *http.Client
 }
 
@@ -45,107 +40,38 @@ func NewClient(baseURL, password string) *Client {
 	}
 }
 
+// APIError is a non-2xx answer from opencode.
+type APIError struct {
+	Method, Path string
+	Status       int
+	Tag          string // opencode's error _tag, e.g. "SessionNotFoundError"
+	Body         string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("opencode %s %s: status %d: %s", e.Method, e.Path, e.Status, e.Body)
+}
+
+// IsSessionNotFound reports whether err means the session no longer exists
+// in opencode (deleted, its database reset, or an ID from before the
+// opencode 2 cutover).
+func IsSessionNotFound(err error) bool {
+	var ae *APIError
+	if !errors.As(err, &ae) {
+		return false
+	}
+	return ae.Tag == "SessionNotFoundError" || (ae.Status == http.StatusNotFound && ae.Tag == "")
+}
+
 type Session struct {
-	ID    string `json:"id"`
-	Title string `json:"title,omitempty"`
-	Agent string `json:"agent,omitempty"`
+	ID    string  `json:"id"`
+	Title string  `json:"title,omitempty"`
+	Agent string  `json:"agent,omitempty"`
+	Cost  float64 `json:"cost,omitempty"`
 }
 
-// TokenUsage reports how much of the model's context window is currently
-// occupied — Input/Output/Reasoning/CacheRead/CacheWrite come from the most
-// recent assistant message's own usage snapshot, NOT the session-wide
-// `tokens` field GET /session/{id} reports. That field is a running SUM
-// across every message ever sent in the session (confirmed live), so it
-// only ever grows — including right after a compaction, even though
-// compaction's entire point is to shrink what's actually in context going
-// forward. Each individual message's own `tokens` instead reflects the real
-// context size for that specific request, which is what actually drops once
-// a compacted summary replaces the older turns on the next prompt — that's
-// the number worth showing here. Cost is the one figure kept cumulative,
-// since total spend is meant to keep growing.
-type TokenUsage struct {
-	Input      int     `json:"input"`
-	Output     int     `json:"output"`
-	Reasoning  int     `json:"reasoning"`
-	CacheRead  int     `json:"cache_read"`
-	CacheWrite int     `json:"cache_write"`
-	Cost       float64 `json:"cost"`
-}
-
-// GetSessionUsage reports the model's current context occupancy for a
-// session — see TokenUsage's doc comment for why this reads the latest
-// message's usage rather than the session's cumulative counter. Polling
-// after a reply finishes is enough to keep it current; there's no dedicated
-// event for it.
-func (c *Client) GetSessionUsage(ctx context.Context, sessionID string) (TokenUsage, error) {
-	var sess struct {
-		Cost float64 `json:"cost"`
-	}
-	if err := c.do(ctx, "GET", fmt.Sprintf("/session/%s", sessionID), nil, &sess); err != nil {
-		return TokenUsage{}, err
-	}
-
-	// A handful, most-recent-first: the very latest message can be a
-	// just-sent user message (no tokens yet) or, rarely, an assistant
-	// message that failed before any tokens were counted — walk back until
-	// a real usage snapshot turns up.
-	var messages []struct {
-		Info struct {
-			Role   string `json:"role"`
-			Tokens struct {
-				Input     int `json:"input"`
-				Output    int `json:"output"`
-				Reasoning int `json:"reasoning"`
-				Cache     struct {
-					Read  int `json:"read"`
-					Write int `json:"write"`
-				} `json:"cache"`
-			} `json:"tokens"`
-		} `json:"info"`
-	}
-	path := fmt.Sprintf("/session/%s/message?order=desc&limit=5", sessionID)
-	if err := c.do(ctx, "GET", path, nil, &messages); err != nil {
-		return TokenUsage{}, err
-	}
-
-	for _, m := range messages {
-		if m.Info.Role != "assistant" {
-			continue
-		}
-		t := m.Info.Tokens
-		if t.Input == 0 && t.Output == 0 {
-			continue
-		}
-		return TokenUsage{
-			Input:      t.Input,
-			Output:     t.Output,
-			Reasoning:  t.Reasoning,
-			CacheRead:  t.Cache.Read,
-			CacheWrite: t.Cache.Write,
-			Cost:       sess.Cost,
-		}, nil
-	}
-	return TokenUsage{Cost: sess.Cost}, nil
-}
-
-// Compact triggers the same conversation-summarization opencode's CLI runs
-// via its /compact command — folds older turns into a summary so the
-// session's context stays under the model's window instead of growing
-// unbounded. Uses /session/{id}/summarize (v1), NOT the newer
-// /api/session/{id}/compact (v2) endpoint the OpenAPI spec also lists —
-// confirmed live that the v2 one 503s with "Session compact is not
-// available yet" on this opencode build, while summarize works.
-func (c *Client) Compact(ctx context.Context, sessionID, providerID, modelID string) error {
-	body := map[string]any{
-		"providerID": providerID,
-		"modelID":    modelID,
-	}
-	return c.doWith(ctx, c.longHTTP, "POST", fmt.Sprintf("/session/%s/summarize", sessionID), body, nil)
-}
-
-// CreateSessionParams pins a new session to a specific provider/model and
-// agent, and optionally a working directory — all in one call, confirmed
-// live against a real opencode server rather than assumed from the spec.
+// CreateSessionParams pins a new session to a provider/model, agent and
+// working directory.
 type CreateSessionParams struct {
 	ProviderID string
 	ModelID    string
@@ -155,42 +81,99 @@ type CreateSessionParams struct {
 	Directory string
 }
 
+// denySubagents switches opencode's subagent tool off for every station
+// session: the local models we run serve one request at a time, so a
+// subagent call would queue behind (and deadlock on) the turn that spawned it.
+var denySubagents = []map[string]string{{"action": "subagent", "resource": "*", "effect": "deny"}}
+
 func (c *Client) CreateSession(ctx context.Context, p CreateSessionParams) (Session, error) {
 	body := map[string]any{
-		"agent": p.Agent,
-		"model": map[string]any{
-			"id":         p.ModelID,
-			"providerID": p.ProviderID,
-		},
+		"agent":       p.Agent,
+		"model":       map[string]any{"id": p.ModelID, "providerID": p.ProviderID},
+		"permissions": denySubagents,
 	}
-
-	path := "/session"
 	if p.Directory != "" {
-		path += "?directory=" + url.QueryEscape(p.Directory)
+		body["location"] = map[string]any{"directory": p.Directory}
 	}
-
 	var sess Session
-	if err := c.do(ctx, "POST", path, body, &sess); err != nil {
+	if err := c.do(ctx, "POST", "/api/session", body, &sess); err != nil {
 		return Session{}, err
 	}
 	return sess, nil
 }
 
-// SessionStatus returns opencode's own live run state ("idle", "busy",
-// "retry") for every session it knows about in directory, keyed by session
-// ID — the authoritative answer to "is a reply running right now", unlike
-// anything inferred from the event stream (which a client that was
-// disconnected at the wrong moment can miss). Idle sessions may be absent
-// from the map entirely.
-func (c *Client) SessionStatus(ctx context.Context, directory string) (map[string]string, error) {
-	path := "/session/status"
-	if directory != "" {
-		path += "?directory=" + url.QueryEscape(directory)
+func (c *Client) GetSession(ctx context.Context, sessionID string) (Session, error) {
+	var s Session
+	err := c.do(ctx, "GET", "/api/session/"+sessionID, nil, &s)
+	return s, err
+}
+
+func (c *Client) DeleteSession(ctx context.Context, sessionID string) error {
+	return c.do(ctx, "DELETE", "/api/session/"+sessionID, nil, nil)
+}
+
+// Delivery says when opencode hands a prompt to a busy session: "steer"
+// at the next step boundary (between tool calls), "queue" after the turn.
+type Delivery string
+
+const (
+	Steer Delivery = "steer"
+	Queue Delivery = "queue"
+)
+
+// Prompt adds a user message to the session and returns at once with its
+// message ID; the reply streams in on the event stream.
+func (c *Client) Prompt(ctx context.Context, sessionID, text string, delivery Delivery) (string, error) {
+	body := map[string]any{"text": text, "delivery": string(delivery)}
+	var out struct {
+		ID string `json:"id"`
 	}
+	if err := c.do(ctx, "POST", "/api/session/"+sessionID+"/prompt", body, &out); err != nil {
+		return "", err
+	}
+	return out.ID, nil
+}
+
+// Synthetic adds text the model sees as context but that isn't a prompt
+// from the user (used to seed a rolled-over session). With resume false it
+// doesn't start a turn.
+func (c *Client) Synthetic(ctx context.Context, sessionID, text, description string, resume bool) error {
+	body := map[string]any{"text": text, "description": description, "resume": resume}
+	return c.do(ctx, "POST", "/api/session/"+sessionID+"/synthetic", body, nil)
+}
+
+// Wait blocks until the session is idle.
+func (c *Client) Wait(ctx context.Context, sessionID string) error {
+	return c.doWith(ctx, c.longHTTP, "POST", "/api/experimental/session/"+sessionID+"/wait", nil, nil)
+}
+
+// Interrupt stops the session's running turn without starting anything
+// still waiting in its inbox.
+func (c *Client) Interrupt(ctx context.Context, sessionID string) error {
+	return c.do(ctx, "POST", "/api/session/"+sessionID+"/interrupt?resume=false", nil, nil)
+}
+
+// Compact asks opencode to summarize the session's older turns. It returns
+// at once with the compaction's message ID; progress arrives as
+// session.compaction.{started,ended,failed} events.
+func (c *Client) Compact(ctx context.Context, sessionID string) (string, error) {
+	var out struct {
+		ID string `json:"id"`
+	}
+	if err := c.do(ctx, "POST", "/api/session/"+sessionID+"/compact", map[string]any{}, &out); err != nil {
+		return "", err
+	}
+	return out.ID, nil
+}
+
+// Active returns the run state of every session opencode is running right
+// now, keyed by session ID ("running", or e.g. "retry"). Idle sessions are
+// absent.
+func (c *Client) Active(ctx context.Context) (map[string]string, error) {
 	var raw map[string]struct {
 		Type string `json:"type"`
 	}
-	if err := c.do(ctx, "GET", path, nil, &raw); err != nil {
+	if err := c.do(ctx, "GET", "/api/session/active", nil, &raw); err != nil {
 		return nil, err
 	}
 	out := make(map[string]string, len(raw))
@@ -200,156 +183,249 @@ func (c *Client) SessionStatus(ctx context.Context, directory string) (map[strin
 	return out, nil
 }
 
-func (c *Client) AbortSession(ctx context.Context, sessionID string) error {
-	return c.do(ctx, "POST", fmt.Sprintf("/session/%s/abort", sessionID), nil, nil)
+// Message is one entry of a session's message list. Only the fields
+// super-badger reads are typed; content stays raw for the translator.
+type Message struct {
+	ID   string `json:"id"`
+	Type string `json:"type"` // user|synthetic|assistant|compaction|idle|shell|...
+	Time struct {
+		Created   int64 `json:"created"`
+		Completed int64 `json:"completed"`
+	} `json:"time"`
+	Text        string          `json:"text"`        // user, synthetic
+	Description string          `json:"description"` // synthetic
+	Content     json.RawMessage `json:"content"`     // assistant
+	Finish      string          `json:"finish"`      // assistant
+	Tokens      *StepTokens     `json:"tokens"`      // assistant, compaction
+	Cost        float64         `json:"cost"`
+	Status      string          `json:"status"`  // compaction: running|completed|failed
+	Reason      string          `json:"reason"`  // compaction: auto|manual
+	Summary     string          `json:"summary"` // compaction (completed)
+	Outcome     string          `json:"outcome"` // idle
+	Error       *StructuredErr  `json:"error"`
+	Model       *ModelRef       `json:"model"`
 }
 
-func (c *Client) DeleteSession(ctx context.Context, sessionID string) error {
-	return c.do(ctx, "DELETE", fmt.Sprintf("/session/%s", sessionID), nil, nil)
+type ModelRef struct {
+	ID         string `json:"id"`
+	ProviderID string `json:"providerID"`
 }
 
-// Prompt sends a text prompt into an existing session and blocks until the
-// full response is ready, returning the raw opencode response body (message
-// + parts) as json.RawMessage. Used only as the no-streaming fallback (see
-// station.Service.Prompt) — a real model reply can take well over a minute,
-// so this uses a client with no fixed timeout, relying on ctx for
-// cancellation instead.
-func (c *Client) Prompt(ctx context.Context, sessionID, text string) (json.RawMessage, error) {
-	body := map[string]any{
-		"parts": []map[string]any{
-			{"type": "text", "text": text},
-		},
-		"tools": promptTools,
+// StepTokens is opencode's per-step token usage.
+type StepTokens struct {
+	Input     int `json:"input"`
+	Output    int `json:"output"`
+	Reasoning int `json:"reasoning"`
+	Cache     struct {
+		Read  int `json:"read"`
+		Write int `json:"write"`
+	} `json:"cache"`
+}
+
+// StructuredErr is opencode's error shape on events and messages.
+type StructuredErr struct {
+	Type    string `json:"type"`
+	Message string `json:"message"`
+	Status  int    `json:"status,omitempty"`
+}
+
+// MessagePage is one page of a session's messages plus the cursor for the
+// next page in the same direction.
+type MessagePage struct {
+	Messages []Message
+	Next     string
+}
+
+// MessagesParams selects a page: the first page (newest first unless Asc)
+// when Cursor is empty, else the page Cursor points at. Type filters by
+// message type.
+type MessagesParams struct {
+	Limit  int
+	Cursor string
+	Type   string
+	Asc    bool
+}
+
+func (c *Client) Messages(ctx context.Context, sessionID string, p MessagesParams) (MessagePage, error) {
+	q := url.Values{}
+	if p.Limit > 0 {
+		q.Set("limit", strconv.Itoa(p.Limit))
 	}
-	var raw json.RawMessage
-	if err := c.doWith(ctx, c.longHTTP, "POST", fmt.Sprintf("/session/%s/message", sessionID), body, &raw); err != nil {
-		return nil, err
+	if p.Cursor != "" {
+		q.Set("cursor", p.Cursor)
+	} else if p.Asc {
+		q.Set("order", "asc")
+	} else {
+		q.Set("order", "desc")
 	}
-	return raw, nil
-}
-
-// promptTools is sent with every prompt to switch individual opencode tools
-// off for that turn. "task" is opencode's subagent tool — the local models
-// we run serve one request at a time, so a subagent call would just queue
-// behind (and deadlock on) the parent turn that spawned it.
-var promptTools = map[string]bool{"task": false}
-
-// PromptAsync sends a text prompt into an existing session and returns
-// immediately (opencode responds 204) — the reply streams in as events on
-// the /event SSE stream (see StreamEvents) instead of blocking this call.
-func (c *Client) PromptAsync(ctx context.Context, sessionID, text string) error {
-	return c.PromptAsyncParts(ctx, sessionID, []string{text})
-}
-
-// PromptAsyncParts is PromptAsync with several texts as separate text parts
-// of one user message — how a station's queued messages all reach the model
-// together in a single turn (see station.Service's queue).
-func (c *Client) PromptAsyncParts(ctx context.Context, sessionID string, texts []string) error {
-	parts := make([]map[string]any, len(texts))
-	for i, t := range texts {
-		parts[i] = map[string]any{"type": "text", "text": t}
+	if p.Type != "" {
+		q.Set("type", p.Type)
 	}
-	body := map[string]any{"parts": parts, "tools": promptTools}
-	return c.do(ctx, "POST", fmt.Sprintf("/session/%s/prompt_async", sessionID), body, nil)
+	var env struct {
+		Data   []Message `json:"data"`
+		Cursor struct {
+			Next string `json:"next"`
+		} `json:"cursor"`
+	}
+	if err := c.doRaw(ctx, c.http, "GET", "/api/session/"+sessionID+"/message?"+q.Encode(), nil, &env); err != nil {
+		return MessagePage{}, err
+	}
+	return MessagePage{Messages: env.Data, Next: env.Cursor.Next}, nil
 }
 
-// StreamEvents opens opencode's global SSE event stream (message updates,
-// part updates, session updates, ...) and returns the raw response for the
-// caller to copy through — see api.streamEvents, which proxies this
-// verbatim to the app rather than parsing/filtering it server-side (this is
-// a local single-user dev tool; the app filters by its own session ID).
-// The returned response's Body must be closed by the caller. No fixed
-// timeout: the connection is meant to stay open indefinitely, bounded only
-// by ctx.
+// PermissionRequest is a pending tool-permission request; opencode pauses
+// the session's turn until it is answered.
+type PermissionRequest struct {
+	ID        string          `json:"id"`
+	SessionID string          `json:"sessionID"`
+	Action    string          `json:"action"`
+	Resources []string        `json:"resources"`
+	Save      []string        `json:"save"`
+	Metadata  json.RawMessage `json:"metadata"`
+}
+
+func (c *Client) Permissions(ctx context.Context, sessionID string) ([]PermissionRequest, error) {
+	var out []PermissionRequest
+	err := c.do(ctx, "GET", "/api/session/"+sessionID+"/permission", nil, &out)
+	return out, err
+}
+
+// ReplyPermission answers a pending permission request: decision is
+// "once", "always" or "reject".
+func (c *Client) ReplyPermission(ctx context.Context, sessionID, requestID, decision string) error {
+	return c.do(ctx, "POST", "/api/session/"+sessionID+"/permission/"+requestID+"/reply", map[string]any{"decision": decision}, nil)
+}
+
+// Form is a pending question form (opencode's question tool). Each field is
+// one question; the session's turn waits for a reply.
+type Form struct {
+	ID        string      `json:"id"`
+	SessionID string      `json:"sessionID"`
+	Title     string      `json:"title"`
+	Fields    []FormField `json:"fields"`
+}
+
+type FormField struct {
+	Key         string       `json:"key"`
+	Title       string       `json:"title"`
+	Description string       `json:"description"`
+	Type        string       `json:"type"`
+	Options     []FormOption `json:"options"`
+	Custom      bool         `json:"custom"`
+}
+
+type FormOption struct {
+	Value       string `json:"value"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+}
+
+func (c *Client) Forms(ctx context.Context, sessionID string) ([]Form, error) {
+	var out []Form
+	err := c.do(ctx, "GET", "/api/session/"+sessionID+"/form", nil, &out)
+	return out, err
+}
+
+// ReplyForm answers a pending form: answer maps each field key to its
+// value (a string, or a list of strings for a multiple-choice field).
+func (c *Client) ReplyForm(ctx context.Context, sessionID, formID string, answer map[string]any) error {
+	return c.do(ctx, "POST", "/api/session/"+sessionID+"/form/"+formID+"/reply", map[string]any{"answer": answer}, nil)
+}
+
+// RejectForm declines a pending form outright.
+func (c *Client) RejectForm(ctx context.Context, sessionID, formID string) error {
+	return c.do(ctx, "DELETE", "/api/session/"+sessionID+"/form/"+formID, nil, nil)
+}
+
+// Provider is an entry of GET /api/provider.
+type Provider struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Package  string `json:"package"`
+	Settings struct {
+		BaseURL string `json:"baseURL"`
+		APIKey  string `json:"apiKey"`
+	} `json:"settings"`
+}
+
+func (c *Client) Providers(ctx context.Context) ([]Provider, error) {
+	var out []Provider
+	err := c.do(ctx, "GET", "/api/provider", nil, &out)
+	return out, err
+}
+
+// Model is an entry of GET /api/model. Limit is the one opencode actually
+// compacts against, after the super-badger plugin's detection and overrides.
+type Model struct {
+	ID         string `json:"id"`
+	ProviderID string `json:"providerID"`
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Enabled    bool   `json:"enabled"`
+	Limit      struct {
+		Context int `json:"context"`
+		Output  int `json:"output"`
+	} `json:"limit"`
+}
+
+func (c *Client) Models(ctx context.Context) ([]Model, error) {
+	var out []Model
+	err := c.do(ctx, "GET", "/api/model", nil, &out)
+	return out, err
+}
+
+// StreamEvents opens opencode's global SSE event stream. The caller must
+// close the response body. No fixed timeout: bounded only by ctx.
 func (c *Client) StreamEvents(ctx context.Context) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/event", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/api/event", nil)
 	if err != nil {
 		return nil, err
 	}
-	if c.password != "" {
-		req.SetBasicAuth("opencode", c.password)
-	}
+	req.Header.Set("Accept", "text/event-stream")
+	req.SetBasicAuth("opencode", c.password)
 	resp, err := c.longHTTP.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	if resp.StatusCode >= 300 {
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		resp.Body.Close()
-		return nil, fmt.Errorf("opencode GET /event: status %d", resp.StatusCode)
+		return nil, &APIError{Method: "GET", Path: "/api/event", Status: resp.StatusCode, Body: string(b)}
 	}
 	return resp, nil
 }
 
-// ListPermissions returns every pending permission request across all
-// sessions — see station.Service.PendingPermissions, which filters this down
-// to one session so a freshly-connected station WebSocket can push whatever
-// was already pending instead of only ever seeing ones asked after connect.
-func (c *Client) ListPermissions(ctx context.Context) (json.RawMessage, error) {
-	var raw json.RawMessage
-	if err := c.do(ctx, "GET", "/permission", nil, &raw); err != nil {
-		return nil, err
-	}
-	return raw, nil
-}
-
-// ReplyPermission answers a pending tool-permission request (opencode pauses
-// the agent loop entirely until this is called — that's what "stuck on
-// read" was: a permission.asked event nobody was listening for or able to
-// answer). reply must be "once", "always", or "reject".
-func (c *Client) ReplyPermission(ctx context.Context, requestID, reply string) error {
-	body := map[string]any{"reply": reply}
-	return c.do(ctx, "POST", fmt.Sprintf("/permission/%s/reply", requestID), body, nil)
-}
-
-// ListQuestions returns every pending question request across all sessions
-// — opencode's AskUserQuestion-style tool, a distinct mechanism from
-// permissions (see station.Service.PendingQuestions, which filters this down
-// to one session the same way PendingPermissions does). Without a reply,
-// opencode pauses the session's agent loop the same way an unanswered
-// permission does.
-func (c *Client) ListQuestions(ctx context.Context) (json.RawMessage, error) {
-	var raw json.RawMessage
-	if err := c.do(ctx, "GET", "/question", nil, &raw); err != nil {
-		return nil, err
-	}
-	return raw, nil
-}
-
-// ReplyQuestion answers a pending question request. answers is one entry per
-// question in the request (a QuestionRequest can carry more than one), each
-// entry the selected option label(s) for that question.
-func (c *Client) ReplyQuestion(ctx context.Context, requestID string, answers [][]string) error {
-	body := map[string]any{"answers": answers}
-	return c.do(ctx, "POST", fmt.Sprintf("/question/%s/reply", requestID), body, nil)
-}
-
-// RejectQuestion declines a pending question request outright (the
-// question-mechanism equivalent of denying a permission).
-func (c *Client) RejectQuestion(ctx context.Context, requestID string) error {
-	return c.do(ctx, "POST", fmt.Sprintf("/question/%s/reject", requestID), nil, nil)
-}
-
-func (c *Client) ListProviders(ctx context.Context) (json.RawMessage, error) {
-	var raw json.RawMessage
-	if err := c.do(ctx, "GET", "/config/providers", nil, &raw); err != nil {
-		return nil, err
-	}
-	return raw, nil
-}
-
-func (c *Client) ListModels(ctx context.Context) (json.RawMessage, error) {
-	var raw json.RawMessage
-	if err := c.do(ctx, "GET", "/api/model", nil, &raw); err != nil {
-		return nil, err
-	}
-	return raw, nil
-}
-
+// do unwraps opencode's {data} envelope into out.
 func (c *Client) do(ctx context.Context, method, path string, body any, out any) error {
 	return c.doWith(ctx, c.http, method, path, body, out)
 }
 
 func (c *Client) doWith(ctx context.Context, client *http.Client, method, path string, body any, out any) error {
+	if out == nil {
+		return c.doRaw(ctx, client, method, path, body, nil)
+	}
+	var raw json.RawMessage
+	if err := c.doRaw(ctx, client, method, path, body, &raw); err != nil {
+		return err
+	}
+	if len(raw) == 0 {
+		return nil
+	}
+	// A few routes (interrupt) answer without the envelope.
+	var env struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &env); err == nil && len(env.Data) > 0 {
+		raw = env.Data
+	}
+	if err := json.Unmarshal(raw, out); err != nil {
+		return fmt.Errorf("opencode %s %s: decode response: %w", method, path, err)
+	}
+	return nil
+}
+
+// doRaw decodes the whole response body into out, envelope included.
+func (c *Client) doRaw(ctx context.Context, client *http.Client, method, path string, body any, out any) error {
 	var reqBody io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -358,36 +434,35 @@ func (c *Client) doWith(ctx context.Context, client *http.Client, method, path s
 		}
 		reqBody = bytes.NewReader(b)
 	}
-
 	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reqBody)
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	if c.password != "" {
-		req.SetBasicAuth("opencode", c.password)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
 	}
+	req.SetBasicAuth("opencode", c.password)
 
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err
 	}
-
 	if resp.StatusCode >= 300 {
-		return fmt.Errorf("opencode %s %s: status %d: %s", method, path, resp.StatusCode, string(respBody))
+		var tag struct {
+			Tag string `json:"_tag"`
+		}
+		_ = json.Unmarshal(respBody, &tag)
+		return &APIError{Method: method, Path: path, Status: resp.StatusCode, Tag: tag.Tag, Body: string(respBody)}
 	}
-
 	if out != nil && len(respBody) > 0 {
 		if err := json.Unmarshal(respBody, out); err != nil {
 			return fmt.Errorf("opencode %s %s: decode response: %w", method, path, err)
 		}
 	}
-
 	return nil
 }

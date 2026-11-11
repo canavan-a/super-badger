@@ -1,4 +1,4 @@
-// Package metrics implements the Super Badger Station Standard API poller:
+// Package metrics implements the Super Galleon Station Standard API poller:
 // an arbitrary set of external HTTP sources, each returning a JSON object of
 // the shape {"<station-id-or-name>": {"<key>": <number>, ...}, ...}. Values
 // are stored per (station, key) as the latest known reading (see
@@ -50,7 +50,7 @@ func (f NotifierFunc) NotifyThreshold(station database.Station, key, label strin
 	f(station, key, label, decimals, value, direction)
 }
 
-// HTTPSource polls one Super Badger Station Standard API endpoint.
+// HTTPSource polls one Super Galleon Station Standard API endpoint.
 type HTTPSource struct {
 	Name   string
 	URL    string

@@ -2,7 +2,9 @@ package opencode
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -58,4 +60,45 @@ func ModelEndpointAlive(ctx context.Context, baseURL, apiKey string) bool {
 		return false
 	}
 	return status < 300 || status == http.StatusUnauthorized || status == http.StatusForbidden
+}
+
+// EngineContext asks the llama.cpp or Strata server behind baseURL for its
+// context size (GET <origin>/props, default_generation_settings.n_ctx) — the
+// same probe the super-badger opencode plugin runs. 0 when the server doesn't
+// say (not a llama.cpp/Strata server, down, or Strata still starting).
+func EngineContext(ctx context.Context, baseURL, apiKey string) int {
+	u := strings.TrimRight(baseURL, "/")
+	u = strings.TrimSuffix(u, "/v1") + "/props"
+	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
+	if err != nil {
+		return 0
+	}
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0
+	}
+	var p struct {
+		Settings struct {
+			NCtx int `json:"n_ctx"`
+		} `json:"default_generation_settings"`
+		NCtx int `json:"n_ctx"`
+	}
+	if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&p) != nil {
+		return 0
+	}
+	n := p.Settings.NCtx
+	if n == 0 {
+		n = p.NCtx
+	}
+	if n < 1024 {
+		return 0
+	}
+	return n
 }

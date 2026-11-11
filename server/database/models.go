@@ -58,7 +58,7 @@ type Station struct {
 	UpdatedAt          time.Time `json:"updated_at"`
 }
 
-// MetricSource is one external "Super Badger Station Standard API" endpoint
+// MetricSource is one external "Super Galleon Station Standard API" endpoint
 // the server polls on its own schedule (see server/metrics for the spec and
 // the poller). Multiple sources can each cover a different subset of
 // Stations (e.g. one per physical box).

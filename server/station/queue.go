@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strings"
 	"sync"
 	"time"
 
 	"main/database"
+	"main/opencode"
 )
 
 // A Station's outgoing prompts go through a server-side queue rather than
@@ -147,7 +147,7 @@ func (s *Service) drain(ctx context.Context, id uint) {
 	defer l.Unlock()
 
 	st, err := database.GetStation(s.db, id)
-	if err != nil || st.OpencodeSessionID == "" {
+	if err != nil {
 		return
 	}
 	msgs, err := database.TakeQueue(s.db, id)
@@ -156,28 +156,34 @@ func (s *Service) drain(ctx context.Context, id uint) {
 	}
 	s.publishQueue(id)
 
-	texts := make([]string, len(msgs))
+	// One opencode prompt per queued message, in order, each steered into
+	// a running turn at its next step boundary.
 	for i, m := range msgs {
-		texts[i] = m.Text
-	}
-	if err := s.promptWithRecovery(ctx, &st, texts); err != nil {
-		log.Printf("[station %d] queue: send: %v", id, err)
-		if rerr := database.RestoreQueue(s.db, msgs); rerr != nil {
-			log.Printf("[station %d] queue: restore: %v", id, rerr)
+		if err := s.promptWithRecovery(ctx, &st, m.Text); err != nil {
+			log.Printf("[station %d] queue: send: %v", id, err)
+			if rerr := database.RestoreQueue(s.db, msgs[i:]); rerr != nil {
+				log.Printf("[station %d] queue: restore: %v", id, rerr)
+			}
+			s.publishQueue(id)
+			s.publish(id, map[string]any{"type": "error", "error": err.Error()})
+			return
 		}
-		s.publishQueue(id)
-		s.publish(id, map[string]any{"type": "error", "error": err.Error()})
 	}
 }
 
-// promptWithRecovery sends texts, and if opencode reports the session no
-// longer exists (e.g. opencode itself restarted, which drops all sessions
-// from memory — confirmed live), transparently replaces it with a fresh
-// session and retries once, telling subscribers what's happening rather
-// than silently retrying behind their backs.
-func (s *Service) promptWithRecovery(ctx context.Context, st *database.Station, texts []string) error {
-	err := s.oc.PromptAsyncParts(ctx, st.OpencodeSessionID, texts)
-	if err == nil || !strings.Contains(err.Error(), "Session not found") {
+// promptWithRecovery sends text, giving the station a session first if it
+// has none (the opencode 2 cutover cleared them all). If opencode no longer
+// has the session (its storage was reset), it replaces it with a fresh one
+// and retries once, telling subscribers what's happening.
+func (s *Service) promptWithRecovery(ctx context.Context, st *database.Station, text string) error {
+	if st.OpencodeSessionID == "" {
+		if err := s.activate(ctx, st); err != nil {
+			return fmt.Errorf("couldn't start a session: %w", err)
+		}
+		s.publish(st.ID, SessionChanged{SessionID: st.OpencodeSessionID})
+	}
+	_, err := s.oc.Prompt(ctx, st.OpencodeSessionID, text, opencode.Steer)
+	if err == nil || !opencode.IsSessionNotFound(err) {
 		return err
 	}
 	s.publish(st.ID, map[string]any{"type": "notice", "text": "Session expired — starting a new one…"})
@@ -188,7 +194,8 @@ func (s *Service) promptWithRecovery(ctx context.Context, st *database.Station, 
 	// Tells clients to discard the transcript they're showing — it belongs
 	// to the now-dead session, not this new one.
 	s.publish(st.ID, map[string]any{"type": "session_reset"})
-	return s.oc.PromptAsyncParts(ctx, st.OpencodeSessionID, texts)
+	_, err = s.oc.Prompt(ctx, st.OpencodeSessionID, text, opencode.Steer)
+	return err
 }
 
 // RunQueue retries every station's leftover queue on a periodic sweep (sends

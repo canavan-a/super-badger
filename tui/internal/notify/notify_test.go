@@ -48,7 +48,7 @@ func TestLinuxDetectAndSend(t *testing.T) {
 	if err := n.Notify(context.Background(), "alpha finished", "The agent is done."); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"--app-name=superbadger", "--urgency=normal", "--expire-time=8000", "--", "alpha finished", "The agent is done."}
+	want := []string{"--app-name=Super Galleon", "--urgency=normal", "--expire-time=8000", "--", "alpha finished", "The agent is done."}
 	if len(*calls) != 1 || (*calls)[0].name != "notify-send" || strings.Join((*calls)[0].args, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("ran %+v, want notify-send %v", *calls, want)
 	}
@@ -165,7 +165,7 @@ func TestCleanMakesTextSafeAndShort(t *testing.T) {
 		t.Errorf("unicode must survive: %q", got)
 	}
 	t1, _ := prepare("  \n ", "body")
-	if t1 != "superbadger" {
+	if t1 != "Super Galleon" {
 		t.Errorf("an empty title should fall back to the app name, got %q", t1)
 	}
 }
@@ -195,7 +195,7 @@ func TestRealDesktopNotification(t *testing.T) {
 	if err != nil {
 		t.Skipf("no notifier here: %v", err)
 	}
-	if err := n.Notify(context.Background(), "superbadger test", "If you can read this, desktop notifications work."); err != nil {
+	if err := n.Notify(context.Background(), "Super Galleon test", "If you can read this, desktop notifications work."); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -187,7 +187,7 @@ export function SplashScreen({theme, onDone, reduceMotion}: Props): React.JSX.El
     );
 
   return (
-    <Animated.View style={[StyleSheet.absoluteFill, {backgroundColor: theme.bg, opacity: v.exit}]} accessible accessibilityLabel="Super Badger">
+    <Animated.View style={[StyleSheet.absoluteFill, {backgroundColor: theme.bg, opacity: v.exit}]} accessible accessibilityLabel="Super Galleon">
       <Pressable style={styles.center} onPress={skip} accessibilityRole="button" accessibilityLabel="Skip intro">
         <View style={{width: W, height: H}}>
           <Animated.View

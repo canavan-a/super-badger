@@ -113,7 +113,7 @@ export async function startMonitoring(): Promise<void> {
   await ensureChannels();
   await notifee.displayNotification({
     id: NID_FGS,
-    title: 'super-badger',
+    title: 'Super Galleon',
     body: 'Watching for agent activity…',
     data: PREFER_SMALL_ICON,
     android: {

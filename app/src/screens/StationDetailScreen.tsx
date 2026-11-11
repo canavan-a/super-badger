@@ -18,18 +18,16 @@ import {
   abortStation,
   compactStation,
   deleteStation,
+  formatContextUsage,
   formatDataPointValue,
-  formatTokens,
   getStation,
   getStationDataPoints,
-  getStationUsage,
   resetStation,
   Station,
   StationDataPoint,
-  TokenUsage,
 } from '../api';
 import {allTurns, ChatState, Part, PendingPermission, PendingQuestion, Turn, turnText} from '../chat';
-import {DiggingSpinner} from '../components/DiggingSpinner';
+import {SailingSpinner} from '../components/SailingSpinner';
 import {Icon} from '../components/Icon';
 import {PixelField} from '../components/PixelField';
 import {CodeBlockSegment, parseMarkdown} from '../markdown';
@@ -74,27 +72,14 @@ export function StationDetailScreen({
     loadingOlder,
     loadOlder,
     listKey,
+    refreshUsage,
   } = useStationChat(stationId);
 
-  // Token/cost usage — same figures the opencode CLI's status line shows.
-  // There's no event for this, so it's refetched whenever a turn finishes
-  // (chat.busy true -> false) and once on mount.
-  const [usage, setUsage] = useState<TokenUsage | null>(null);
-  const refreshUsage = useCallback(() => {
-    getStationUsage(stationId)
-      .then(setUsage)
-      .catch(() => {
-        // Usage is a nice-to-have status line, not worth surfacing as an error.
-      });
-  }, [stationId]);
-  useEffect(() => {
-    refreshUsage();
-  }, [refreshUsage]);
-  useEffect(() => {
-    if (!chat.busy) refreshUsage();
-  }, [chat.busy, refreshUsage]);
+  // The context gauge (ctx / limit) — kept current by the socket's live
+  // `usage` events (see chat.ts's UsageInfo), no polling.
+  const usage = chat.usage;
 
-  // Ad hoc data points (Super Badger Station Standard API) the owner chose
+  // Ad hoc data points (Super Galleon Station Standard API) the owner chose
   // to surface on the top bar — see StationSettingsScreen for the toggle.
   // Polled independently of usage since a data point can update on its own
   // schedule regardless of chat activity.
@@ -230,21 +215,17 @@ export function StationDetailScreen({
   // away on the header itself.
   const [menuOpen, setMenuOpen] = useState(false);
 
-  // "ctx" (not "tok"/"total") since this is current context occupancy —
-  // drops after a compaction — not a cumulative total-spent figure. Must
-  // include cache_read: on a locally-cached model, most of a multi-turn
-  // session's active context is tokens already sitting in the KV cache and
-  // reused rather than reprocessed each turn — input+output alone is only
-  // the small *new* slice for that one turn, which read as "a tiny
-  // per-message number" instead of the real total context size (what's
-  // actually resident/active for the model right now). Computed at
-  // component scope (not just inside the header effect below) so the •••
-  // menu's Compact row can show the same label.
-  const activeContext = usage ? usage.input + usage.output + usage.cache_read + usage.cache_write : 0;
+  // Current context occupancy against the model's window ("7.1k / 12k") —
+  // drops after a compaction — not a cumulative total-spent figure. The
+  // server's tokens.ctx already includes cached tokens, which on a local
+  // model are most of a multi-turn session's context. Computed at component
+  // scope (not just inside the header effect below) so the ••• menu's
+  // Compact row can show the same label.
+  const contextLabel = formatContextUsage(usage);
   const compactLabel = compacting
     ? 'Compacting…'
-    : activeContext > 0
-    ? `Compact (${formatTokens(activeContext)} ctx)`
+    : contextLabel
+    ? `Compact (${contextLabel} ctx)`
     : 'Compact';
 
   // Reports title/subtitle/actions up to App's single top bar instead of
@@ -271,19 +252,19 @@ export function StationDetailScreen({
       {key: 'delete' as const, label: 'Delete', onPress: confirmDelete, destructive: true},
     ].filter(a => station.top_bar_actions.includes(a.key));
     const badges = topBarPoints.map(p => ({label: p.label || p.key, value: formatDataPointValue(p.value, p.decimals)}));
-    const showTokenCount = station.top_bar_actions.includes('tokens') && activeContext > 0;
+    const showTokenCount = station.top_bar_actions.includes('tokens') && contextLabel !== null;
     onHeaderChange({
       title: station.name,
       indicator,
       accentColor: station.color,
       badges,
-      tokenCount: showTokenCount ? formatTokens(activeContext) : undefined,
+      tokenCount: showTokenCount ? contextLabel ?? undefined : undefined,
       onPress: () => onNavigate({name: 'stationSettings', id: stationId}),
       actions: [...optionalActions, {label: 'Actions', icon: 'kebab', onPress: () => setMenuOpen(true)}],
     });
     return () => onHeaderChange(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [station, usage, compacting, topBarPoints, theme]);
+  }, [station, contextLabel, compacting, topBarPoints, theme]);
 
   if (loading) {
     return (
@@ -319,10 +300,12 @@ export function StationDetailScreen({
       )}
       {chat.pendingQuestion && (
         <QuestionPrompt
+          // A fresh prompt per question: the selection must not carry over.
+          key={`${chat.pendingQuestion.id}/${chat.pendingQuestion.index}`}
           styles={styles}
           theme={theme}
           question={chat.pendingQuestion}
-          onReply={labels => replyQuestion(chat.pendingQuestion!.id, [labels])}
+          onReply={labels => replyQuestion(chat.pendingQuestion!.id, labels)}
           onReject={() => rejectQuestion(chat.pendingQuestion!.id)}
         />
       )}
@@ -336,7 +319,6 @@ export function StationDetailScreen({
           chat={chat}
           queue={queue}
           onRemoveQueued={removeQueued}
-          compacting={compacting}
           hasMoreHistory={hasMoreHistory}
           loadingOlder={loadingOlder}
           onLoadOlder={loadOlder}
@@ -489,7 +471,6 @@ function ChatList({
   chat,
   queue,
   onRemoveQueued,
-  compacting,
   hasMoreHistory,
   loadingOlder,
   onLoadOlder,
@@ -499,7 +480,6 @@ function ChatList({
   chat: ChatState;
   queue: QueuedMessage[];
   onRemoveQueued: (id: string) => void;
-  compacting: boolean;
   hasMoreHistory: boolean;
   loadingOlder: boolean;
   onLoadOlder: () => void;
@@ -540,14 +520,6 @@ function ChatList({
   const [visibleCount, setVisibleCount] = useState(CHAT_PAGE_SIZE);
   const turns = allChatTurns.slice(-visibleCount);
   const hasMoreAbove = allChatTurns.length > visibleCount;
-  // Mirrored into a ref so renderItem below (needed for prevTurn) can stay a
-  // stable useCallback instead of a fresh closure every render — a fresh
-  // renderItem gives each cell a new element identity every time, which
-  // would defeat TurnView's React.memo and bring back a re-render of every
-  // mounted bubble on each flush tick.
-  const turnsRef = useRef(turns);
-  turnsRef.current = turns;
-
   // Guards the pagination trigger below so it fires once per "reached near
   // the top" event instead of on every one of onScroll's ~60-times-a-second
   // ticks while the user lingers up there — `maintainVisibleContentPosition`
@@ -705,18 +677,15 @@ function ChatList({
   // selection across them.
   const [selectionText, setSelectionText] = useState<string | null>(null);
 
+  // A stable useCallback rather than a fresh closure every render — a fresh
+  // renderItem gives each cell a new element identity every time, which
+  // would defeat TurnView's React.memo and bring back a re-render of every
+  // mounted bubble on each flush tick.
   const renderItem = useCallback(
-    ({item, index}: {item: Turn; index: number}) => (
-      <TurnView
-        turn={item}
-        prevTurn={index > 0 ? turnsRef.current[index - 1] : undefined}
-        compacting={compacting}
-        onLongPress={setSelectionText}
-        styles={styles}
-        theme={theme}
-      />
+    ({item}: {item: Turn}) => (
+      <TurnView turn={item} onLongPress={setSelectionText} styles={styles} theme={theme} />
     ),
-    [compacting, styles, theme],
+    [styles, theme],
   );
 
   return (
@@ -923,10 +892,15 @@ function QuestionPrompt({
   const trimmedCustom = customText.trim();
   const answers = customActive && trimmedCustom ? [...selected, trimmedCustom] : selected;
   const canSubmit = answers.length > 0;
+  const total = question.questions.length;
+  const title = [question.header, total > 1 ? `(${question.index + 1} of ${total})` : '']
+    .filter(Boolean)
+    .join(' ');
+  const last = question.index + 1 >= total;
 
   return (
     <View style={styles.permissionBox}>
-      {question.header ? <Text style={styles.permissionTitle}>{question.header}</Text> : null}
+      {title ? <Text style={styles.permissionTitle}>{title}</Text> : null}
       <Text style={styles.permissionPatterns}>{question.question}</Text>
       <View style={styles.questionOptions}>
         {question.options.map(opt => (
@@ -961,7 +935,7 @@ function QuestionPrompt({
           style={[styles.permissionButton, !canSubmit && styles.permissionButtonDisabled]}
           disabled={!canSubmit}
           onPress={() => onReply(answers)}>
-          <Text style={styles.permissionButtonText}>Submit</Text>
+          <Text style={styles.permissionButtonText}>{last ? 'Submit' : 'Next'}</Text>
         </Pressable>
         <Pressable style={[styles.permissionButton, styles.permissionDeny]} onPress={onReject}>
           <Text style={styles.permissionButtonText}>Dismiss</Text>
@@ -971,25 +945,7 @@ function QuestionPrompt({
   );
 }
 
-// A real user prompt always has non-empty text (send() trims and bails on
-// empty). Auto-compaction (opencode compacting on its own when context fills
-// up, not via the Compact button) turned out to go through this same
-// message.updated/message.part.updated stream as a user+assistant turn pair
-// with no text content at all — that's a signature nothing else produces, so
-// it doubles as "this pair is a compaction artifact" regardless of what
-// triggered it, not just the manual button's `compacting` flag.
-function isEmptyUserTurn(t: Turn | undefined): boolean {
-  return (
-    !!t &&
-    t.role === 'user' &&
-    !t.partOrder.some(id => {
-      const p = t.parts[id];
-      return p.kind === 'text' && p.text;
-    })
-  );
-}
-
-// Mirrors the TUI's thinking() (tui/internal/ui/dig.go): an in-flight
+// Mirrors the TUI's thinking() (tui/internal/ui/sail.go): an in-flight
 // reply is "thinking" while its latest part is reasoning, or before anything
 // has streamed at all.
 function isThinking(turn: Turn): boolean {
@@ -1008,15 +964,11 @@ function isThinking(turn: Turn): boolean {
 // reference is a reliable "did this one actually change" signal.
 const TurnView = React.memo(function TurnView({
   turn,
-  prevTurn,
-  compacting,
   onLongPress,
   styles,
   theme,
 }: {
   turn: Turn;
-  prevTurn?: Turn;
-  compacting: boolean;
   onLongPress: (text: string) => void;
   styles: Styles;
   theme: Theme;
@@ -1026,16 +978,22 @@ const TurnView = React.memo(function TurnView({
     if (text) onLongPress(text);
   };
   if (turn.role === 'user') {
-    // Hide rather than show an empty bubble ("a dot for mine") — the paired
-    // assistant turn right after it (below) carries the one visible badge
-    // for this pair instead.
-    if (isEmptyUserTurn(turn)) return null;
     // Messages the server queue sent together arrive as one user message
-    // with a text part each — one bubble per part, as they were typed.
+    // with a text part each — one bubble per part, as they were typed. A
+    // synthetic user turn (e.g. context carried over from the previous
+    // session) has a notice part instead, shown as a chip. Empty parts
+    // render nothing, so an empty turn takes no space.
     return (
       <>
         {turn.partOrder.map(id => {
           const part = turn.parts[id];
+          if (part.kind === 'notice' && part.text) {
+            return (
+              <View key={id} style={[styles.bubble, styles.bubbleAssistant]}>
+                <Text style={styles.chip}>⚙ {part.text}</Text>
+              </View>
+            );
+          }
           return part.kind === 'text' && part.text ? (
             <Pressable
               key={id}
@@ -1048,15 +1006,19 @@ const TurnView = React.memo(function TurnView({
       </>
     );
   }
-  // Compact (button, or opencode auto-compacting on its own) creates its own
-  // turn pair on the wire, and the reply streams the compaction agent's
-  // reasoning and summary — opening with an empty reasoning part, which left
-  // a blank bubble. Its parts are never shown: just the compaction chip.
-  const isCompactionReply = isEmptyUserTurn(prevTurn) || (compacting && turn.partOrder.length === 0);
-  if (isCompactionReply) {
+  // Compaction is explicit now: the server sends a turn holding just a
+  // `compaction` part (chat.ts maps it to a "Compacting…" / "Conversation
+  // compacted" / "Compaction failed" notice). A turn of nothing but notices
+  // like that is a marker, shown as a chip rather than a reply bubble.
+  const notices = turn.partOrder.map(id => turn.parts[id]);
+  if (notices.length > 0 && notices.every(p => p.kind === 'notice')) {
     return (
       <View style={[styles.bubble, styles.bubbleAssistant]}>
-        <Text style={styles.chip}>{turn.done ? '⚙ Conversation compacted' : '⚙ Compaction triggered'}</Text>
+        {notices.map(p => (
+          <Text key={p.id} style={styles.chip}>
+            ⚙ {p.kind === 'notice' ? p.text : ''}
+          </Text>
+        ))}
       </View>
     );
   }
@@ -1068,7 +1030,7 @@ const TurnView = React.memo(function TurnView({
       {/* Sits on its own line at the tail of the bubble, but only while the
           model is thinking — not while it streams its answer or a tool runs,
           which show their own progress. */}
-      {!turn.done && isThinking(turn) && <DiggingSpinner />}
+      {!turn.done && isThinking(turn) && <SailingSpinner />}
     </Pressable>
   );
 });

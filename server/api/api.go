@@ -34,6 +34,15 @@ func NewRouter(svc *station.Service, oc *opencode.Client, mv *mullvad.Client, br
 	corsConfig.AllowOrigins = []string{"*"}
 	corsConfig.AllowHeaders = []string{"Content-Type", "Authorization"}
 	r.Use(cors.New(corsConfig))
+	// The opencode plugin's override feed: this host only, ahead of auth
+	// (see internalLimits).
+	r.GET("/internal/limits", func(c *gin.Context) {
+		if !isLocal(c) {
+			c.AbortWithStatus(http.StatusForbidden)
+			return
+		}
+		internalLimits(db)(c)
+	})
 	r.Use(RequireAuth(db))
 
 	// Liveness of superbadger itself — deliberately not touching opencode or
@@ -78,6 +87,8 @@ func NewRouter(svc *station.Service, oc *opencode.Client, mv *mullvad.Client, br
 
 	r.GET("/providers", listProviders(oc))
 	r.GET("/models", listModels(oc))
+	r.GET("/limits", listLimits(oc, db))
+	r.PUT("/limits", setLimit(db, broker))
 	r.POST("/providers/test", testProviderConnection())
 
 	r.GET("/mullvad/status", mullvadStatus(mv))
@@ -305,12 +316,12 @@ func promptStation(svc *station.Service) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-		resp, err := svc.Prompt(c.Request.Context(), id, body.Text)
+		events, err := svc.Prompt(c.Request.Context(), id, body.Text)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.Data(http.StatusOK, "application/json", resp)
+		c.JSON(http.StatusOK, gin.H{"events": events})
 	}
 }
 
@@ -447,9 +458,9 @@ func stationHistory(svc *station.Service) gin.HandlerFunc {
 			}
 			limit = min(n, historyPageMax)
 		}
-		events, cursor, hasMore, err := svc.HistoryPage(id, c.Query("before"), limit)
+		events, cursor, hasMore, err := svc.HistoryPage(c.Request.Context(), id, c.Query("before"), limit)
 		if err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 			return
 		}
 		writeJSONMaybeGzip(c, http.StatusOK, historyPage{Events: events, Cursor: cursor, HasMore: hasMore})
@@ -473,28 +484,6 @@ func writeJSONMaybeGzip(c *gin.Context, status int, v any) {
 	_ = zw.Close()
 	c.Header("Content-Encoding", "gzip")
 	c.Data(status, "application/json", buf.Bytes())
-}
-
-func listProviders(oc *opencode.Client) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		raw, err := oc.ListProviders(c.Request.Context())
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		c.Data(http.StatusOK, "application/json", raw)
-	}
-}
-
-func listModels(oc *opencode.Client) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		raw, err := oc.ListModels(c.Request.Context())
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		c.Data(http.StatusOK, "application/json", raw)
-	}
 }
 
 func testProviderConnection() gin.HandlerFunc {

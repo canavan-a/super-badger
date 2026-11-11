@@ -37,10 +37,19 @@ type (
 	flushMsg   struct{ gen int }
 	pollMsg    struct{ gen int }
 	historyMsg struct {
-		gen   int
+		gen int
+		// seq is chatModel.histSeq when the fetch was made: a page fetched
+		// before the latest rebuild belongs to a transcript that's gone.
+		seq   int
 		page  api.HistoryPage
 		older bool // a scroll-up page, to go above what's shown
-		err   error
+		// rebuild: a resync's fresh newest page, replacing the transcript
+		rebuild bool
+		err     error
+	}
+	runStatusMsg struct {
+		gen    int
+		status string
 	}
 	dpMsg struct {
 		gen int
@@ -111,8 +120,8 @@ type chatModel struct {
 	showThink bool
 
 	dps        []api.DataPoint
-	usage      api.TokenUsage
 	compacting bool
+	opened     bool // the socket has been open before (so "open" is a reconnect)
 
 	// History paging: only the newest page is fetched on open; older pages
 	// come in as the transcript is scrolled to its top (see loadOlder).
@@ -120,6 +129,9 @@ type chatModel struct {
 	histMore     bool
 	loadingOlder bool
 	anchor       bool // keep the view put across the next prepend
+	// histSeq counts transcript rebuilds requested (resync); history pages
+	// fetched before the latest one are dropped on arrival.
+	histSeq int
 
 	menu bool
 	help bool // the /help command list is showing
@@ -208,11 +220,32 @@ func (m *chatModel) pollTick() tea.Cmd {
 const historyPageSize = 5
 
 func (m *chatModel) fetchHistory(before string) tea.Cmd {
-	c, id, gen := m.client, m.station.ID, m.gen
+	c, id, gen, seq := m.client, m.station.ID, m.gen, m.histSeq
 	return func() tea.Msg {
 		p, err := c.History(id, before, historyPageSize)
-		return historyMsg{gen: gen, page: p, older: before != "", err: err}
+		return historyMsg{gen: gen, seq: seq, page: p, older: before != "", err: err}
 	}
+}
+
+// resync rebuilds the transcript from a fresh newest history page and
+// re-reads the run status: after a "resync" event (the server's upstream
+// stream reconnected), this socket reconnecting, or the station moving to a
+// new session, when events may have been missed.
+func (m *chatModel) resync() tea.Cmd {
+	m.histSeq++
+	c, id, gen, seq := m.client, m.station.ID, m.gen, m.histSeq
+	return tea.Batch(
+		func() tea.Msg {
+			p, err := c.History(id, "", historyPageSize)
+			return historyMsg{gen: gen, seq: seq, page: p, rebuild: true, err: err}
+		},
+		func() tea.Msg {
+			if st, err := c.RunStatus(id); err == nil && st != "" {
+				return runStatusMsg{gen, st}
+			}
+			return nil
+		},
+	)
 }
 
 // loadOlder fetches the next older page once the transcript is scrolled to
@@ -270,6 +303,24 @@ func (m *chatModel) Update(msg tea.Msg) tea.Cmd {
 		if msg.m.Frame != nil {
 			if !m.applyQueueFrame(msg.m.Frame) {
 				if e, err := chat.ParseEvent(msg.m.Frame); err == nil {
+					if e.Type == "resync" {
+						// The server's upstream stream reconnected and may
+						// have dropped events: rebuild from history.
+						return tea.Batch(m.waitFrame(), m.resync())
+					}
+					if e.Type == "session_reset" {
+						// The station moved to a new session. Applied now with
+						// whatever is buffered (not at the next flush), so it
+						// can't land after — and wipe — the new session's
+						// history fetched below. That history has what was sent
+						// before this arrived (the carried-over context, a
+						// continue prompt); the old session's paging cursor is
+						// meaningless.
+						m.pending = append(m.pending, e)
+						m.flush()
+						m.histCursor, m.histMore, m.anchor = "", false, false
+						return tea.Batch(m.waitFrame(), m.resync(), m.fetchTop())
+					}
 					m.pending = append(m.pending, e)
 				}
 			}
@@ -277,6 +328,11 @@ func (m *chatModel) Update(msg tea.Msg) tea.Cmd {
 			m.status = msg.m.Status
 			if m.status == "open" {
 				m.sendUnsent()
+				if m.opened {
+					// Events sent while the socket was down are gone.
+					return tea.Batch(m.waitFrame(), m.resync())
+				}
+				m.opened = true
 			}
 		}
 		return m.waitFrame()
@@ -293,6 +349,12 @@ func (m *chatModel) Update(msg tea.Msg) tea.Cmd {
 		return tea.Batch(m.pollTick(), m.fetchTop())
 
 	case historyMsg:
+		if msg.seq != m.histSeq {
+			// Fetched against a transcript a rebuild has since replaced:
+			// splicing it in would leave a gap or misorder turns. (The
+			// rebuild already cleared loadingOlder.)
+			return nil
+		}
 		if msg.older {
 			m.loadingOlder = false
 		}
@@ -304,7 +366,10 @@ func (m *chatModel) Update(msg tea.Msg) tea.Cmd {
 			m.state.Prepend(msg.page.Events)
 			m.anchor = !m.stick
 		} else {
-			m.state.Seed(msg.page.Events)
+			// The first page on open, or a resync's: either way built fresh,
+			// keeping what arrived live meanwhile after it (see Rebuilt).
+			m.state = m.state.Rebuilt(msg.page.Events)
+			m.loadingOlder, m.anchor = false, false
 		}
 		m.dirty = true
 		// Pages are small, so one may not fill the screen — then there's
@@ -323,7 +388,14 @@ func (m *chatModel) Update(msg tea.Msg) tea.Cmd {
 		})
 		m.dps = msg.dps
 	case usageMsg:
-		m.usage = msg.u
+		limit := m.state.Usage.ContextLimit
+		m.state.Usage = msg.u
+		if m.state.Usage.ContextLimit == 0 {
+			m.state.Usage.ContextLimit = limit
+		}
+	case runStatusMsg:
+		m.state.Apply(chat.Event{Type: "status", Status: msg.status})
+		m.dirty = true
 	case stationMsg:
 		m.station = msg.s
 	case chatErrMsg:
@@ -371,7 +443,8 @@ func (m *chatModel) flush() tea.Cmd {
 	m.pending = nil
 	m.dirty = true
 	if wasBusy && !m.state.Busy {
-		// Usage isn't pushed by any event, so refetch when a reply completes.
+		// Usage is pushed live; this refreshes the station's own status and
+		// data points when a reply completes.
 		return m.fetchTop()
 	}
 	return nil
@@ -612,8 +685,8 @@ func (m *chatModel) menuKey(s string) tea.Cmd {
 }
 
 // kill force-stops the station's agent. Unlike /stop it doesn't check Busy:
-// Busy only turns on for replies this client sent, so a run started before
-// connecting (or from another client) would otherwise be unstoppable.
+// it's for when this client's idea of the run can't be trusted (a missed
+// status event), which would otherwise leave a run unstoppable.
 func (m *chatModel) kill() tea.Cmd {
 	// The server empties its queue as part of the abort; clearing here too
 	// just saves waiting for its snapshot.
@@ -683,7 +756,9 @@ func (m *chatModel) afterReset(s api.Station) {
 	m.state = chat.New()
 	m.pending, m.queue, m.unsent = nil, nil, nil
 	m.histCursor, m.histMore, m.anchor = "", false, false
-	m.usage = api.TokenUsage{}
+	// An older page still in flight belongs to the old session.
+	m.histSeq++
+	m.loadingOlder = false
 	m.dirty, m.stick = true, true
 	m.conn.Reconnect()
 }
@@ -742,8 +817,18 @@ func (m *chatModel) questionKey(q *chat.PendingQuestion, k tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
+// answerQuestion records the answer to the question showing and moves on to
+// the next; once all are answered they go to the server together.
 func (m *chatModel) answerQuestion(q *chat.PendingQuestion, answers []string) {
-	m.conn.Send(ws.QuestionReply(q.ID, [][]string{answers}))
+	all, done := q.Answer(answers)
+	if !done {
+		m.qCur, m.qSel, m.qTyping = 0, map[int]bool{}, false
+		m.qInput.SetValue("")
+		m.qInput.Blur()
+		m.dirty = true
+		return
+	}
+	m.conn.Send(ws.QuestionReply(q.ID, all))
 	m.resetQuestion()
 }
 
@@ -806,8 +891,12 @@ func (m *chatModel) topBar() string {
 		return s.Muted.Render(label+" ") + s.Primary.Bold(true).Render(value)
 	}
 	if m.station.HasAction("tokens") {
-		if ctx := m.usage.Context(); ctx > 0 {
-			parts = append(parts, metric("ctx", api.FormatTokens(ctx)))
+		if ctx := m.state.Usage.Context(); ctx > 0 {
+			v := api.FormatTokens(ctx)
+			if lim := m.state.Usage.ContextLimit; lim > 0 {
+				v += "/" + api.FormatTokens(lim)
+			}
+			parts = append(parts, metric("ctx", v))
 		}
 	}
 	for _, d := range m.dps {
@@ -923,16 +1012,19 @@ func (m *chatModel) transcript() string {
 	tw := max(10, m.w-6)
 	wrap := lipgloss.NewStyle().Width(tw)
 	var b strings.Builder
-	for i, t := range m.state.Turns {
-		if t.Role == "assistant" && i > 0 && compactionPrompt(m.state.Turns[i-1]) {
-			// The compaction agent's reasoning and summary: while it runs the
-			// compacting line below stands in for it, after that a marker.
-			if t.Done {
-				b.WriteString(" " + m.st.Muted.Render("◆ conversation compacted") + "\n\n")
+	for _, t := range m.state.Turns {
+		if t.Marker() {
+			// Compaction markers and synthetic turns ("context carried
+			// over"): one dim line each, not a message. A running
+			// compaction is shown by the compacting line below instead.
+			for _, id := range t.PartOrder {
+				if p := t.Parts[id]; p != nil && p.Text != "" && p.Status != "running" {
+					b.WriteString(" " + m.st.Muted.Render("◆ "+p.Text) + "\n\n")
+				}
 			}
 			continue
 		}
-		if len(t.PartOrder) == 0 {
+		if len(t.PartOrder) == 0 && t.Error == "" {
 			continue
 		}
 		if t.Role == "assistant" {
@@ -958,15 +1050,15 @@ func (m *chatModel) transcript() string {
 		m.queueRows = append(m.queueRows, queueRow{start, start + lipgloss.Height(block), i})
 		b.WriteString(block + "\n\n")
 	}
-	// Compacting replaces the digging line: an auto-compaction's empty reply
+	// Compacting replaces the sailing line: an auto-compaction's empty reply
 	// otherwise looks just like a reply that hasn't started thinking yet.
 	if m.isCompacting() {
 		dots := strings.Repeat(".", int(time.Now().UnixMilli()/400%4))
 		b.WriteString(" " + m.st.Primary.Render("◆ ") + m.st.Text.Render("compacting") + m.st.Muted.Render(dots+"  summarizing older messages to free up context") + "\n")
 	} else if thinking(m.state.Turns, m.state.Busy) {
 		now := time.Now()
-		dirt := lipgloss.NewStyle().Foreground(lipgloss.Color("#8B5A2B")).Render(digDots(now))
-		b.WriteString(" " + m.st.Primary.Render("◆ ") + m.st.Muted.Italic(true).Render(digWord(now)) + " " + dirt + "\n")
+		wake := m.st.Soft.Render(sprayDots(now))
+		b.WriteString(" " + m.st.Primary.Render("◆ ") + m.st.Muted.Italic(true).Render(sailWord(now)) + " " + wake + "\n")
 	}
 	if b.Len() == 0 {
 		b.WriteString("\n " + m.st.Muted.Render("nothing here yet — say something."))
@@ -975,9 +1067,10 @@ func (m *chatModel) transcript() string {
 }
 
 // isCompacting covers both a compaction this view started (/compact, ⌥c)
-// and one opencode started on its own (see autoCompacting).
+// and any the server reports (compaction events, or a running compaction in
+// history), whoever started it.
 func (m *chatModel) isCompacting() bool {
-	return m.compacting || autoCompacting(m.state.Turns)
+	return m.compacting || m.state.Compacting
 }
 
 // userBlock is "my" text: a full-width raised panel with a cyan rail.
@@ -1008,6 +1101,12 @@ func (m *chatModel) assistantTurn(t *chat.Turn, wrap lipgloss.Style) string {
 		}
 		for _, l := range strings.Split(r, "\n") {
 			out = append(out, " "+rail+l)
+		}
+	}
+	// A failed step's error, in place: the banner only holds the latest.
+	if t.Error != "" && t.Finish != "aborted" {
+		for _, l := range strings.Split(wrap.Render("✗ "+clean(t.Error)), "\n") {
+			out = append(out, " "+rail+s.Danger.Render(strings.TrimRight(l, " ")))
 		}
 	}
 	return strings.Join(out, "\n")
@@ -1176,8 +1275,12 @@ func (m *chatModel) bottom() string {
 			s.Primary.Render("[o]")+" allow once   "+s.Primary.Render("[a]")+" always allow   "+s.Danger.Render("[r]")+" reject")
 	case m.state.PendingQuestion != nil:
 		q := m.state.PendingQuestion
-		if q.Header != "" {
-			panel = append(panel, s.Primary.Bold(true).Render(q.Header))
+		header := q.Header
+		if n := q.Count(); n > 1 {
+			header = strings.TrimSpace(fmt.Sprintf("%s  (%d/%d)", header, q.Index()+1, n))
+		}
+		if header != "" {
+			panel = append(panel, s.Primary.Bold(true).Render(header))
 		}
 		panel = append(panel, wrap.Render(q.Question), "")
 		for i, o := range q.Options {

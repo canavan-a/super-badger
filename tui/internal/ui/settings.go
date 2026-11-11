@@ -117,7 +117,7 @@ func (m *settingsModel) Update(msg tea.Msg) (screen, tea.Cmd) {
 				}
 				ctx, cancel := context.WithTimeout(context.Background(), 2*notify.SendTimeout)
 				defer cancel()
-				return deskTestDoneMsg{err: d.Notify(ctx, "superbadger", "Desktop notifications are working."), name: d.Name()}
+				return deskTestDoneMsg{err: d.Notify(ctx, "Super Galleon", "Desktop notifications are working."), name: d.Name()}
 			}
 		case "test":
 			c := api.New(m.cfg.ServerURL, m.cfg.AuthToken)

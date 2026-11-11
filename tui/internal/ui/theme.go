@@ -8,7 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Palettes. "burrow" is the house look, taken from the superbadger.ans art
+// Palettes. "harbor" is the house look, taken from the superbadger.ans art
 // (deep navy, dusty blues, one electric cyan accent); the rest are the app's
 // themes (app/src/theme.tsx). Every theme paints its own background, so the
 // TUI looks the same whatever the terminal's colors are.
@@ -27,7 +27,7 @@ type Theme struct {
 }
 
 var themes = map[string]Theme{
-	"burrow": {"burrow", "#101422", "#1a2140", "#3a4e80", "#5a6c9c", "#6e84b8", "#c4deff", "#aafffa", "#ff7a90", "#7ee6b0", "#0b0e1a"},
+	"harbor": {"harbor", "#101422", "#1a2140", "#3a4e80", "#5a6c9c", "#6e84b8", "#c4deff", "#aafffa", "#ff7a90", "#7ee6b0", "#0b0e1a"},
 	"dark":   {"dark", "#0d1117", "#161b22", "#30363d", "#6e7681", "#8b949e", "#e6edf3", "#2f81f7", "#f85149", "#3fb950", "#161b22"},
 	"slate":  {"slate", "#1e2530", "#262e3b", "#3c4757", "#6b7a90", "#93a0b3", "#dde3ea", "#5aa9e6", "#ef6a6a", "#6fcf97", "#232b37"},
 	"ember":  {"ember", "#050403", "#0c0908", "#3a2620", "#6a5045", "#8a6c5f", "#e8d9d0", "#e0703c", "#c93a3a", "#4f9e70", "#0c0908"},
@@ -52,7 +52,7 @@ type Styles struct {
 func NewStyles(name string) Styles {
 	t, ok := themes[name]
 	if !ok {
-		t = themes["burrow"]
+		t = themes["harbor"]
 	}
 	fg := func(c string) lipgloss.Style { return lipgloss.NewStyle().Foreground(lipgloss.Color(c)) }
 	return Styles{

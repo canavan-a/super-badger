@@ -45,18 +45,53 @@ func (s Station) HasAction(a string) bool {
 	return false
 }
 
-type TokenUsage struct {
-	Input      int     `json:"input"`
-	Output     int     `json:"output"`
-	Reasoning  int     `json:"reasoning"`
-	CacheRead  int     `json:"cache_read"`
-	CacheWrite int     `json:"cache_write"`
-	Cost       float64 `json:"cost"`
+// Tokens is one step's usage. Ctx is what the context window holds after the
+// step (input + output + cache), the figure the context gauge shows.
+type Tokens struct {
+	Input      int `json:"input"`
+	Output     int `json:"output"`
+	Reasoning  int `json:"reasoning"`
+	CacheRead  int `json:"cacheRead"`
+	CacheWrite int `json:"cacheWrite"`
+	Ctx        int `json:"ctx"`
 }
 
-// Context is the active context size shown on the top bar (see
-// StationDetailScreen.tsx): everything but reasoning.
-func (u TokenUsage) Context() int { return u.Input + u.Output + u.CacheRead + u.CacheWrite }
+// TokenUsage is GET /stations/:id/usage and the WebSocket's usage event:
+// the latest step's tokens (nil before the first step, and right after a
+// compaction), the session's total cost, and the model's context window.
+type TokenUsage struct {
+	Tokens       *Tokens `json:"tokens"`
+	Cost         float64 `json:"cost"`
+	ContextLimit int     `json:"contextLimit"`
+}
+
+// Context is the active context size shown on the top bar.
+func (u TokenUsage) Context() int {
+	if u.Tokens == nil {
+		return 0
+	}
+	return u.Tokens.Ctx
+}
+
+// ModelLimit is one row of GET /limits: the context/output window opencode
+// uses for a provider's model right now, and where it comes from.
+type ModelLimit struct {
+	ProviderID string `json:"provider_id"`
+	ModelID    string `json:"model_id"`
+	Name       string `json:"name"`
+	Context    int    `json:"context"`
+	Output     int    `json:"output"`
+	// Detected is the engine's own context size (0 when it reports none).
+	Detected int        `json:"detected"`
+	Override *LimitPair `json:"override"`
+	Source   string     `json:"source"` // override|detected|default
+}
+
+// LimitPair is a stored override; nil fields aren't overridden.
+type LimitPair struct {
+	Context *int `json:"context"`
+	Output  *int `json:"output"`
+}
 
 type DataPoint struct {
 	Key                string  `json:"key"`
@@ -102,14 +137,19 @@ type MetricSourceParams struct {
 }
 
 type ProviderModel struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Limit struct {
+		Context int `json:"context"`
+		Output  int `json:"output"`
+	} `json:"limit"`
 }
 
 type Provider struct {
-	ID     string                   `json:"id"`
-	Name   string                   `json:"name"`
-	Models map[string]ProviderModel `json:"models"`
+	ID      string                   `json:"id"`
+	Name    string                   `json:"name"`
+	BaseURL string                   `json:"baseURL"`
+	Models  map[string]ProviderModel `json:"models"`
 }
 
 type ProvidersResponse struct {
@@ -257,8 +297,45 @@ func (c *Client) Usage(id uint) (out TokenUsage, err error) {
 	return
 }
 
-// HistoryPage is one page of a station's cached transcript: raw opencode
-// events (same shape as the WebSocket frames) for up to limit messages.
+// RunStatus is whether the station's session is running a reply right now:
+// busy|idle|retry.
+func (c *Client) RunStatus(id uint) (string, error) {
+	var out struct {
+		Status string `json:"status"`
+	}
+	err := c.do("GET", fmt.Sprintf("/stations/%d/status", id), nil, &out)
+	return out.Status, err
+}
+
+// ListLimits returns the context/output limits of every model, or of one
+// provider's model when providerID (and modelID) are set.
+func (c *Client) ListLimits(providerID, modelID string) (out []ModelLimit, err error) {
+	path := "/limits"
+	if providerID != "" {
+		q := url.Values{"provider_id": {providerID}}
+		if modelID != "" {
+			q.Set("model_id", modelID)
+		}
+		path += "?" + q.Encode()
+	}
+	err = c.do("GET", path, nil, &out)
+	return
+}
+
+// SetLimit stores a model's limit override (shared by every station on that
+// model). nil leaves that limit to detection; both nil clears the override.
+func (c *Client) SetLimit(providerID, modelID string, context, output *int) error {
+	body := struct {
+		ProviderID string `json:"provider_id"`
+		ModelID    string `json:"model_id"`
+		Context    *int   `json:"context"`
+		Output     *int   `json:"output"`
+	}{providerID, modelID, context, output}
+	return c.do("PUT", "/limits", body, nil)
+}
+
+// HistoryPage is one page of a station's cached transcript: events in the
+// same schema as the WebSocket's (see internal/chat) for up to limit messages.
 // Cursor goes back in as before to fetch the page older than this one.
 type HistoryPage struct {
 	Events  []json.RawMessage `json:"events"`

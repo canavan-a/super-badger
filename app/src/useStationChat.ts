@@ -1,8 +1,8 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {AppState} from 'react-native';
 
-import {getStationHistory, getStationRunStatus} from './api';
-import {applyEvent, ChatState, emptyChatState, prependHistory, rebuildFromHistory} from './chat';
+import {getStationHistory, getStationRunStatus, getStationUsage} from './api';
+import {answerQuestion, applyEvent, ChatState, emptyChatState, prependHistory, rebuildFromHistory} from './chat';
 import {settingsStore} from './settings';
 
 function wsURL(stationId: number): string {
@@ -17,7 +17,7 @@ function wsURL(stationId: number): string {
 
 export type ConnectionStatus = 'connecting' | 'open' | 'closed';
 
-// A fast token stream can deliver 30-50+ message.part.delta events per
+// A fast token stream can deliver 30-50+ text-delta `part` events per
 // second; applying each straight to React state would mean that many
 // re-renders of the whole chat list per second. Instead, incoming events are
 // buffered here and the reducer runs a whole batch per flush — one render
@@ -69,6 +69,9 @@ export function useStationChat(stationId: number) {
   // on (and thus be recreated by) every state change.
   const busyRef = useRef(false);
   busyRef.current = state.busy;
+  // The state as last rendered, for callbacks that read it (replyQuestion).
+  const stateRef = useRef(state);
+  stateRef.current = state;
   // The server's queue, replaced wholesale by every {"type":"queue"}
   // snapshot it pushes.
   const [serverQueue, setServerQueue] = useState<QueuedMessage[]>([]);
@@ -93,8 +96,8 @@ export function useStationChat(stationId: number) {
     };
   }, []);
 
-  // Restores recent transcript (server-side ring buffer, see
-  // server/opencode/events.go) when landing on a station — otherwise
+  // Restores recent transcript (server-side history, see
+  // server/opencode/translate.go's FromMessages) when landing on a station — otherwise
   // navigating away and back always starts blank. Only the newest page is
   // fetched here; older pages come in via loadOlder as the user scrolls up,
   // since the whole cache can be several MB of tool output. If the session
@@ -136,16 +139,36 @@ export function useStationChat(stationId: number) {
     [stationId],
   );
 
+  // The context gauge. Live `usage` events keep it current (one after every
+  // step, and one on every connect); this covers mount and an explicit
+  // compact, which may finish before any socket event says so.
+  const refreshUsage = useCallback(() => {
+    getStationUsage(stationId)
+      .then(u => setState(prev => applyEvent(prev, {...u, type: 'usage'})))
+      .catch(() => {
+        // A nice-to-have gauge, not worth surfacing as an error.
+      });
+  }, [stationId]);
+
+  // Busy follows the server's `status` events; this asks for it directly,
+  // for when some of those may have been missed.
+  const refreshRunStatus = useCallback(() => {
+    getStationRunStatus(stationId)
+      .then(({status: run}) => setState(prev => applyEvent(prev, {type: 'status', status: run})))
+      .catch(() => {});
+  }, [stationId]);
+
   useEffect(() => {
     historyCursor.current = '';
     setHasMoreHistory(false);
     resync(false);
+    refreshUsage();
     return () => {
       // Invalidates any fetch still in flight for the old station.
       // eslint-disable-next-line react-hooks/exhaustive-deps -- a counter, not a DOM ref
       resyncSeq.current++;
     };
-  }, [resync]);
+  }, [resync, refreshUsage]);
 
   // Safety net for a busy flag that outlived its reply: if the turn-finished
   // event was lost (socket half-dead, app suspended mid-reply), nothing else
@@ -242,6 +265,31 @@ export function useStationChat(stationId: number) {
           return;
         }
         lastEventAt.current = Date.now();
+        if (msg.type === 'resync') {
+          // The server's own opencode stream reconnected, so this socket may
+          // have missed events: the same rebuild a reconnect does, plus the
+          // run state and gauge (their events may be among the missed).
+          resync(true);
+          refreshRunStatus();
+          refreshUsage();
+          return;
+        }
+        if (msg.type === 'session_reset') {
+          // The station moved to a new session. Applied now with whatever is
+          // buffered (not at the next flush), so it can't land after — and
+          // wipe — the new session's history fetched below. That history has
+          // what was sent before this arrived (the carried-over context, a
+          // continue prompt); the old session's paging cursor is meaningless.
+          const batch = [...pending.current, msg];
+          pending.current = [];
+          setState(prev => batch.reduce(applyEvent, prev));
+          historyCursor.current = '';
+          setHasMoreHistory(false);
+          resync(true);
+          refreshRunStatus();
+          refreshUsage();
+          return;
+        }
         if (msg.type === 'queue') {
           // Applied right away rather than batched: it's a whole snapshot,
           // and rare (one per queue change).
@@ -288,7 +336,7 @@ export function useStationChat(stationId: number) {
       clearInterval(watchdog);
       wsRef.current?.close();
     };
-  }, [stationId, resync]);
+  }, [stationId, resync, refreshRunStatus, refreshUsage]);
 
   // Coming back from the background, Android has often silently killed the
   // socket while it still reports OPEN — sends into it vanish and nothing new
@@ -343,9 +391,16 @@ export function useStationChat(stationId: number) {
   // Answers a pending question.asked request (see chat.ts's PendingQuestion)
   // — opencode's separate AskUserQuestion-style tool, same "pauses the agent
   // loop until answered" behavior as a permission but a distinct mechanism.
-  const replyQuestion = useCallback((requestID: string, answers: string[][]) => {
-    setState(prev => ({...prev, pendingQuestion: null}));
-    wsRef.current?.send(JSON.stringify({type: 'question_reply', request_id: requestID, answers}));
+  // `labels` answers the question showing; a request with several questions
+  // steps to the next, and all the answers are sent together after the last.
+  const replyQuestion = useCallback((requestID: string, labels: string[]) => {
+    const q = stateRef.current.pendingQuestion;
+    if (!q || q.id !== requestID) return;
+    const {next, all} = answerQuestion(q, labels);
+    setState(prev => (prev.pendingQuestion?.id === requestID ? {...prev, pendingQuestion: next} : prev));
+    if (all) {
+      wsRef.current?.send(JSON.stringify({type: 'question_reply', request_id: requestID, answers: all}));
+    }
   }, []);
 
   const rejectQuestion = useCallback((requestID: string) => {
@@ -400,6 +455,7 @@ export function useStationChat(stationId: number) {
     replyPermission,
     replyQuestion,
     rejectQuestion,
+    refreshUsage,
     dismissError,
     hasMoreHistory,
     loadingOlder,

@@ -27,13 +27,14 @@ import {
 } from '../api';
 import {DataPointChart} from '../components/DataPointChart';
 import {Icon} from '../components/Icon';
+import {ModelLimitSettings} from '../components/ModelLimitSettings';
 import {moveItem} from '../components/StationLayoutSettings';
 import {platformConfirm} from '../platformConfirm';
 import {Route} from '../routes';
 import {STATION_COLORS} from '../stationColors';
 import {Theme, useTheme} from '../theme';
 
-// Per-station settings tab for the Super Badger Station Standard API: shows
+// Per-station settings tab for the Super Galleon Station Standard API: shows
 // every ad hoc data point the server has polled for this station (see
 // server/metrics), how recently it updated, a toggle to surface it on the
 // station's top bar, and an optional above/below threshold that triggers a
@@ -418,6 +419,13 @@ export function StationSettingsScreen({
           </>
         ) : null}
       </View>
+
+      {station ? (
+        <View style={styles.card}>
+          <Text style={styles.label}>Model context limit</Text>
+          <ModelLimitSettings providerId={station.provider_id} modelId={station.model_id} />
+        </View>
+      ) : null}
 
       <View style={styles.card}>
         <Text style={styles.label}>Top bar</Text>

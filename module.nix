@@ -14,6 +14,40 @@
 { config, lib, pkgs, ... }:
 let
   cfg = config.services.superbadger;
+  system = pkgs.stdenv.hostPlatform.system;
+  passwordFile = cfg.opencode.passwordFile;
+
+  # The super-badger opencode plugin (opencode-plugin/): detects each local
+  # model's context window from its llama.cpp / Strata engine, applies the
+  # overrides super-badger stores, and redoes a compaction whose summary
+  # failed. opencode loads it straight from the store; it needs no npm
+  # dependencies.
+  plugin = "${self}/opencode-plugin";
+
+  listenPort = lib.last (lib.splitString ":" cfg.listenAddr);
+  # Where the plugin reaches the server: loopback when it listens on every
+  # address, else the one address it listens on (the server accepts
+  # /internal/limits from any of this host's own addresses).
+  listenHost = let h = lib.removeSuffix ":${listenPort}" cfg.listenAddr; in
+    if h == "" || h == "0.0.0.0" then "127.0.0.1"
+    else if h == "[::]" then "[::1]"
+    else h;
+
+  # Merged by opencode over the opencode user's own config (OPENCODE_CONFIG_CONTENT).
+  opencodeConfig = {
+    compaction.keep.tokens = cfg.opencode.compaction.keepTokens;
+  } // lib.optionalAttrs cfg.opencode.plugin.enable {
+    plugins = [{
+      package = plugin;
+      options = { superbadgerURL = "http://${listenHost}:${listenPort}"; } // cfg.opencode.plugin.options;
+    }];
+  };
+
+  opencodeStart = pkgs.writeShellScript "opencode-serve" ''
+    OPENCODE_PASSWORD="$(< "$CREDENTIALS_DIRECTORY/opencode-password")"
+    export OPENCODE_PASSWORD
+    exec ${cfg.opencode.package}/bin/opencode serve --port ${toString cfg.opencode.port} --hostname ${cfg.opencode.hostname}
+  '';
   serverBin = "/var/lib/superbadger/bin/superbadger-server";
   badgerBin = "/var/lib/superbadger/bin/badger";
   goCache = "/var/cache/superbadger-go";
@@ -65,8 +99,12 @@ in
 
       package = lib.mkOption {
         type = lib.types.package;
-        default = pkgs.opencode or (throw "pkgs.opencode not found; set services.superbadger.opencode.package");
-        description = "opencode package providing the `opencode` binary.";
+        default = self.packages.${system}.opencode;
+        defaultText = lib.literalExpression "super-badger's pinned opencode 2";
+        description = ''
+          opencode package providing the `opencode` binary. Must be opencode
+          2.2 or later: super-badger speaks only the opencode 2 API.
+        '';
       };
 
       extraPackages = lib.mkOption {
@@ -88,6 +126,45 @@ in
           system-wide (environment.systemPackages). A systemd service otherwise
           only gets a bare PATH, so commands the agent reaches for come back
           "command not found" and it can loop retrying them.
+        '';
+      };
+
+      passwordFile = lib.mkOption {
+        type = lib.types.str;
+        default = "/var/lib/superbadger/opencode-password";
+        description = ''
+          File holding the password opencode serve requires (HTTP Basic auth;
+          opencode 2 always requires one). Generated on first start if it
+          doesn't exist, then handed to both services as a systemd credential.
+        '';
+      };
+
+      plugin = {
+        enable = lib.mkOption {
+          type = lib.types.bool;
+          default = true;
+          description = ''
+            Load super-badger's opencode plugin: per-model context limits
+            detected from llama.cpp / Strata engines (with overrides from the
+            app), and recovery from compactions whose summary fails.
+          '';
+        };
+        options = lib.mkOption {
+          type = lib.types.attrsOf lib.types.anything;
+          default = { };
+          example = { probeIntervalMs = 10000; maxOutput = 8192; providers = [ "nixllm" ]; };
+          description = "Extra plugin options (see opencode-plugin/index.ts).";
+        };
+      };
+
+      compaction.keepTokens = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 6000;
+        description = ''
+          Recent tokens opencode keeps verbatim when it compacts. opencode's
+          own default (15000) is sized for large hosted windows; on a 32k
+          local model it leaves a compacted session so full it compacts again
+          a few turns later.
         '';
       };
     };
@@ -153,6 +230,25 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    assertions = [{
+      assertion = lib.versionAtLeast (lib.getVersion cfg.opencode.package) "2.2";
+      message = "services.superbadger.opencode.package must be opencode 2.2 or later (got ${lib.getVersion cfg.opencode.package}).";
+    }];
+
+    systemd.services.superbadger-opencode-password = {
+      description = "Generate the password super-badger and opencode share";
+      wantedBy = [ "multi-user.target" ];
+      before = [ "opencode-serve.service" "superbadger.service" ];
+      requiredBy = [ "opencode-serve.service" "superbadger.service" ];
+      unitConfig.ConditionPathExists = "!${passwordFile}";
+      serviceConfig.Type = "oneshot";
+      script = ''
+        umask 077
+        mkdir -p "$(dirname ${lib.escapeShellArg passwordFile})"
+        ${pkgs.openssl}/bin/openssl rand -hex 32 > ${lib.escapeShellArg passwordFile}
+      '';
+    };
+
     services.mullvad-vpn = lib.mkIf cfg.mullvad.enable {
       enable = true;
     };
@@ -258,13 +354,15 @@ in
       wantedBy = [ "multi-user.target" ];
       after = [ "network.target" ];
       path = agentPath;
+      environment.OPENCODE_CONFIG_CONTENT = builtins.toJSON opencodeConfig;
       environment.PATH = lib.mkIf cfg.opencode.inheritSystemPath (lib.mkForce (lib.concatStringsSep ":" [
         (lib.makeBinPath agentPath)
         "/run/wrappers/bin"
         "/run/current-system/sw/bin"
       ]));
       serviceConfig = {
-        ExecStart = "${cfg.opencode.package}/bin/opencode serve --port ${toString cfg.opencode.port} --hostname ${cfg.opencode.hostname}";
+        ExecStart = opencodeStart;
+        LoadCredential = "opencode-password:${passwordFile}";
         Restart = "always";
         RestartSec = 2;
       };
@@ -279,6 +377,7 @@ in
         SUPERBADGER_LISTEN_ADDR = cfg.listenAddr;
         SUPERBADGER_DB_PATH = cfg.dbPath;
         SUPERBADGER_OPENCODE_URL = "http://${cfg.opencode.hostname}:${toString cfg.opencode.port}";
+        SUPERBADGER_OPENCODE_PASSWORD_FILE = "%d/opencode-password";
       } // lib.optionalAttrs (cfg.metrics.url != null) {
         SUPERBADGER_METRICS_URL = cfg.metrics.url;
         SUPERBADGER_METRICS_INTERVAL = cfg.metrics.interval;
@@ -290,6 +389,7 @@ in
       };
       serviceConfig = {
         ExecStart = serverBin;
+        LoadCredential = "opencode-password:${passwordFile}";
         Restart = "always";
         RestartSec = 2;
         User = "superbadger";

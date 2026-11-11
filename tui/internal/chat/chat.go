@@ -1,6 +1,7 @@
-// Package chat is a Go port of app/src/chat.ts: transcript state built from
-// opencode's event stream (forwarded verbatim by the server's per-station
-// WebSocket, plus a few flat server-synthesized messages).
+// Package chat builds a station's transcript from super-badger's own event
+// schema (server/opencode/translate.go): flat JSON events keyed by "type",
+// carried by the station WebSocket and GET /stations/:id/history alike, plus
+// a few flat server messages (notice, error, queue, session_reset).
 //
 // State is mutated in place; the bubbletea model owns it and only touches it
 // from Update, so no locking is needed.
@@ -10,6 +11,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"superbadger-tui/internal/api"
 )
 
 type PartKind string
@@ -29,15 +32,15 @@ type Part struct {
 	ID     string
 	Text   string // text/reasoning body; label for file/subtask/notice
 	Tool   string
-	Status string // pending|running|completed|error
+	Status string // tool: pending|running|completed|error; compaction: running|completed|failed
 	Title  string
 	Input  any
 	Output string
 	Error  string
-	Tokens int // a step-finish's provider "total" (includes thinking tokens)
-	// A step-finish's breakdown: Ctx is what the context window holds after the
-	// step (input + output + cache read/write — the same figure as the top
-	// bar's "ctx"), Reasoning the thinking tokens, which Ctx leaves out.
+	Tokens int // a step's input+output+reasoning
+	// A step's breakdown: Ctx is what the context window holds after the
+	// step (the same figure as the top bar's "ctx"), Reasoning the thinking
+	// tokens.
 	Ctx, Reasoning int
 }
 
@@ -49,6 +52,8 @@ type Turn struct {
 	PartOrder []string
 	Parts     map[string]*Part
 	Done      bool
+	Finish    string // stop|tool-calls|length|error|aborted|...
+	Error     string // a failed step's error text
 }
 
 type PendingPermission struct {
@@ -60,15 +65,56 @@ type PendingPermission struct {
 type QuestionOption struct {
 	Label       string
 	Description string
+	Value       string
 }
 
-type PendingQuestion struct {
-	ID       string
+// Question is one question of a question.asked request.
+type Question struct {
+	Key      string
 	Question string
 	Header   string
 	Options  []QuestionOption
 	Multiple bool
 	Custom   bool
+}
+
+// PendingQuestion is a question.asked request. Its flat fields are the
+// question currently being answered; Answer steps through the rest.
+type PendingQuestion struct {
+	ID       string
+	Key      string
+	Question string
+	Header   string
+	Options  []QuestionOption
+	Multiple bool
+	Custom   bool
+
+	questions []Question
+	answers   [][]string
+}
+
+func (q *PendingQuestion) show(i int) {
+	c := q.questions[i]
+	q.Key, q.Question, q.Header, q.Options, q.Multiple, q.Custom = c.Key, c.Question, c.Header, c.Options, c.Multiple, c.Custom
+}
+
+// Count is how many questions the request asks; Index which one is showing.
+func (q *PendingQuestion) Count() int { return len(q.questions) }
+func (q *PendingQuestion) Index() int { return len(q.answers) }
+
+// Answer records the answer to the question showing (option labels or free
+// text) and moves on to the next. done reports that every question has been
+// answered, with all of them (one array per question, in order).
+func (q *PendingQuestion) Answer(a []string) (all [][]string, done bool) {
+	if a == nil {
+		a = []string{}
+	}
+	q.answers = append(q.answers, a)
+	if len(q.answers) >= len(q.questions) {
+		return q.answers, true
+	}
+	q.show(len(q.answers))
+	return nil, false
 }
 
 type State struct {
@@ -79,37 +125,77 @@ type State struct {
 	Notice            string
 	PendingPermission *PendingPermission
 	PendingQuestion   *PendingQuestion
+	// Compacting: a compaction is running (compaction events, or a running
+	// compaction part in history).
+	Compacting bool
+	// Usage feeds the context gauge: usage events and GET /stations/:id/usage.
+	Usage api.TokenUsage
+	Title string
+	// fresh: every turn held arrived live since the transcript was last
+	// emptied (on open, or a session reset), none left over from an older
+	// load, so a history snapshot that doesn't have them yet must keep them
+	// (see Rebuilt).
+	fresh bool
 }
 
-func New() *State { return &State{turnIndex: map[string]int{}} }
+func New() *State { return &State{turnIndex: map[string]int{}, fresh: true} }
 
-// Event is either an opencode event ({id?, type, properties}) or a flat
-// server message ({type:"error", error} / {type:"notice", text}).
+// Event is one flat event (see the package doc).
 type Event struct {
-	ID         string         `json:"id"`
-	Type       string         `json:"type"`
-	Properties map[string]any `json:"properties"`
-	Error      string         `json:"error"`
-	Text       string         `json:"text"`
+	Type      string `json:"type"`
+	SessionID string `json:"sessionID"`
+	MessageID string `json:"messageID"`
+	PartID    string `json:"partID"`
+
+	Role   string `json:"role"`
+	Done   bool   `json:"done"`
+	Finish string `json:"finish"`
+	Time   int64  `json:"time"`
+
+	Kind   string          `json:"kind"`
+	Text   string          `json:"text"`
+	Delta  string          `json:"delta"`
+	Tool   string          `json:"tool"`
+	Status string          `json:"status"`
+	Input  json.RawMessage `json:"input"`
+	Output string          `json:"output"`
+	Error  string          `json:"error"`
+
+	Phase   string `json:"phase"`
+	Reason  string `json:"reason"`
+	Attempt int    `json:"attempt"`
+
+	Tokens       *api.Tokens `json:"tokens"`
+	Cost         *float64    `json:"cost"`
+	ContextLimit int         `json:"contextLimit"`
+
+	ID         string     `json:"id"`
+	Permission string     `json:"permission"`
+	Patterns   []string   `json:"patterns"`
+	Questions  []question `json:"questions"`
+
 	// ClearError marks a notice as the server handling the current error
 	// itself (auto mode compacting after a context overflow).
 	ClearError bool `json:"clear_error"`
+}
+
+type question struct {
+	Key      string `json:"key"`
+	Question string `json:"question"`
+	Header   string `json:"header"`
+	Options  []struct {
+		Label       string `json:"label"`
+		Description string `json:"description"`
+		Value       string `json:"value"`
+	} `json:"options"`
+	Multiple bool `json:"multiple"`
+	Custom   bool `json:"custom"`
 }
 
 func ParseEvent(b []byte) (Event, error) {
 	var e Event
 	err := json.Unmarshal(b, &e)
 	return e, err
-}
-
-func str(m map[string]any, k string) string {
-	s, _ := m[k].(string)
-	return s
-}
-
-func obj(m map[string]any, k string) map[string]any {
-	o, _ := m[k].(map[string]any)
-	return o
 }
 
 func (s *State) ensureTurn(id, role string) *Turn {
@@ -136,198 +222,194 @@ func (t *Turn) upsert(p *Part) {
 	t.Parts[p.ID] = p
 }
 
-func partFromRaw(raw map[string]any) *Part {
-	id := str(raw, "id")
-	switch str(raw, "type") {
-	case "text":
-		return &Part{Kind: KindText, ID: id, Text: str(raw, "text")}
-	case "reasoning":
-		return &Part{Kind: KindReasoning, ID: id, Text: str(raw, "text")}
+// toolTitle picks a short label for a tool call from its input (the events
+// carry no title): what it says it does, or the file, pattern or URL.
+func toolTitle(in any) string {
+	m, _ := in.(map[string]any)
+	for _, k := range []string{"description", "filePath", "path", "pattern", "url", "query"} {
+		if s, _ := m[k].(string); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+// compactionNotice is a compaction part's transcript marker.
+func compactionNotice(status, errText string) string {
+	switch status {
+	case "running":
+		return "Compacting…"
+	case "failed":
+		if errText != "" {
+			return "Compaction failed: " + errText
+		}
+		return "Compaction failed"
+	}
+	return "Conversation compacted"
+}
+
+func (s *State) applyPart(e Event) {
+	if e.MessageID == "" || e.PartID == "" {
+		return
+	}
+	t := s.ensureTurn(e.MessageID, "assistant")
+	s.Notice = ""
+	switch e.Kind {
+	case "text", "reasoning":
+		kind := PartKind(e.Kind)
+		ex, ok := t.Parts[e.PartID]
+		if e.Delta != "" {
+			if ok && ex.hasText() {
+				ex.Text += e.Delta
+			} else {
+				t.upsert(&Part{Kind: kind, ID: e.PartID, Text: e.Delta})
+			}
+			return
+		}
+		// History replay can resolve after live deltas grew this part past
+		// the snapshot; skip a stale prefix rather than snap the text back.
+		if ok && ex.hasText() && len(ex.Text) > len(e.Text) && strings.HasPrefix(ex.Text, e.Text) {
+			return
+		}
+		t.upsert(&Part{Kind: kind, ID: e.PartID, Text: e.Text})
 	case "tool":
-		st := obj(raw, "state")
-		p := &Part{Kind: KindTool, ID: id, Tool: str(raw, "tool"), Status: str(st, "status"),
-			Title: str(st, "title"), Input: st["input"], Error: str(st, "error")}
+		p := &Part{Kind: KindTool, ID: e.PartID, Tool: e.Tool, Status: e.Status, Output: e.Output, Error: e.Error}
+		if len(e.Input) > 0 {
+			_ = json.Unmarshal(e.Input, &p.Input)
+		}
+		p.Title = toolTitle(p.Input)
 		if p.Tool == "" {
 			p.Tool = "tool"
 		}
 		if p.Status == "" {
 			p.Status = "pending"
 		}
-		switch o := st["output"].(type) {
-		case string:
-			p.Output = o
-		case nil:
-		default:
-			b, _ := json.Marshal(o)
-			p.Output = string(b)
+		t.upsert(p)
+	case "step":
+		p := &Part{Kind: KindStepFinish, ID: e.PartID}
+		if tk := e.Tokens; tk != nil {
+			p.Tokens = tk.Input + tk.Output + tk.Reasoning
+			p.Ctx = tk.Ctx
+			p.Reasoning = tk.Reasoning
 		}
-		return p
-	case "step-finish":
-		p := &Part{Kind: KindStepFinish, ID: id}
-		tk := obj(raw, "tokens")
-		n := func(m map[string]any, k string) int {
-			f, _ := m[k].(float64)
-			return int(f)
-		}
-		cache := obj(tk, "cache")
-		p.Tokens = n(tk, "total")
-		p.Reasoning = n(tk, "reasoning")
-		p.Ctx = n(tk, "input") + n(tk, "output") + n(cache, "read") + n(cache, "write")
-		return p
-	case "step-start":
-		return nil
-	case "file", "patch", "snapshot":
-		label := str(raw, "filename")
-		if label == "" {
-			label = str(raw, "path")
-		}
-		if label == "" {
-			label = str(raw, "type")
-		}
-		return &Part{Kind: KindFile, ID: id, Text: label}
-	case "agent", "subtask":
-		label := str(raw, "description")
-		if label == "" {
-			label = str(raw, "agent")
-		}
-		if label == "" {
-			label = "subtask"
-		}
-		return &Part{Kind: KindSubtask, ID: id, Text: label}
-	case "retry":
-		return &Part{Kind: KindNotice, ID: id, Text: "Retrying…"}
+		t.upsert(p)
 	case "compaction":
-		return &Part{Kind: KindNotice, ID: id, Text: "Conversation compacted"}
-	default:
-		return &Part{Kind: KindNotice, ID: id, Text: "[" + str(raw, "type") + "]"}
+		t.upsert(&Part{Kind: KindNotice, ID: e.PartID, Status: e.Status, Text: compactionNotice(e.Status, e.Error)})
+		s.Compacting = e.Status == "running"
+	case "notice":
+		t.upsert(&Part{Kind: KindNotice, ID: e.PartID, Text: e.Text})
 	}
 }
 
-// Apply folds one event into the state (chat.ts applyEvent).
+// Apply folds one event into the state.
 func (s *State) Apply(e Event) {
-	p := e.Properties
 	switch e.Type {
-	case "message.updated":
-		info := obj(p, "info")
-		if info == nil {
+	case "msg":
+		if e.MessageID == "" {
 			return
 		}
-		t := s.ensureTurn(str(info, "id"), str(info, "role"))
-		if obj(info, "time")["completed"] != nil {
+		t := s.ensureTurn(e.MessageID, e.Role)
+		if e.Role != "" {
+			t.Role = e.Role
+		}
+		// Never undone: a stale history page can carry an older, unfinished
+		// copy of a turn the live stream already finished.
+		if e.Done {
 			t.Done = true
-			// A completed assistant message is as good a "reply finished"
-			// signal as session.idle, which isn't reliably delivered — but
-			// opencode completes one message per step, and a step that ended
-			// in tool calls is followed by another, so only a final step counts.
-			if str(info, "role") == "assistant" && !stepContinues(str(info, "finish")) {
-				s.Busy = false
-			}
-		} else if str(info, "role") == "assistant" {
-			// A reply has started — the server sends the queue itself (see
-			// server/station/queue.go), so there's no local send to mark
-			// busy. Assistant only: opencode updates user messages again
-			// after the reply ends (summaries), which would flip busy back on.
+		}
+		if e.Finish != "" {
+			t.Finish = e.Finish
+		}
+		if e.Error != "" {
+			t.Error = e.Error
+		}
+
+	case "part":
+		s.applyPart(e)
+
+	// The only source of busy: live, and also sent by the server on every
+	// connect, so a reply that finished (or started) while this client
+	// wasn't watching still shows correctly.
+	case "status":
+		switch e.Status {
+		case "busy":
 			s.Busy = true
+		case "retry":
+			s.Busy = true
+			n := fmt.Sprintf("Retrying (attempt %d)", e.Attempt)
+			if e.Error != "" {
+				n += ": " + e.Error
+			}
+			s.Notice = n
+		case "idle":
+			s.Busy = false
 		}
 
-	case "message.part.updated":
-		raw := obj(p, "part")
-		if raw == nil {
-			return
-		}
-		part := partFromRaw(raw)
-		if part == nil {
-			return
-		}
-		msgID := str(raw, "messageID")
-		t := s.ensureTurn(msgID, "assistant")
-		// History replay can resolve after live deltas grew this part past
-		// the snapshot; skip a stale prefix rather than snap the text back.
-		if ex, ok := t.Parts[part.ID]; ok && ex.hasText() && part.hasText() &&
-			len(ex.Text) > len(part.Text) && strings.HasPrefix(ex.Text, part.Text) {
-			s.Notice = ""
-			return
-		}
-		t.upsert(part)
-		s.Notice = ""
-
-	case "message.part.delta":
-		msgID, partID := str(p, "messageID"), str(p, "partID")
-		if msgID == "" || partID == "" || str(p, "field") != "text" {
-			return
-		}
-		t := s.Turn(msgID)
-		if t == nil {
-			return
-		}
-		if ex, ok := t.Parts[partID]; ok && ex.hasText() {
-			ex.Text += str(p, "delta")
+	case "compaction":
+		switch e.Phase {
+		case "started":
+			s.Compacting = true
+			s.Notice = "Compacting…"
+		case "ended":
+			s.Compacting = false
+			s.Notice = "Conversation compacted"
+			// The old figure overstates the compacted context until the
+			// next step reports.
+			s.Usage.Tokens = nil
+		case "failed":
+			// The server reports the failure itself (error/notice).
+			s.Compacting = false
 		}
 
-	case "session.idle":
-		s.Busy = false
-
-	// opencode's own run state, live and also sent by the server on every
-	// connect (server/api/ws.go) — so a reply that finished (or started)
-	// while this client wasn't watching still shows correctly.
-	case "session.status":
-		if st := str(obj(p, "status"), "type"); st != "" {
-			s.Busy = st != "idle"
+	case "usage":
+		if e.Tokens != nil {
+			tk := *e.Tokens
+			s.Usage.Tokens = &tk
 		}
+		if e.Cost != nil {
+			s.Usage.Cost = *e.Cost
+		}
+		if e.ContextLimit > 0 {
+			s.Usage.ContextLimit = e.ContextLimit
+		}
+
+	case "title":
+		s.Title = e.Text
 
 	case "permission.asked":
-		id := str(p, "id")
-		if id == "" {
+		if e.ID == "" {
 			return
 		}
-		pp := &PendingPermission{ID: id, Permission: str(p, "permission")}
-		if pats, ok := p["patterns"].([]any); ok {
-			for _, x := range pats {
-				if sx, ok := x.(string); ok {
-					pp.Patterns = append(pp.Patterns, sx)
-				}
-			}
-		}
-		s.PendingPermission = pp
+		s.PendingPermission = &PendingPermission{ID: e.ID, Permission: e.Permission, Patterns: e.Patterns}
 
 	case "permission.replied":
-		s.PendingPermission = nil
+		if s.PendingPermission != nil && (e.ID == "" || e.ID == s.PendingPermission.ID) {
+			s.PendingPermission = nil
+		}
 
 	case "question.asked":
-		id := str(p, "id")
-		qs, _ := p["questions"].([]any)
-		if id == "" || len(qs) == 0 {
+		if e.ID == "" || len(e.Questions) == 0 {
 			return
 		}
-		q, _ := qs[0].(map[string]any)
-		pq := &PendingQuestion{ID: id, Question: str(q, "question"), Header: str(q, "header")}
-		pq.Multiple, _ = q["multiple"].(bool)
-		pq.Custom, _ = q["custom"].(bool)
-		if opts, ok := q["options"].([]any); ok {
-			for _, o := range opts {
-				om, _ := o.(map[string]any)
-				pq.Options = append(pq.Options, QuestionOption{str(om, "label"), str(om, "description")})
+		pq := &PendingQuestion{ID: e.ID}
+		for _, q := range e.Questions {
+			c := Question{Key: q.Key, Question: q.Question, Header: q.Header, Multiple: q.Multiple, Custom: q.Custom}
+			for _, o := range q.Options {
+				c.Options = append(c.Options, QuestionOption{Label: o.Label, Description: o.Description, Value: o.Value})
 			}
+			pq.questions = append(pq.questions, c)
 		}
+		pq.show(0)
 		s.PendingQuestion = pq
 
 	case "question.replied", "question.rejected":
-		s.PendingQuestion = nil
-
-	case "session.error":
-		msg := str(obj(p, "error"), "message")
-		if msg == "" {
-			msg = str(p, "message")
+		if s.PendingQuestion != nil && (e.ID == "" || e.ID == s.PendingQuestion.ID) {
+			s.PendingQuestion = nil
 		}
-		if msg == "" {
-			msg = "session error"
-		}
-		s.Busy = false
-		s.Error = msg
 
-	// Server-synthesized (server/api/ws.go).
+	// Both opencode errors ({error, kind}) and the server's own ({error}).
+	// Busy is left to status events.
 	case "error":
-		s.Busy = false
 		s.Error = e.Error
 		if s.Error == "" {
 			s.Error = "unknown error"
@@ -339,15 +421,80 @@ func (s *State) Apply(e Event) {
 			s.Error = ""
 		}
 
+	// The station moved to a new session: the old session's turns go. The
+	// model (so its context limit) is unchanged. The UI then reloads the new
+	// session's history.
 	case "session_reset":
-		notice := s.Notice
+		notice, limit := s.Notice, s.Usage.ContextLimit
 		*s = *New()
-		s.Notice = notice
+		s.Notice, s.Usage.ContextLimit = notice, limit
 	}
 }
 
+// Rebuilt is a fresh state built from a newest history page, keeping what
+// history doesn't carry (run state, prompts, banners, usage) from s, and
+// what arrived live after the snapshot was taken:
+//   - turns the snapshot doesn't have yet: those after the newest turn both
+//     share, or all of them while s is fresh (nothing in it is left over
+//     from an older load, so a turn missing from the snapshot is newer);
+//   - in a turn both have: live text grown past the snapshot's prefix of the
+//     same part, parts started after the snapshot, and a done it hadn't seen.
+func (s *State) Rebuilt(events []json.RawMessage) *State {
+	n := New()
+	n.Busy, n.Error, n.Notice = s.Busy, s.Error, s.Notice
+	n.PendingPermission, n.PendingQuestion = s.PendingPermission, s.PendingQuestion
+	n.Usage, n.Title = s.Usage, s.Title
+	n.Seed(events)
+	snapshotEmpty := len(n.Turns) == 0
+
+	for _, t := range n.Turns {
+		old := s.Turn(t.MessageID)
+		if old == nil {
+			continue
+		}
+		for _, id := range old.PartOrder {
+			live, snap := old.Parts[id], t.Parts[id]
+			switch {
+			case snap == nil:
+				t.upsert(live)
+			case live.hasText() && snap.hasText() && len(live.Text) > len(snap.Text) && strings.HasPrefix(live.Text, snap.Text):
+				t.Parts[id] = live
+			}
+		}
+		if old.Done {
+			t.Done = true
+			if t.Finish == "" {
+				t.Finish = old.Finish
+			}
+		}
+	}
+
+	lastShared := -1
+	for i, t := range s.Turns {
+		if n.Turn(t.MessageID) != nil {
+			lastShared = i
+		}
+	}
+	var live []*Turn
+	switch {
+	case s.fresh:
+		live = s.Turns
+	case lastShared >= 0:
+		live = s.Turns[lastShared+1:]
+	}
+	for _, t := range live {
+		if n.Turn(t.MessageID) == nil {
+			n.Turns = append(n.Turns, t)
+			n.turnIndex[t.MessageID] = len(n.Turns) - 1
+		}
+	}
+	// Still fresh until a snapshot has something in it to anchor on.
+	n.fresh = s.fresh && snapshotEmpty
+	return n
+}
+
 // AddLocalUserTurn appends a finished user turn directly, without waiting for
-// opencode's echo.
+// the server's echo.
 func (s *State) AddLocalUserTurn(id, text string) {
 	t := &Turn{MessageID: id, Role: "user", PartOrder: []string{id}, Done: true,
 		Parts: map[string]*Part{id: {Kind: KindText, ID: id, Text: text}}}
@@ -398,10 +545,19 @@ func (t *Turn) Text() string {
 	return b.String()
 }
 
-func (p Part) String() string { return fmt.Sprintf("%s:%s", p.Kind, p.ID) }
-
-// stepContinues reports whether an assistant message's finish reason means
-// opencode's loop runs another step after it (its own loop-exit check).
-func stepContinues(finish string) bool {
-	return finish == "tool-calls" || finish == "unknown"
+// Marker reports whether a turn is only notices (a compaction marker, a
+// synthetic "context carried over" turn): shown as a one-line marker rather
+// than as a message.
+func (t *Turn) Marker() bool {
+	if len(t.PartOrder) == 0 {
+		return false
+	}
+	for _, id := range t.PartOrder {
+		if p := t.Parts[id]; p != nil && p.Kind != KindNotice {
+			return false
+		}
+	}
+	return true
 }
+
+func (p Part) String() string { return fmt.Sprintf("%s:%s", p.Kind, p.ID) }

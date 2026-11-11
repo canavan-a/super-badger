@@ -1,0 +1,30 @@
+data: {"id":"evt_1c11b934b001IoSTMDolh8Sla2","type":"server.connected","data":{}}
+
+: heartbeat
+
+data: {"id":"evt_1c11b9481001Iq5dpN0vhyViNY","created":1794241172609,"type":"session.created","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee46b81ffe8v1T57Kx7Ni7sP","slug":"sunny-nebula","version":"2.2.5","projectID":"df896ba68f9d64b5db6211918f884c86b95bf2e4","location":{"directory":"/work/proj"},"subpath":"","agent":"build","permissions":[{"action":"subagent","resource":"*","effect":"deny"}],"model":{"id":"fake-model","providerID":"fake"}},"durable":{"aggregateID":"ses_e3ee46b81ffe8v1T57Kx7Ni7sP","seq":0,"version":1}}
+
+data: {"id":"evt_1c11b948e0027lHou5Sp7rIbAF","created":1794241172622,"type":"session.inbox.enqueued","location":{"directory":"/work/proj"},"data":{"inboxID":"msg_1c11b948e001KPvuqE16SVGWy2","sessionID":"ses_e3ee46b81ffe8v1T57Kx7Ni7sP","item":{"type":"user","payload":{"text":"ASK me"},"delivery":"steer"}},"durable":{"aggregateID":"ses_e3ee46b81ffe8v1T57Kx7Ni7sP","seq":1,"version":1}}
+
+data: {"id":"evt_1c11b948f001s2SKfE2cH80zTy","created":1794241172623,"type":"session.execution.started","data":{"sessionID":"ses_e3ee46b81ffe8v1T57Kx7Ni7sP"},"durable":{"aggregateID":"ses_e3ee46b81ffe8v1T57Kx7Ni7sP","seq":2,"version":1}}
+
+data: {"id":"evt_1c11b9491001DrBIy4XhkMspST","created":1794241172625,"metadata":{"instructions":{"initial":true}},"type":"session.instructions.updated","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee46b81ffe8v1T57Kx7Ni7sP","delta":{"core/codemode":"1f1291478accf8b3e4d96a40c150bf844d60557dede4aae56c47ea0043bbdce2","core/skill-guidance":"4c871a2fb8fda40d9ec36cbf7de9f344001b0d2ca0b82f949ccb2e916a6799c1","core/date":"92b15ba69e41b58abd2e121f9dbae18f05891be3cf4e617a4d55342d2626508a","core/environment":"f6959a61e905a326eda693d2503c9ac58b59482e7df0de4c062dd447da7bc386"}},"durable":{"aggregateID":"ses_e3ee46b81ffe8v1T57Kx7Ni7sP","seq":3,"version":2}}
+
+data: {"id":"evt_1c11b9492001HSFa1XI1KD8IZZ","created":1794241172626,"type":"session.inbox.delivered","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee46b81ffe8v1T57Kx7Ni7sP","inboxID":"msg_1c11b948e001KPvuqE16SVGWy2"},"durable":{"aggregateID":"ses_e3ee46b81ffe8v1T57Kx7Ni7sP","seq":4,"version":1}}
+
+data: {"id":"evt_1c11b949c001Ge19bdGfXzoWb3","created":1794241172636,"type":"session.step.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee46b81ffe8v1T57Kx7Ni7sP","agent":"build","model":{"id":"fake-model","providerID":"fake","variant":"default"},"assistantMessageID":"msg_1c11b949800133ckAUhidIbiIr","started":1794241172634},"durable":{"aggregateID":"ses_e3ee46b81ffe8v1T57Kx7Ni7sP","seq":5,"version":1}}
+
+data: {"id":"evt_1c11b949d001dmstoIUFEy2rkA","created":1794241172637,"type":"session.tool.input.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee46b81ffe8v1T57Kx7Ni7sP","assistantMessageID":"msg_1c11b949800133ckAUhidIbiIr","id":"call_1794241172636161866","name":"question"},"durable":{"aggregateID":"ses_e3ee46b81ffe8v1T57Kx7Ni7sP","seq":6,"version":1}}
+
+data: {"id":"evt_1c11b949e001hyxhVnlNzTRBfB","created":1794241172638,"type":"session.tool.input.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee46b81ffe8v1T57Kx7Ni7sP","assistantMessageID":"msg_1c11b949800133ckAUhidIbiIr","id":"call_1794241172636161866","text":"{\"questions\":[{\"question\":\"Pick a colour?\",\"header\":\"Colour\",\"options\":[{\"label\":\"Red\",\"description\":\"warm\"},{\"label\":\"Blue\",\"description\":\"cool\"}]}]}"},"durable":{"aggregateID":"ses_e3ee46b81ffe8v1T57Kx7Ni7sP","seq":7,"version":1}}
+
+data: {"id":"evt_1c11b949f001iol36X9DkIEXb7","created":1794241172639,"type":"session.tool.called","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee46b81ffe8v1T57Kx7Ni7sP","assistantMessageID":"msg_1c11b949800133ckAUhidIbiIr","id":"call_1794241172636161866","input":{"questions":[{"question":"Pick a colour?","header":"Colour","options":[{"label":"Red","description":"warm"},{"label":"Blue","description":"cool"}]}]},"executed":false},"durable":{"aggregateID":"ses_e3ee46b81ffe8v1T57Kx7Ni7sP","seq":8,"version":1}}
+
+data: {"id":"evt_1c11b94a0001bVdp6fF1p0vfcR","created":1794241172640,"type":"session.step.streamed","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee46b81ffe8v1T57Kx7Ni7sP","assistantMessageID":"msg_1c11b949800133ckAUhidIbiIr"},"durable":{"aggregateID":"ses_e3ee46b81ffe8v1T57Kx7Ni7sP","seq":9,"version":1}}
+
+data: {"id":"evt_1c11b94a2002QZhWOEudf3rYij","created":1794241172642,"type":"form.created","location":{"directory":"/work/proj"},"data":{"form":{"id":"frm_1c11b94a2001qlk4JcB3lq8K71","sessionID":"ses_e3ee46b81ffe8v1T57Kx7Ni7sP","title":"Questions","metadata":{"kind":"question","tool":{"messageID":"msg_1c11b949800133ckAUhidIbiIr","id":"call_1794241172636161866"}},"fields":[{"key":"q0","title":"Colour","description":"Pick a colour?","type":"string","options":[{"value":"Red","label":"Red","description":"warm"},{"value":"Blue","label":"Blue","description":"cool"}],"custom":true}]}}}
+
+data: {"id":"evt_1c11b94b9002FBHcCxjADamvOw","created":1794241172665,"type":"session.usage.updated","data":{"sessionID":"ses_e3ee46b81ffe8v1T57Kx7Ni7sP","cost":0,"tokens":{"input":484,"output":7,"reasoning":0,"cache":{"read":0,"write":0}}}}
+
+data: {"id":"evt_1c11b94ba001S7IrN82ZLybtWI","created":1794241172666,"type":"session.renamed","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee46b81ffe8v1T57Kx7Ni7sP","title":"ok (484 prompt tokens of 32768)"},"durable":{"aggregateID":"ses_e3ee46b81ffe8v1T57Kx7Ni7sP","seq":11,"version":1}}
+

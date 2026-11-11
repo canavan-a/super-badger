@@ -32,7 +32,7 @@ import {SplashGate} from './logo/SplashGate';
 import {useThemedAppIcon} from './appIcon';
 
 const TITLES: Record<Route['name'], string> = {
-  stations: 'Super Badger',
+  stations: 'Super Galleon',
   stationDetail: 'Station',
   stationSettings: 'Data Points',
   commands: 'Commands',
@@ -413,7 +413,7 @@ function AppInner(): React.JSX.Element {
       ) : serverOnline === false && (
         <View style={styles.offlineBanner}>
           <Text style={styles.offlineBannerText}>
-            Can't reach superbadger server — check it's running and the address in Settings.
+            Can't reach the Super Galleon server — check it's running and the address in Settings.
           </Text>
         </View>
       )}

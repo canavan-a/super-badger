@@ -19,7 +19,7 @@ jest.mock('react-native/Libraries/Animated/NativeAnimatedHelper');
 const text = (node: renderer.ReactTestInstance): string => JSON.stringify(node.props.style ?? '');
 
 const bgOf = (tree: renderer.ReactTestRenderer): string | undefined => {
-  const root = tree.root.findAll(n => n.props?.accessibilityLabel === 'Super Badger')[0];
+  const root = tree.root.findAll(n => n.props?.accessibilityLabel === 'Super Galleon')[0];
   const flat = ([] as any[]).concat(root.props.style).flat(3);
   return flat.find(s => s && s.backgroundColor)?.backgroundColor;
 };
@@ -47,10 +47,10 @@ describe('SplashScreen', () => {
   const svgCount = (tree: renderer.ReactTestRenderer) =>
     tree.root.findAll(n => typeof n.props?.viewBox === 'string' && n.props.width !== undefined).length;
 
-  it('draws the whole logo: badger, eye and glint, eleven letters, and the shine strips', () => {
+  it('draws the whole logo: galleon, trim and glint, twelve letters, and the shine strips', () => {
     const tree = mount(() => {});
     const strips = [...BADGER_STRIPS, ...WORD_STRIPS].filter(s => s.tones.length > 0).length;
-    expect(svgCount(tree)).toBe(3 + 11 + strips); // badger + eye + eye glint, letters, strips
+    expect(svgCount(tree)).toBe(3 + 12 + strips); // galleon + trim + trim glint, letters, strips
     act(() => tree.unmount());
   });
 
@@ -155,7 +155,7 @@ describe('SplashGate', () => {
   afterEach(() => jest.useRealTimers());
 
   const hasSplash = (tree: renderer.ReactTestRenderer) =>
-    tree.root.findAll(n => n.props?.accessibilityLabel === 'Super Badger').length > 0;
+    tree.root.findAll(n => n.props?.accessibilityLabel === 'Super Galleon').length > 0;
 
   const mountGate = async () => {
     let tree!: renderer.ReactTestRenderer;

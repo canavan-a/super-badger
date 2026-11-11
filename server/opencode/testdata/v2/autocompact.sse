@@ -1,0 +1,1026 @@
+data: {"id":"evt_1c11cbe5d001cJukxT5dF8xsbj","type":"server.connected","data":{}}
+
+: heartbeat
+
+data: {"id":"evt_1c11cbe61001Una1cLct4oCPAq","created":1794241248865,"type":"session.created","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","slug":"neon-mountain","version":"2.2.5","projectID":"df896ba68f9d64b5db6211918f884c86b95bf2e4","location":{"directory":"/work/proj"},"subpath":"","agent":"build","permissions":[{"action":"subagent","resource":"*","effect":"deny"}],"model":{"id":"fake-model","providerID":"fake"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":0,"version":1}}
+
+data: {"id":"evt_1c11cbe6e002VH7b4Brz0cSt6n","created":1794241248878,"type":"session.inbox.enqueued","location":{"directory":"/work/proj"},"data":{"inboxID":"msg_1c11cbe6e001YjkR1PWckKRbB9","sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","item":{"type":"user","payload":{"text":"LONG reply 1"},"delivery":"steer"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":1,"version":1}}
+
+data: {"id":"evt_1c11cbe6f001rI387askED03rH","created":1794241248879,"type":"session.execution.started","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":2,"version":1}}
+
+data: {"id":"evt_1c11cbe71001qUzhnv6nWpeDsl","created":1794241248881,"metadata":{"instructions":{"initial":true}},"type":"session.instructions.updated","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","delta":{"core/codemode":"1f1291478accf8b3e4d96a40c150bf844d60557dede4aae56c47ea0043bbdce2","core/skill-guidance":"4c871a2fb8fda40d9ec36cbf7de9f344001b0d2ca0b82f949ccb2e916a6799c1","core/date":"92b15ba69e41b58abd2e121f9dbae18f05891be3cf4e617a4d55342d2626508a","core/environment":"f6959a61e905a326eda693d2503c9ac58b59482e7df0de4c062dd447da7bc386"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":3,"version":2}}
+
+data: {"id":"evt_1c11cbe7200160H4GJ32xp75jb","created":1794241248882,"type":"session.inbox.delivered","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","inboxID":"msg_1c11cbe6e001YjkR1PWckKRbB9"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":4,"version":1}}
+
+data: {"id":"evt_1c11cbe7d001gnu7PijyUhTWia","created":1794241248893,"type":"session.step.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","agent":"build","model":{"id":"fake-model","providerID":"fake","variant":"default"},"assistantMessageID":"msg_1c11cbe780013D0vtLdQsy5Swx","started":1794241248890},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":5,"version":1}}
+
+data: {"id":"evt_1c11cbe7e001NAwQV0j5HIo61Y","created":1794241248894,"type":"session.reasoning.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11cbe780013D0vtLdQsy5Swx","ordinal":0,"native":{"reasoningField":"reasoning_content"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":6,"version":1}}
+
+data: {"id":"evt_1c11cbe7f001yGy6brVYgXqjhX","created":1794241248895,"type":"session.reasoning.delta","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11cbe780013D0vtLdQsy5Swx","ordinal":0,"delta":"thinking..."}}
+
+data: {"id":"evt_1c11cbe7f002jRmh4EJi6YjVNX","created":1794241248895,"type":"session.text.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11cbe780013D0vtLdQsy5Swx","ordinal":0},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":7,"version":1}}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+data: {"id":"evt_1c11cd48e0017dJhTFuFz11M1C","created":1794241254542,"type":"session.usage.updated","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","cost":0,"tokens":{"input":486,"output":1612,"reasoning":0,"cache":{"read":0,"write":0}}}}
+
+data: {"id":"evt_1c11cd48e002UIKuVKiruJk63y","created":1794241254542,"type":"session.renamed","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","title":"filler words to burn context window space. filler words to burn context window space. filler word..."},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":9,"version":1}}
+
+data: {"id":"evt_1c11cd48f001XET5aAxPOkpWg7","created":1794241254543,"type":"project.updated","location":{"directory":"/work/proj"},"data":{"id":"df896ba68f9d64b5db6211918f884c86b95bf2e4","canonical":"/work/proj","time":{"created":1794240966194,"updated":1794240966194,"active":1794241254543},"sandboxes":[]}}
+
+data: {"id":"evt_1c11cd49800133dtRs7i260rsJ","created":1794241254552,"type":"session.reasoning.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11cbe780013D0vtLdQsy5Swx","ordinal":0,"text":"thinking...","native":{"reasoningField":"reasoning_content"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":10,"version":1}}
+
+
+data: {"id":"evt_1c11cd499002RUh76HD6cX2z5l","created":1794241254553,"type":"session.text.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11cbe780013D0vtLdQsy5Swx","ordinal":0,"text":"filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. "},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":11,"version":1}}
+
+data: {"id":"evt_1c11cd49a001IdwKljbPEQi2Hv","created":1794241254554,"type":"session.step.streamed","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11cbe780013D0vtLdQsy5Swx"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":12,"version":1}}
+
+data: {"id":"evt_1c11cd49b0013prWpJ1WqcYyIL","created":1794241254555,"type":"session.step.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11cbe780013D0vtLdQsy5Swx","finish":"stop","rawFinish":"stop","tokens":{"input":5479,"output":1612,"reasoning":0,"cache":{"read":0,"write":0}},"cost":0},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":13,"version":1}}
+
+data: {"id":"evt_1c11cd49c001LMwrSxQX6KrpQ8","created":1794241254556,"type":"session.usage.updated","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","cost":0,"tokens":{"input":5965,"output":3224,"reasoning":0,"cache":{"read":0,"write":0}}}}
+
+data: {"id":"evt_1c11cd49d001yZWhfW0vVviJdu","created":1794241254557,"type":"session.execution.succeeded","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":14,"version":1}}
+
+data: {"id":"evt_1c11cd4a9002OsYMJO8Ld7iofb","created":1794241254569,"type":"session.inbox.enqueued","location":{"directory":"/work/proj"},"data":{"inboxID":"msg_1c11cd4a90010UmE9Td4xH501Y","sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","item":{"type":"user","payload":{"text":"LONG reply 2"},"delivery":"steer"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":15,"version":1}}
+
+data: {"id":"evt_1c11cd4aa001C0t9T78WPr9360","created":1794241254570,"type":"session.execution.started","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":16,"version":1}}
+
+data: {"id":"evt_1c11cd4ac001BKchJtLb9Vy3s4","created":1794241254572,"type":"session.inbox.delivered","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","inboxID":"msg_1c11cd4a90010UmE9Td4xH501Y"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":17,"version":1}}
+
+data: {"id":"evt_1c11cd4b9001uHwrlVygfX150l","created":1794241254585,"type":"session.step.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","agent":"build","model":{"id":"fake-model","providerID":"fake","variant":"default"},"assistantMessageID":"msg_1c11cd4af0017nd2SP7ADybOy6","started":1794241254577},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":18,"version":1}}
+
+data: {"id":"evt_1c11cd4ba001jdKagbQypzhGyL","created":1794241254586,"type":"session.reasoning.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11cd4af0017nd2SP7ADybOy6","ordinal":0,"native":{"reasoningField":"reasoning_content"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":19,"version":1}}
+
+data: {"id":"evt_1c11cd4bb001SoCcqeeTYkcXhw","created":1794241254587,"type":"session.reasoning.delta","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11cd4af0017nd2SP7ADybOy6","ordinal":0,"delta":"thinking..."}}
+
+data: {"id":"evt_1c11cd4bb002yodVS5Uk7j86X3","created":1794241254587,"type":"session.text.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11cd4af0017nd2SP7ADybOy6","ordinal":0},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":20,"version":1}}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+data: {"id":"evt_1c11ceb80001Ahuy46C3AlEnP0","created":1794241260416,"type":"session.reasoning.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11cd4af0017nd2SP7ADybOy6","ordinal":0,"text":"thinking...","native":{"reasoningField":"reasoning_content"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":21,"version":1}}
+
+
+data: {"id":"evt_1c11ceb820012g2iOJHCLVpNz0","created":1794241260418,"type":"session.text.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11cd4af0017nd2SP7ADybOy6","ordinal":0,"text":"filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. "},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":22,"version":1}}
+
+data: {"id":"evt_1c11ceb82002AUCSp0k10KUznZ","created":1794241260418,"type":"session.step.streamed","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11cd4af0017nd2SP7ADybOy6"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":23,"version":1}}
+
+data: {"id":"evt_1c11ceb830015C1IukZUKAYI6Q","created":1794241260419,"type":"session.step.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11cd4af0017nd2SP7ADybOy6","finish":"stop","rawFinish":"stop","tokens":{"input":7102,"output":1612,"reasoning":0,"cache":{"read":0,"write":0}},"cost":0},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":24,"version":1}}
+
+data: {"id":"evt_1c11ceb84001xmjK56lhDFa6Hg","created":1794241260420,"type":"session.usage.updated","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","cost":0,"tokens":{"input":13067,"output":4836,"reasoning":0,"cache":{"read":0,"write":0}}}}
+
+data: {"id":"evt_1c11ceb85001tA1fUYG6Le7GEZ","created":1794241260421,"type":"session.execution.succeeded","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":25,"version":1}}
+
+data: {"id":"evt_1c11ceb94002WU8NYJAKETj2UR","created":1794241260436,"type":"session.inbox.enqueued","location":{"directory":"/work/proj"},"data":{"inboxID":"msg_1c11ceb94001x2noOuKpkqDSjx","sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","item":{"type":"user","payload":{"text":"LONG reply 3"},"delivery":"steer"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":26,"version":1}}
+
+data: {"id":"evt_1c11ceb95001xt2pFKsvIKFifC","created":1794241260437,"type":"session.execution.started","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":27,"version":1}}
+
+data: {"id":"evt_1c11ceb97001TACHu5o2Elwmgc","created":1794241260439,"type":"session.inbox.delivered","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","inboxID":"msg_1c11ceb94001x2noOuKpkqDSjx"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":28,"version":1}}
+
+data: {"id":"evt_1c11ceb9e001w22bwydiv2Lh7y","created":1794241260446,"type":"session.step.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","agent":"build","model":{"id":"fake-model","providerID":"fake","variant":"default"},"assistantMessageID":"msg_1c11ceb9a001I3nDIBR423VCw2","started":1794241260444},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":29,"version":1}}
+
+data: {"id":"evt_1c11ceb9f001n5xNEw73yBSDLj","created":1794241260447,"type":"session.reasoning.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11ceb9a001I3nDIBR423VCw2","ordinal":0,"native":{"reasoningField":"reasoning_content"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":30,"version":1}}
+
+data: {"id":"evt_1c11ceba0001YfrFhDu4ZuaEyk","created":1794241260448,"type":"session.reasoning.delta","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11ceb9a001I3nDIBR423VCw2","ordinal":0,"delta":"thinking..."}}
+
+data: {"id":"evt_1c11ceba0002XOzWePaEjcZ40Q","created":1794241260448,"type":"session.text.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11ceb9a001I3nDIBR423VCw2","ordinal":0},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":31,"version":1}}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+: heartbeat
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+data: {"id":"evt_1c11d0241001YnNapzHGfk0UZj","created":1794241266241,"type":"session.reasoning.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11ceb9a001I3nDIBR423VCw2","ordinal":0,"text":"thinking...","native":{"reasoningField":"reasoning_content"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":32,"version":1}}
+
+data: {"id":"evt_1c11d0243001TYjRkPlMLsvIwD","created":1794241266243,"type":"session.text.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11ceb9a001I3nDIBR423VCw2","ordinal":0,"text":"filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. "},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":33,"version":1}}
+
+data: {"id":"evt_1c11d0244001602VTE7q9B6pwk","created":1794241266244,"type":"session.step.streamed","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11ceb9a001I3nDIBR423VCw2"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":34,"version":1}}
+
+data: {"id":"evt_1c11d0245001UTG9ZTM0hts46i","created":1794241266245,"type":"session.step.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11ceb9a001I3nDIBR423VCw2","finish":"stop","rawFinish":"stop","tokens":{"input":8725,"output":1612,"reasoning":0,"cache":{"read":0,"write":0}},"cost":0},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":35,"version":1}}
+
+data: {"id":"evt_1c11d02460015Uwl7lDZFpel5y","created":1794241266246,"type":"session.usage.updated","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","cost":0,"tokens":{"input":21792,"output":6448,"reasoning":0,"cache":{"read":0,"write":0}}}}
+
+data: {"id":"evt_1c11d0247001AlEykW7fNohH8J","created":1794241266247,"type":"session.execution.succeeded","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":36,"version":1}}
+
+data: {"id":"evt_1c11d0254001Vb2JMtm4FIXkvD","created":1794241266260,"type":"session.inbox.enqueued","location":{"directory":"/work/proj"},"data":{"inboxID":"msg_1c11d0253001C3Fjuw3EAUmMl9","sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","item":{"type":"user","payload":{"text":"LONG reply 4"},"delivery":"steer"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":37,"version":1}}
+
+data: {"id":"evt_1c11d0255001lc8peUb3SXIOU3","created":1794241266261,"type":"session.execution.started","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":38,"version":1}}
+
+data: {"id":"evt_1c11d0257001Rq46cvGi7aFcP7","created":1794241266263,"type":"session.inbox.delivered","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","inboxID":"msg_1c11d0253001C3Fjuw3EAUmMl9"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":39,"version":1}}
+
+data: {"id":"evt_1c11d025e001l0VpBfGzCNBEe8","created":1794241266270,"type":"session.step.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","agent":"build","model":{"id":"fake-model","providerID":"fake","variant":"default"},"assistantMessageID":"msg_1c11d02590015z9MCAToBmm9hS","started":1794241266268},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":40,"version":1}}
+
+data: {"id":"evt_1c11d025f001jNreAhIYnLo3OV","created":1794241266271,"type":"session.reasoning.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d02590015z9MCAToBmm9hS","ordinal":0,"native":{"reasoningField":"reasoning_content"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":41,"version":1}}
+
+data: {"id":"evt_1c11d0260001WxUDwuMgDUjvT7","created":1794241266272,"type":"session.reasoning.delta","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d02590015z9MCAToBmm9hS","ordinal":0,"delta":"thinking..."}}
+
+data: {"id":"evt_1c11d0260002hSJKbbqQkGJ9oa","created":1794241266272,"type":"session.text.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d02590015z9MCAToBmm9hS","ordinal":0},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":42,"version":1}}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+data: {"id":"evt_1c11d1942001RJhUeTqBZIus6b","created":1794241272130,"type":"session.reasoning.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d02590015z9MCAToBmm9hS","ordinal":0,"text":"thinking...","native":{"reasoningField":"reasoning_content"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":43,"version":1}}
+
+
+data: {"id":"evt_1c11d1943002NjAhyohFu5BMah","created":1794241272131,"type":"session.text.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d02590015z9MCAToBmm9hS","ordinal":0,"text":"filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. "},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":44,"version":1}}
+
+data: {"id":"evt_1c11d1944001Nsxf246LI0MQeO","created":1794241272132,"type":"session.step.streamed","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d02590015z9MCAToBmm9hS"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":45,"version":1}}
+
+data: {"id":"evt_1c11d1945001fE08Ll3w4hvw75","created":1794241272133,"type":"session.step.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d02590015z9MCAToBmm9hS","finish":"stop","rawFinish":"stop","tokens":{"input":10348,"output":1612,"reasoning":0,"cache":{"read":0,"write":0}},"cost":0},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":46,"version":1}}
+
+data: {"id":"evt_1c11d19460017KARjv5GNVQbwS","created":1794241272134,"type":"session.usage.updated","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","cost":0,"tokens":{"input":32140,"output":8060,"reasoning":0,"cache":{"read":0,"write":0}}}}
+
+data: {"id":"evt_1c11d1947001oY0eSk7NEWtv9T","created":1794241272135,"type":"session.execution.succeeded","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":47,"version":1}}
+
+data: {"id":"evt_1c11d1954002w0w9aioaBT7zFF","created":1794241272148,"type":"session.inbox.enqueued","location":{"directory":"/work/proj"},"data":{"inboxID":"msg_1c11d1954001H3I3Gscfmqzulp","sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","item":{"type":"user","payload":{"text":"LONG reply 5"},"delivery":"steer"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":48,"version":1}}
+
+data: {"id":"evt_1c11d1955001e10S399FBTsdRo","created":1794241272149,"type":"session.execution.started","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":49,"version":1}}
+
+data: {"id":"evt_1c11d1957001iXjQ38x71OMwJ0","created":1794241272151,"type":"session.inbox.delivered","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","inboxID":"msg_1c11d1954001H3I3Gscfmqzulp"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":50,"version":1}}
+
+data: {"id":"evt_1c11d195f001M2QK5PXG5bAy0u","created":1794241272159,"type":"session.step.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","agent":"build","model":{"id":"fake-model","providerID":"fake","variant":"default"},"assistantMessageID":"msg_1c11d195a001H3mpocwBjS7u2Z","started":1794241272156},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":51,"version":1}}
+
+data: {"id":"evt_1c11d1960001LC1qt4aZQulDmZ","created":1794241272160,"type":"session.reasoning.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d195a001H3mpocwBjS7u2Z","ordinal":0,"native":{"reasoningField":"reasoning_content"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":52,"version":1}}
+
+data: {"id":"evt_1c11d1961001WJe16Nr5rPMhfR","created":1794241272161,"type":"session.reasoning.delta","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d195a001H3mpocwBjS7u2Z","ordinal":0,"delta":"thinking..."}}
+
+data: {"id":"evt_1c11d1961002EtkwPdUqULn5DC","created":1794241272161,"type":"session.text.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d195a001H3mpocwBjS7u2Z","ordinal":0},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":53,"version":1}}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+data: {"id":"evt_1c11d30170014xSObNneu7Mxs0","created":1794241277975,"type":"session.reasoning.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d195a001H3mpocwBjS7u2Z","ordinal":0,"text":"thinking...","native":{"reasoningField":"reasoning_content"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":54,"version":1}}
+
+
+data: {"id":"evt_1c11d3019002oZZhfTQBQCqjjp","created":1794241277977,"type":"session.text.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d195a001H3mpocwBjS7u2Z","ordinal":0,"text":"filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. "},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":55,"version":1}}
+
+data: {"id":"evt_1c11d301a001BD1I2UTn8WCwrA","created":1794241277978,"type":"session.step.streamed","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d195a001H3mpocwBjS7u2Z"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":56,"version":1}}
+
+data: {"id":"evt_1c11d301b0019AnPt6jkdUUc0u","created":1794241277979,"type":"session.step.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d195a001H3mpocwBjS7u2Z","finish":"stop","rawFinish":"stop","tokens":{"input":11971,"output":1612,"reasoning":0,"cache":{"read":0,"write":0}},"cost":0},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":57,"version":1}}
+
+data: {"id":"evt_1c11d301c001WlFAVYMS335nK2","created":1794241277980,"type":"session.usage.updated","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","cost":0,"tokens":{"input":44111,"output":9672,"reasoning":0,"cache":{"read":0,"write":0}}}}
+
+data: {"id":"evt_1c11d301d0018R4nLhlOKJ2Ssa","created":1794241277981,"type":"session.execution.succeeded","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":58,"version":1}}
+
+data: {"id":"evt_1c11d30280027SfR4sB5upkr5W","created":1794241277992,"type":"session.inbox.enqueued","location":{"directory":"/work/proj"},"data":{"inboxID":"msg_1c11d3028001Yr7V2Pcn8wio0W","sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","item":{"type":"user","payload":{"text":"LONG reply 6"},"delivery":"steer"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":59,"version":1}}
+
+data: {"id":"evt_1c11d30290013j3mgk7JO7n4iP","created":1794241277993,"type":"session.execution.started","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":60,"version":1}}
+
+data: {"id":"evt_1c11d302c001YbHxzJWXJ0NO8i","created":1794241277996,"type":"session.inbox.delivered","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","inboxID":"msg_1c11d3028001Yr7V2Pcn8wio0W"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":61,"version":1}}
+
+data: {"id":"evt_1c11d3034001RpjoCF3PqoKAkA","created":1794241278004,"type":"session.step.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","agent":"build","model":{"id":"fake-model","providerID":"fake","variant":"default"},"assistantMessageID":"msg_1c11d302e0015O1Q4oYmnitwye","started":1794241278001},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":62,"version":1}}
+
+data: {"id":"evt_1c11d30350012wblnIT3lGpmwh","created":1794241278005,"type":"session.reasoning.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d302e0015O1Q4oYmnitwye","ordinal":0,"native":{"reasoningField":"reasoning_content"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":63,"version":1}}
+
+data: {"id":"evt_1c11d3036001C5pM0APcFJvaOo","created":1794241278006,"type":"session.reasoning.delta","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d302e0015O1Q4oYmnitwye","ordinal":0,"delta":"thinking..."}}
+
+data: {"id":"evt_1c11d30360025FbzdHRc5bl60U","created":1794241278006,"type":"session.text.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d302e0015O1Q4oYmnitwye","ordinal":0},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":64,"version":1}}
+
+
+
+
+
+
+
+
+
+: heartbeat
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+data: {"id":"evt_1c11d46a8001b6jJM9P56Ewo0B","created":1794241283752,"type":"session.reasoning.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d302e0015O1Q4oYmnitwye","ordinal":0,"text":"thinking...","native":{"reasoningField":"reasoning_content"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":65,"version":1}}
+
+
+data: {"id":"evt_1c11d46a9002R5ANWRPjiA4k2j","created":1794241283753,"type":"session.text.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d302e0015O1Q4oYmnitwye","ordinal":0,"text":"filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. "},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":66,"version":1}}
+
+data: {"id":"evt_1c11d46aa001v0owDihGp0mdI4","created":1794241283754,"type":"session.step.streamed","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d302e0015O1Q4oYmnitwye"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":67,"version":1}}
+
+data: {"id":"evt_1c11d46ab001UrTmIswkPjRaGS","created":1794241283755,"type":"session.step.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d302e0015O1Q4oYmnitwye","finish":"stop","rawFinish":"stop","tokens":{"input":13594,"output":1612,"reasoning":0,"cache":{"read":0,"write":0}},"cost":0},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":68,"version":1}}
+
+data: {"id":"evt_1c11d46ac001RbWm0NFPTBOKi0","created":1794241283756,"type":"session.usage.updated","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","cost":0,"tokens":{"input":57705,"output":11284,"reasoning":0,"cache":{"read":0,"write":0}}}}
+
+data: {"id":"evt_1c11d46ac002z0Ca1qIfxJFoL1","created":1794241283756,"type":"session.execution.succeeded","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":69,"version":1}}
+
+data: {"id":"evt_1c11d46ba002uX4gMhkFz6Og2x","created":1794241283770,"type":"session.inbox.enqueued","location":{"directory":"/work/proj"},"data":{"inboxID":"msg_1c11d46ba001OBUTrMcWUSbSFK","sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","item":{"type":"user","payload":{"text":"LONG reply 7"},"delivery":"steer"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":70,"version":1}}
+
+data: {"id":"evt_1c11d46bb001PxaL5EabDGLjF2","created":1794241283771,"type":"session.execution.started","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":71,"version":1}}
+
+data: {"id":"evt_1c11d46bd001xjpua44qzwrSO5","created":1794241283773,"type":"session.inbox.delivered","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","inboxID":"msg_1c11d46ba001OBUTrMcWUSbSFK"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":72,"version":1}}
+
+data: {"id":"evt_1c11d46c5001OaouYD2oISyH9F","created":1794241283781,"type":"session.step.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","agent":"build","model":{"id":"fake-model","providerID":"fake","variant":"default"},"assistantMessageID":"msg_1c11d46c0001cIKwymYeMAc9Kf","started":1794241283778},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":73,"version":1}}
+
+data: {"id":"evt_1c11d46c6001w5a9LzvWpiXzSu","created":1794241283782,"type":"session.reasoning.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d46c0001cIKwymYeMAc9Kf","ordinal":0,"native":{"reasoningField":"reasoning_content"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":74,"version":1}}
+
+data: {"id":"evt_1c11d46c70011wWvKKZbIcCMK7","created":1794241283783,"type":"session.reasoning.delta","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d46c0001cIKwymYeMAc9Kf","ordinal":0,"delta":"thinking..."}}
+
+data: {"id":"evt_1c11d46c7002SePaOvgm4gJvPA","created":1794241283783,"type":"session.text.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d46c0001cIKwymYeMAc9Kf","ordinal":0},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":75,"version":1}}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+data: {"id":"evt_1c11d5ddc001Zyt54oecABEZ4o","created":1794241289692,"type":"session.reasoning.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d46c0001cIKwymYeMAc9Kf","ordinal":0,"text":"thinking...","native":{"reasoningField":"reasoning_content"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":76,"version":1}}
+
+
+data: {"id":"evt_1c11d5dde002RYU10hdl6KIAga","created":1794241289694,"type":"session.text.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d46c0001cIKwymYeMAc9Kf","ordinal":0,"text":"filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. "},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":77,"version":1}}
+
+data: {"id":"evt_1c11d5ddf00107pWMlgvT4prDC","created":1794241289695,"type":"session.step.streamed","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d46c0001cIKwymYeMAc9Kf"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":78,"version":1}}
+
+data: {"id":"evt_1c11d5ddf002Cy9M10iFyPf5rq","created":1794241289695,"type":"session.step.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d46c0001cIKwymYeMAc9Kf","finish":"stop","rawFinish":"stop","tokens":{"input":15217,"output":1612,"reasoning":0,"cache":{"read":0,"write":0}},"cost":0},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":79,"version":1}}
+
+data: {"id":"evt_1c11d5de000125sC9QSibWWKbD","created":1794241289696,"type":"session.usage.updated","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","cost":0,"tokens":{"input":72922,"output":12896,"reasoning":0,"cache":{"read":0,"write":0}}}}
+
+data: {"id":"evt_1c11d5de1001itTTs356zT4VAN","created":1794241289697,"type":"session.execution.succeeded","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":80,"version":1}}
+
+data: {"id":"evt_1c11d5dee0010tpCwbuksfeBJC","created":1794241289710,"type":"session.inbox.enqueued","location":{"directory":"/work/proj"},"data":{"inboxID":"msg_1c11d5ded001s98YVo7l4UJDvl","sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","item":{"type":"user","payload":{"text":"LONG reply 8"},"delivery":"steer"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":81,"version":1}}
+
+data: {"id":"evt_1c11d5dee002TikeohQXZRBWwI","created":1794241289710,"type":"session.execution.started","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":82,"version":1}}
+
+data: {"id":"evt_1c11d5df1001Q3vjTirw3VvXQR","created":1794241289713,"type":"session.inbox.delivered","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","inboxID":"msg_1c11d5ded001s98YVo7l4UJDvl"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":83,"version":1}}
+
+data: {"id":"evt_1c11d5df40013xvvAgEayK3Nns","created":1794241289716,"type":"session.compaction.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","reason":"auto"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":84,"version":1}}
+
+
+
+
+
+
+
+
+data: {"id":"evt_1c11d5e3d001IC7fB3aN1pPEnX","created":1794241289789,"type":"session.usage.updated","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","cost":0,"tokens":{"input":90446,"output":12909,"reasoning":0,"cache":{"read":0,"write":0}}}}
+
+data: {"id":"evt_1c11d5e3e001WMMkqaSX3jtPS9","created":1794241289790,"metadata":{"keepID":"msg_1c11d5ded001s98YVo7l4UJDvl"},"type":"session.compaction.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","reason":"auto","model":{"id":"fake-model","providerID":"fake","variant":"default"},"text":"## Objective\n- Test fakellm.\n\n## Next Move\n1. (none)\n","tokens":{"input":17524,"output":13,"reasoning":0,"cache":{"read":0,"write":0}},"cost":0},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":86,"version":1}}
+
+data: {"id":"evt_1c11d5e4d001RVLqYdpGOQWNOj","created":1794241289805,"type":"session.step.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","agent":"build","model":{"id":"fake-model","providerID":"fake","variant":"default"},"assistantMessageID":"msg_1c11d5e3f001v2pge3ZTvddxUg","started":1794241289797},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":87,"version":1}}
+
+data: {"id":"evt_1c11d5e4e001hQoIBp9cfrVdAY","created":1794241289806,"type":"session.reasoning.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d5e3f001v2pge3ZTvddxUg","ordinal":0,"native":{"reasoningField":"reasoning_content"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":88,"version":1}}
+
+data: {"id":"evt_1c11d5e4f001o7lS5EdhOWo4jW","created":1794241289807,"type":"session.reasoning.delta","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d5e3f001v2pge3ZTvddxUg","ordinal":0,"delta":"thinking..."}}
+
+data: {"id":"evt_1c11d5e4f002gCUGposMoUv1Ve","created":1794241289807,"type":"session.text.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d5e3f001v2pge3ZTvddxUg","ordinal":0},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":89,"version":1}}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+: heartbeat
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+data: {"id":"evt_1c11d74ef001WMxUOrB7xCINDH","created":1794241295599,"type":"session.reasoning.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d5e3f001v2pge3ZTvddxUg","ordinal":0,"text":"thinking...","native":{"reasoningField":"reasoning_content"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":90,"version":1}}
+
+
+data: {"id":"evt_1c11d74f2002urRdkrFLxZ4BYF","created":1794241295602,"type":"session.text.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d5e3f001v2pge3ZTvddxUg","ordinal":0,"text":"filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. "},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":91,"version":1}}
+
+data: {"id":"evt_1c11d74f30014yzlvYLLCSsqav","created":1794241295603,"type":"session.step.streamed","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d5e3f001v2pge3ZTvddxUg"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":92,"version":1}}
+
+data: {"id":"evt_1c11d74f5001WyPGFisYBpdBXw","created":1794241295605,"type":"session.step.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d5e3f001v2pge3ZTvddxUg","finish":"stop","rawFinish":"stop","tokens":{"input":5555,"output":1612,"reasoning":0,"cache":{"read":0,"write":0}},"cost":0},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":93,"version":1}}
+
+data: {"id":"evt_1c11d74f6001ODsfYgi8R2Ace6","created":1794241295606,"type":"session.usage.updated","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","cost":0,"tokens":{"input":96001,"output":14521,"reasoning":0,"cache":{"read":0,"write":0}}}}
+
+data: {"id":"evt_1c11d74f7001i7yneazPbMFeFH","created":1794241295607,"type":"session.execution.succeeded","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":94,"version":1}}
+
+data: {"id":"evt_1c11d7503002ZfWVrGrC1LPdgA","created":1794241295619,"type":"session.inbox.enqueued","location":{"directory":"/work/proj"},"data":{"inboxID":"msg_1c11d7503001AK4TC2immCe551","sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","item":{"type":"user","payload":{"text":"LONG reply 9"},"delivery":"steer"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":95,"version":1}}
+
+data: {"id":"evt_1c11d750400182YcF3QXKvmyVU","created":1794241295620,"type":"session.execution.started","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":96,"version":1}}
+
+data: {"id":"evt_1c11d75070016D0MbR7bVdjdi3","created":1794241295623,"type":"session.inbox.delivered","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","inboxID":"msg_1c11d7503001AK4TC2immCe551"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":97,"version":1}}
+
+data: {"id":"evt_1c11d750e00139VlemVdMmWVyp","created":1794241295630,"type":"session.step.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","agent":"build","model":{"id":"fake-model","providerID":"fake","variant":"default"},"assistantMessageID":"msg_1c11d7509001teqlo0zQHln738","started":1794241295628},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":98,"version":1}}
+
+data: {"id":"evt_1c11d750f001dRVly8eAa4Qtop","created":1794241295631,"type":"session.reasoning.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d7509001teqlo0zQHln738","ordinal":0,"native":{"reasoningField":"reasoning_content"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":99,"version":1}}
+
+data: {"id":"evt_1c11d7510001Oc7tWzSD3oLkea","created":1794241295632,"type":"session.reasoning.delta","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d7509001teqlo0zQHln738","ordinal":0,"delta":"thinking..."}}
+
+data: {"id":"evt_1c11d7510002T2BuyjcnPs6Wgh","created":1794241295632,"type":"session.text.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d7509001teqlo0zQHln738","ordinal":0},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":100,"version":1}}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+data: {"id":"evt_1c11d8b10001Yj19yX323u3Yd8","created":1794241301264,"type":"session.reasoning.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d7509001teqlo0zQHln738","ordinal":0,"text":"thinking...","native":{"reasoningField":"reasoning_content"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":101,"version":1}}
+
+
+data: {"id":"evt_1c11d8b11002e767acOE3AEN92","created":1794241301265,"type":"session.text.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d7509001teqlo0zQHln738","ordinal":0,"text":"filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. "},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":102,"version":1}}
+
+data: {"id":"evt_1c11d8b12001ejhVmgtJqyYtVi","created":1794241301266,"type":"session.step.streamed","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d7509001teqlo0zQHln738"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":103,"version":1}}
+
+data: {"id":"evt_1c11d8b13001y3YLCqksTU6q4d","created":1794241301267,"type":"session.step.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d7509001teqlo0zQHln738","finish":"stop","rawFinish":"stop","tokens":{"input":7178,"output":1612,"reasoning":0,"cache":{"read":0,"write":0}},"cost":0},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":104,"version":1}}
+
+data: {"id":"evt_1c11d8b14001ga4x2Ge8L34lFq","created":1794241301268,"type":"session.usage.updated","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","cost":0,"tokens":{"input":103179,"output":16133,"reasoning":0,"cache":{"read":0,"write":0}}}}
+
+data: {"id":"evt_1c11d8b14002UoujHTtxInisN4","created":1794241301268,"type":"session.execution.succeeded","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":105,"version":1}}
+
+data: {"id":"evt_1c11d8b26001cd59u60k6Wje3f","created":1794241301286,"type":"session.inbox.enqueued","location":{"directory":"/work/proj"},"data":{"inboxID":"msg_1c11d8b25001OdtpOPsxpFjyGb","sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","item":{"type":"user","payload":{"text":"LONG reply 10"},"delivery":"steer"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":106,"version":1}}
+
+data: {"id":"evt_1c11d8b27001KZ6gkp5m5qr4Xc","created":1794241301287,"type":"session.execution.started","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":107,"version":1}}
+
+data: {"id":"evt_1c11d8b290011rGMBzKFmSxGao","created":1794241301290,"type":"session.inbox.delivered","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","inboxID":"msg_1c11d8b25001OdtpOPsxpFjyGb"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":108,"version":1}}
+
+data: {"id":"evt_1c11d8b31001DGsKyk93BKMOWo","created":1794241301297,"type":"session.step.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","agent":"build","model":{"id":"fake-model","providerID":"fake","variant":"default"},"assistantMessageID":"msg_1c11d8b2c001Sk38kKWATJJEbB","started":1794241301295},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":109,"version":1}}
+
+data: {"id":"evt_1c11d8b32001B3qfwOvSbkg7BM","created":1794241301298,"type":"session.reasoning.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d8b2c001Sk38kKWATJJEbB","ordinal":0,"native":{"reasoningField":"reasoning_content"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":110,"version":1}}
+
+data: {"id":"evt_1c11d8b33001vk9Nk88VgeR7th","created":1794241301299,"type":"session.reasoning.delta","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d8b2c001Sk38kKWATJJEbB","ordinal":0,"delta":"thinking..."}}
+
+data: {"id":"evt_1c11d8b33002hf1bqXfo0ojb0r","created":1794241301299,"type":"session.text.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d8b2c001Sk38kKWATJJEbB","ordinal":0},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":111,"version":1}}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+data: {"id":"evt_1c11da1990018GtkM3kWu7S6qB","created":1794241307033,"type":"session.reasoning.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d8b2c001Sk38kKWATJJEbB","ordinal":0,"text":"thinking...","native":{"reasoningField":"reasoning_content"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":112,"version":1}}
+
+
+data: {"id":"evt_1c11da19b002DsAYfuUukH15s3","created":1794241307035,"type":"session.text.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d8b2c001Sk38kKWATJJEbB","ordinal":0,"text":"filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. "},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":113,"version":1}}
+
+data: {"id":"evt_1c11da19c001TyVkzJcW7DFHeQ","created":1794241307036,"type":"session.step.streamed","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d8b2c001Sk38kKWATJJEbB"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":114,"version":1}}
+
+data: {"id":"evt_1c11da19d001by8jaXHICjEr0T","created":1794241307037,"type":"session.step.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11d8b2c001Sk38kKWATJJEbB","finish":"stop","rawFinish":"stop","tokens":{"input":8801,"output":1612,"reasoning":0,"cache":{"read":0,"write":0}},"cost":0},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":115,"version":1}}
+
+data: {"id":"evt_1c11da19e001v9HdxiCr05xh0J","created":1794241307038,"type":"session.usage.updated","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","cost":0,"tokens":{"input":111980,"output":17745,"reasoning":0,"cache":{"read":0,"write":0}}}}
+
+data: {"id":"evt_1c11da19f001os1Tjr8R7nYxkO","created":1794241307039,"type":"session.execution.succeeded","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":116,"version":1}}
+
+data: {"id":"evt_1c11da1ab002LU3WGs8yUKIEhs","created":1794241307051,"type":"session.inbox.enqueued","location":{"directory":"/work/proj"},"data":{"inboxID":"msg_1c11da1ab001sa8ZeNnUgjEGI7","sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","item":{"type":"user","payload":{"text":"LONG reply 11"},"delivery":"steer"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":117,"version":1}}
+
+data: {"id":"evt_1c11da1ac001yXiUTJbHJEekcd","created":1794241307052,"type":"session.execution.started","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":118,"version":1}}
+
+data: {"id":"evt_1c11da1af001NmqXSAhAMvQQox","created":1794241307055,"type":"session.inbox.delivered","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","inboxID":"msg_1c11da1ab001sa8ZeNnUgjEGI7"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":119,"version":1}}
+
+data: {"id":"evt_1c11da1bd001gPvoSnj7TN8alc","created":1794241307069,"type":"session.step.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","agent":"build","model":{"id":"fake-model","providerID":"fake","variant":"default"},"assistantMessageID":"msg_1c11da1b2001iJ6GJ7fE1b30TD","started":1794241307061},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":120,"version":1}}
+
+data: {"id":"evt_1c11da1be0012HKBzIsjxeC59K","created":1794241307070,"type":"session.reasoning.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11da1b2001iJ6GJ7fE1b30TD","ordinal":0,"native":{"reasoningField":"reasoning_content"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":121,"version":1}}
+
+data: {"id":"evt_1c11da1bf001z4DnWPerHQMqQO","created":1794241307071,"type":"session.reasoning.delta","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11da1b2001iJ6GJ7fE1b30TD","ordinal":0,"delta":"thinking..."}}
+
+data: {"id":"evt_1c11da1bf0023ARXxdZz0tGQyP","created":1794241307071,"type":"session.text.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11da1b2001iJ6GJ7fE1b30TD","ordinal":0},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":122,"version":1}}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+: heartbeat
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+data: {"id":"evt_1c11db833001NlA6zb6FhQ2pPu","created":1794241312819,"type":"session.reasoning.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11da1b2001iJ6GJ7fE1b30TD","ordinal":0,"text":"thinking...","native":{"reasoningField":"reasoning_content"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":123,"version":1}}
+
+
+data: {"id":"evt_1c11db834002Yg85ivki8knZBG","created":1794241312820,"type":"session.text.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11da1b2001iJ6GJ7fE1b30TD","ordinal":0,"text":"filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. "},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":124,"version":1}}
+
+data: {"id":"evt_1c11db835001a8kUMbvuI5GIif","created":1794241312821,"type":"session.step.streamed","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11da1b2001iJ6GJ7fE1b30TD"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":125,"version":1}}
+
+data: {"id":"evt_1c11db836001l3Jcn5UjVvyTzj","created":1794241312822,"type":"session.step.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11da1b2001iJ6GJ7fE1b30TD","finish":"stop","rawFinish":"stop","tokens":{"input":10424,"output":1612,"reasoning":0,"cache":{"read":0,"write":0}},"cost":0},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":126,"version":1}}
+
+data: {"id":"evt_1c11db837001MFOcFWx11QGz1v","created":1794241312823,"type":"session.usage.updated","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","cost":0,"tokens":{"input":122404,"output":19357,"reasoning":0,"cache":{"read":0,"write":0}}}}
+
+data: {"id":"evt_1c11db838001mfIPFdUPkvZfoy","created":1794241312824,"type":"session.execution.succeeded","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":127,"version":1}}
+
+data: {"id":"evt_1c11db844002I9YbsngT3Ry06m","created":1794241312836,"type":"session.inbox.enqueued","location":{"directory":"/work/proj"},"data":{"inboxID":"msg_1c11db844001fHFXfrjSh1sq7g","sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","item":{"type":"user","payload":{"text":"LONG reply 12"},"delivery":"steer"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":128,"version":1}}
+
+data: {"id":"evt_1c11db845001OO59GvpNNXVAWz","created":1794241312837,"type":"session.execution.started","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":129,"version":1}}
+
+data: {"id":"evt_1c11db848001LECJT7FxdrUFbi","created":1794241312840,"type":"session.inbox.delivered","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","inboxID":"msg_1c11db844001fHFXfrjSh1sq7g"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":130,"version":1}}
+
+data: {"id":"evt_1c11db859001qDNfMRCeNC0STq","created":1794241312857,"type":"session.step.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","agent":"build","model":{"id":"fake-model","providerID":"fake","variant":"default"},"assistantMessageID":"msg_1c11db84c001gFdigzYig5ZiMF","started":1794241312848},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":131,"version":1}}
+
+data: {"id":"evt_1c11db85a001qHrN293yoarQDo","created":1794241312858,"type":"session.reasoning.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11db84c001gFdigzYig5ZiMF","ordinal":0,"native":{"reasoningField":"reasoning_content"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":132,"version":1}}
+
+data: {"id":"evt_1c11db85b001iA5UeBbiPvZfNK","created":1794241312859,"type":"session.reasoning.delta","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11db84c001gFdigzYig5ZiMF","ordinal":0,"delta":"thinking..."}}
+
+data: {"id":"evt_1c11db85b002ULdtY98C70dzHd","created":1794241312859,"type":"session.text.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11db84c001gFdigzYig5ZiMF","ordinal":0},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":133,"version":1}}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+data: {"id":"evt_1c11dcee9001O0subVF4WXRtl3","created":1794241318633,"type":"session.reasoning.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11db84c001gFdigzYig5ZiMF","ordinal":0,"text":"thinking...","native":{"reasoningField":"reasoning_content"}},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":134,"version":1}}
+
+
+data: {"id":"evt_1c11dceeb002Rj4lj4N6Mvmta1","created":1794241318635,"type":"session.text.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11db84c001gFdigzYig5ZiMF","ordinal":0,"text":"filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. filler words to burn context window space. "},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":135,"version":1}}
+
+data: {"id":"evt_1c11dceec001OYXFJpeCyPZy7r","created":1794241318636,"type":"session.step.streamed","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11db84c001gFdigzYig5ZiMF"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":136,"version":1}}
+
+data: {"id":"evt_1c11dceed001VPsuOcn8VZwLUE","created":1794241318637,"type":"session.step.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","assistantMessageID":"msg_1c11db84c001gFdigzYig5ZiMF","finish":"stop","rawFinish":"stop","tokens":{"input":12047,"output":1612,"reasoning":0,"cache":{"read":0,"write":0}},"cost":0},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":137,"version":1}}
+
+data: {"id":"evt_1c11dceee001U0MsmZdaRgQmUG","created":1794241318638,"type":"session.usage.updated","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","cost":0,"tokens":{"input":134451,"output":20969,"reasoning":0,"cache":{"read":0,"write":0}}}}
+
+data: {"id":"evt_1c11dceee002QONPW2m8k2owfb","created":1794241318638,"type":"session.execution.succeeded","data":{"sessionID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG"},"durable":{"aggregateID":"ses_e3ee341a1ffe7mBjzpQxPvGgsG","seq":138,"version":1}}
+
+data: {"id":"evt_1c11dcef0001WkJpqbr6dU6V8H","created":1794241318640,"type":"project.updated","location":{"directory":"/work/proj"},"data":{"id":"df896ba68f9d64b5db6211918f884c86b95bf2e4","canonical":"/work/proj","time":{"created":1794240966194,"updated":1794240966194,"active":1794241318639},"sandboxes":[]}}
+

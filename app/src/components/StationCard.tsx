@@ -3,12 +3,12 @@ import {Pressable, StyleSheet, Text, View} from 'react-native';
 
 import {
   formatDataPointValue,
-  formatTokens,
+  formatContextUsage,
   getStationDataPoints,
   getStationUsage,
   Station,
   StationDataPoint,
-  TokenUsage,
+  StationUsage,
 } from '../api';
 import {Theme, useTheme} from '../theme';
 
@@ -23,7 +23,7 @@ export function StationCard({station, onPress}: {station: Station; onPress: () =
   const styles = makeStyles(theme);
 
   const [points, setPoints] = useState<StationDataPoint[]>([]);
-  const [usage, setUsage] = useState<TokenUsage | null>(null);
+  const [usage, setUsage] = useState<StationUsage | null>(null);
 
   useEffect(() => {
     const refresh = () => {
@@ -46,8 +46,8 @@ export function StationCard({station, onPress}: {station: Station; onPress: () =
     .filter(p => p.show_on_top_bar)
     .map(p => ({label: p.label || p.key, value: formatDataPointValue(p.value, p.decimals)}));
 
-  const activeContext = usage ? usage.input + usage.output + usage.cache_read + usage.cache_write : 0;
-  const showTokenCount = station.top_bar_actions.includes('tokens') && activeContext > 0;
+  const contextLabel = formatContextUsage(usage);
+  const showTokenCount = station.top_bar_actions.includes('tokens') && contextLabel !== null;
 
   return (
     <Pressable style={styles.card} onPress={onPress}>
@@ -64,7 +64,7 @@ export function StationCard({station, onPress}: {station: Station; onPress: () =
       <View style={styles.cardHeader}>
         <View style={styles.titleRow}>
           <Text style={styles.cardTitle}>{station.name}</Text>
-          {showTokenCount ? <Text style={styles.tokenCount}>{formatTokens(activeContext)}</Text> : null}
+          {showTokenCount ? <Text style={styles.tokenCount}>{contextLabel}</Text> : null}
         </View>
         <View style={styles.statusRow}>
           <View style={[styles.dot, {backgroundColor: station.reachable ? theme.success : theme.danger}]} />

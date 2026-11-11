@@ -4,7 +4,7 @@ import {ActivityIndicator, Pressable, StyleSheet, Switch, Text, TextInput, View}
 import {createMetricSource, deleteMetricSource, listMetricSources, MetricSource, updateMetricSource} from '../api';
 import {Theme, useTheme} from '../theme';
 
-// Server-wide config for the Super Badger Station Standard API: each row is
+// Server-wide config for the Super Galleon Station Standard API: each row is
 // one external endpoint the server polls on its own interval (see
 // server/metrics.Manager) and upserts into every matched station's data
 // points. Not per-station — a given source can cover any number of stations

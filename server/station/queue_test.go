@@ -2,115 +2,12 @@ package station
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
 	"main/database"
-	"main/opencode"
 )
-
-// fakeOpencode stands in for the opencode HTTP API: it reports a settable
-// session status and records every prompt_async body it receives.
-type fakeOpencode struct {
-	mu       sync.Mutex
-	status   string // "" = idle (absent from /session/status, like opencode)
-	fail     bool
-	prompts  [][]string
-	compacts int
-}
-
-func (f *fakeOpencode) handler(sessionID string) http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /session/status", func(w http.ResponseWriter, r *http.Request) {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		out := map[string]any{}
-		if f.status != "" {
-			out[sessionID] = map[string]string{"type": f.status}
-		}
-		_ = json.NewEncoder(w).Encode(out)
-	})
-	mux.HandleFunc("POST /session/{id}/prompt_async", func(w http.ResponseWriter, r *http.Request) {
-		var body struct {
-			Parts []struct {
-				Text string `json:"text"`
-			} `json:"parts"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		if f.fail {
-			http.Error(w, "boom", http.StatusInternalServerError)
-			return
-		}
-		texts := []string{}
-		for _, p := range body.Parts {
-			texts = append(texts, p.Text)
-		}
-		f.prompts = append(f.prompts, texts)
-		f.status = "busy"
-		w.WriteHeader(http.StatusNoContent)
-	})
-	mux.HandleFunc("POST /session/{id}/summarize", func(w http.ResponseWriter, r *http.Request) {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		f.compacts++
-		_, _ = w.Write([]byte("true"))
-	})
-	mux.HandleFunc("POST /session/{id}/abort", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-	return mux
-}
-
-func (f *fakeOpencode) set(fn func(f *fakeOpencode)) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	fn(f)
-}
-
-func (f *fakeOpencode) sent() [][]string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([][]string(nil), f.prompts...)
-}
-
-func newTestService(t *testing.T) (*Service, *fakeOpencode, uint) {
-	t.Helper()
-	db, err := database.Connect(filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	const sessionID = "ses_test"
-	fake := &fakeOpencode{}
-	srv := httptest.NewServer(fake.handler(sessionID))
-	t.Cleanup(srv.Close)
-	oc := opencode.NewClient(srv.URL, "")
-	svc := NewService(db, oc, opencode.NewEventBroker(oc))
-	st := database.Station{Name: "s", ProviderID: "p", ModelID: "m", Agent: agentBuild,
-		OpencodeSessionID: sessionID, Status: database.StatusActive}
-	if err := database.CreateStation(db, &st); err != nil {
-		t.Fatal(err)
-	}
-	return svc, fake, st.ID
-}
-
-func waitFor(t *testing.T, what string, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for !cond() {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", what)
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-}
 
 func queueLen(t *testing.T, svc *Service, id uint) int {
 	t.Helper()
@@ -200,8 +97,8 @@ func TestRetriedSendKeepsOrderAheadOfNewMessages(t *testing.T) {
 	_, _ = database.EnqueueMessage(svc.db, id, "new")
 	svc.drain(context.Background(), id)
 	got := fake.sent()
-	if len(got) != 1 || strings.Join(got[0], ",") != "old,new" {
-		t.Fatalf("sent %v, want one prompt [old new]", got)
+	if len(got) != 2 || got[0][0] != "old" || got[1][0] != "new" {
+		t.Fatalf("sent %v, want [old] then [new]", got)
 	}
 }
 
@@ -236,5 +133,46 @@ func TestAbortClearsQueue(t *testing.T) {
 	svc.drain(context.Background(), id)
 	if len(fake.sent()) != 0 {
 		t.Fatalf("sent after abort: %v", fake.sent())
+	}
+}
+
+func TestExpiredSessionIsReplaced(t *testing.T) {
+	svc, fake, id := newTestService(t)
+	msgs, unsubscribe := svc.SubscribeStation(id)
+	defer unsubscribe()
+	fake.set(func(f *fakeOpencode) { f.gone[testSession] = true })
+	if err := svc.Enqueue(id, "hi"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "prompt on the new session", func() bool { return len(fake.sent()) == 1 })
+	st, _ := database.GetStation(svc.db, id)
+	if st.OpencodeSessionID != "ses_new1" {
+		t.Fatalf("session = %q", st.OpencodeSessionID)
+	}
+	var changed, reset bool
+	for !changed || !reset {
+		select {
+		case m := <-msgs:
+			if c, ok := m.(SessionChanged); ok && c.SessionID == "ses_new1" {
+				changed = true
+			}
+			if e, ok := m.(map[string]any); ok && e["type"] == "session_reset" {
+				reset = true
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("changed=%v reset=%v", changed, reset)
+		}
+	}
+}
+
+func TestStationWithoutSessionGetsOneOnSend(t *testing.T) {
+	svc, fake, id := newTestService(t)
+	_ = database.UpdateStationSession(svc.db, id, "", database.StatusIdle) // the opencode 2 cutover
+	if err := svc.Enqueue(id, "hi"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "prompt", func() bool { return len(fake.sent()) == 1 })
+	if s := fake.get(func(f *fakeOpencode) any { return f.promptSess[0] }); s != "ses_new1" {
+		t.Fatalf("prompted session %v", s)
 	}
 }

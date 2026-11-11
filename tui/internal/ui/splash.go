@@ -226,8 +226,8 @@ func init() {
 // splashWordRow reports whether row y is part of the wordmark.
 func splashWordRow(y int) bool { return y > splashGap && y < len(splashGrid)-1 }
 
-// splashFrameRows renders frame n of the original (burrow) colors.
-func splashFrameRows(n int) []string { return splashFor(themes["burrow"]).frame(n) }
+// splashFrameRows renders frame n of the original (harbor) colors.
+func splashFrameRows(n int) []string { return splashFor(themes["harbor"]).frame(n) }
 
 // frame renders animation frame n: the wordmark with a diagonal glimmer
 // sweeping left to right, the eye's glint, and the "_" blinking.

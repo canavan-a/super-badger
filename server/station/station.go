@@ -7,8 +7,8 @@ package station
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -36,15 +36,11 @@ func NewService(db *gorm.DB, oc *opencode.Client, broker *opencode.EventBroker) 
 	}
 }
 
-// agentBuild is the only agent Stations use. opencode's other "primary"
-// agents (compaction/summary/title) are internal-use only, and "plan" was
-// dropped as a user-facing choice — a Station is for driving real work, and
-// exposing plan/build as a pick was more decision than the UI needed to ask.
+// agentBuild is the only agent Stations use.
 const agentBuild = "build"
 
 // CreateParams references a provider/model already declared in opencode's own
-// config (GET /providers lists them) — see database.Station's doc comment
-// for why a Station can't fully self-configure a model connection.
+// config (GET /providers lists them).
 type CreateParams struct {
 	Name       string `json:"name" binding:"required"`
 	ProviderID string `json:"provider_id" binding:"required"`
@@ -64,7 +60,6 @@ func (s *Service) Create(ctx context.Context, p CreateParams) (database.Station,
 	if err := database.CreateStation(s.db, &st); err != nil {
 		return database.Station{}, err
 	}
-
 	if err := s.activate(ctx, &st); err != nil {
 		return st, err
 	}
@@ -88,16 +83,12 @@ func (s *Service) Reset(ctx context.Context, id uint) (database.Station, error) 
 	return st, nil
 }
 
-// activate ensures st has a fresh opencode session for its provider/model.
-// Other Stations' sessions, including ones on the same provider/model, are
-// left untouched — they can run concurrently.
+// activate gives st a fresh opencode session for its provider/model,
+// stopping the one it replaces (which stays in opencode's storage).
 func (s *Service) activate(ctx context.Context, st *database.Station) error {
 	if st.OpencodeSessionID != "" {
-		_ = s.oc.AbortSession(ctx, st.OpencodeSessionID)
-		// This session is being replaced (manual reset or auto-recovery) —
-		// its transcript belongs to a session that no longer exists and
-		// must never be served as if it were still current.
-		s.broker.ClearHistory(st.OpencodeSessionID)
+		_ = s.oc.Interrupt(ctx, st.OpencodeSessionID)
+		s.broker.Forget(st.OpencodeSessionID)
 	}
 
 	sess, err := s.oc.CreateSession(ctx, opencode.CreateSessionParams{
@@ -137,176 +128,189 @@ func (s *Service) Update(id uint, updates map[string]any) (database.Station, err
 	return database.GetStation(s.db, id)
 }
 
-func (s *Service) Prompt(ctx context.Context, id uint, text string) (json.RawMessage, error) {
-	st, err := database.GetStation(s.db, id)
-	if err != nil {
-		return nil, err
-	}
-	return s.oc.Prompt(ctx, st.OpencodeSessionID, text)
-}
-
-// PromptAsync kicks off a prompt without waiting for the reply — the caller
-// is expected to be listening on this Station's WebSocket (see api.stationWS)
-// for the streamed response instead.
-func (s *Service) PromptAsync(ctx context.Context, id uint, text string) error {
-	st, err := database.GetStation(s.db, id)
-	if err != nil {
-		return err
-	}
-	return s.oc.PromptAsync(ctx, st.OpencodeSessionID, text)
-}
-
-// ReplyPermission answers a pending tool-permission request from any
-// station's session — see opencode.Client.ReplyPermission for why this
-// exists at all (opencode pauses indefinitely otherwise).
-func (s *Service) ReplyPermission(ctx context.Context, requestID, reply string) error {
-	return s.oc.ReplyPermission(ctx, requestID, reply)
-}
-
-// PendingPermissions returns any permission requests opencode is currently
-// blocked on for st's session, shaped as permission.asked events — so a
-// freshly-connected station WebSocket (see api.stationWS) can push them
-// immediately instead of only ever seeing ones asked *after* it connects,
-// which would otherwise strand a client that reconnects (e.g. a page
-// refresh) while one is already pending.
-func (s *Service) PendingPermissions(ctx context.Context, id uint) ([]opencode.Event, error) {
+// Prompt sends text and waits for the reply, returning the turn's events
+// (the user message and everything after it). The no-streaming path; the
+// app and TUI use the station WebSocket instead.
+func (s *Service) Prompt(ctx context.Context, id uint, text string) ([]opencode.Event, error) {
 	st, err := database.GetStation(s.db, id)
 	if err != nil {
 		return nil, err
 	}
 	if st.OpencodeSessionID == "" {
-		return nil, nil
+		if err := s.activate(ctx, &st); err != nil {
+			return nil, err
+		}
 	}
-
-	raw, err := s.oc.ListPermissions(ctx)
+	msgID, err := s.oc.Prompt(ctx, st.OpencodeSessionID, text, opencode.Steer)
 	if err != nil {
 		return nil, err
 	}
-
-	var all []struct {
-		ID         string          `json:"id"`
-		SessionID  string          `json:"sessionID"`
-		Permission string          `json:"permission"`
-		Patterns   json.RawMessage `json:"patterns"`
-		Metadata   json.RawMessage `json:"metadata"`
-		Always     json.RawMessage `json:"always"`
-		Tool       json.RawMessage `json:"tool"`
-	}
-	if err := json.Unmarshal(raw, &all); err != nil {
+	if err := s.oc.Wait(ctx, st.OpencodeSessionID); err != nil {
 		return nil, err
 	}
+	page, err := s.oc.Messages(ctx, st.OpencodeSessionID, opencode.MessagesParams{Limit: 50})
+	if err != nil {
+		return nil, err
+	}
+	// Newest first: keep everything down to (and including) our message.
+	var turn []opencode.Message
+	for _, m := range page.Messages {
+		turn = append([]opencode.Message{m}, turn...)
+		if m.ID == msgID {
+			break
+		}
+	}
+	return opencode.FromMessages(st.OpencodeSessionID, turn), nil
+}
 
-	var out []opencode.Event
-	for _, p := range all {
-		if p.SessionID != st.OpencodeSessionID {
-			continue
+// ReplyPermission answers a pending tool-permission request in station id's
+// session; opencode pauses the turn until it is answered.
+func (s *Service) ReplyPermission(ctx context.Context, id uint, requestID, reply string) error {
+	st, err := database.GetStation(s.db, id)
+	if err != nil {
+		return err
+	}
+	return s.oc.ReplyPermission(ctx, st.OpencodeSessionID, requestID, reply)
+}
+
+// PendingPermissions returns the permission requests st's session is
+// blocked on, as permission.asked events — pushed to a freshly-connected
+// station WebSocket so a request asked while no client was watching isn't
+// stranded.
+func (s *Service) PendingPermissions(ctx context.Context, id uint) ([]opencode.Event, error) {
+	st, err := database.GetStation(s.db, id)
+	if err != nil || st.OpencodeSessionID == "" {
+		return nil, err
+	}
+	reqs, err := s.oc.Permissions(ctx, st.OpencodeSessionID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]opencode.Event, 0, len(reqs))
+	for _, r := range reqs {
+		if r.SessionID == "" {
+			r.SessionID = st.OpencodeSessionID
 		}
-		props, err := json.Marshal(map[string]any{
-			"id":         p.ID,
-			"sessionID":  p.SessionID,
-			"permission": p.Permission,
-			"patterns":   p.Patterns,
-			"metadata":   p.Metadata,
-			"always":     p.Always,
-			"tool":       p.Tool,
-		})
-		if err != nil {
-			continue
-		}
-		out = append(out, opencode.Event{Type: "permission.asked", Properties: props})
+		out = append(out, opencode.PermissionEvent(r))
 	}
 	return out, nil
 }
 
-// ReplyQuestion answers a pending question request from any station's
-// session — opencode's AskUserQuestion-style tool, distinct from
-// permissions (see opencode.Client.ReplyQuestion). Without this, opencode
-// pauses the session's agent loop the same way an unanswered permission
-// does — this is what "the question tool isn't passing back through" was.
-func (s *Service) ReplyQuestion(ctx context.Context, requestID string, answers [][]string) error {
-	return s.oc.ReplyQuestion(ctx, requestID, answers)
+// PendingQuestions returns the question forms st's session is blocked on,
+// as question.asked events (same reconnect fix as PendingPermissions).
+func (s *Service) PendingQuestions(ctx context.Context, id uint) ([]opencode.Event, error) {
+	st, err := database.GetStation(s.db, id)
+	if err != nil || st.OpencodeSessionID == "" {
+		return nil, err
+	}
+	forms, err := s.oc.Forms(ctx, st.OpencodeSessionID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]opencode.Event, 0, len(forms))
+	for _, f := range forms {
+		if f.SessionID == "" {
+			f.SessionID = st.OpencodeSessionID
+		}
+		out = append(out, opencode.QuestionEvent(f))
+	}
+	return out, nil
 }
 
-// RejectQuestion declines a pending question request outright.
-func (s *Service) RejectQuestion(ctx context.Context, requestID string) error {
-	return s.oc.RejectQuestion(ctx, requestID)
+// ReplyQuestion answers a pending question form. answers holds one entry
+// per question, in order, each the chosen option label(s) or free text.
+func (s *Service) ReplyQuestion(ctx context.Context, id uint, requestID string, answers [][]string) error {
+	st, err := database.GetStation(s.db, id)
+	if err != nil {
+		return err
+	}
+	forms, err := s.oc.Forms(ctx, st.OpencodeSessionID)
+	if err != nil {
+		return err
+	}
+	for _, f := range forms {
+		if f.ID == requestID {
+			return s.oc.ReplyForm(ctx, st.OpencodeSessionID, f.ID, FormAnswer(f, answers))
+		}
+	}
+	return fmt.Errorf("question %s is no longer pending", requestID)
 }
 
-// SessionStatus reports whether st's session is running a reply right now,
-// straight from opencode ("idle", "busy" or "retry") — sent to every
-// freshly-connected station WebSocket so the app's send button never has to
-// guess from history whether a reply it may have missed the end of is still
-// going.
+// FormAnswer maps per-question answers onto a form's field keys. A chosen
+// option label is sent as that option's value; anything else as typed.
+func FormAnswer(f opencode.Form, answers [][]string) map[string]any {
+	out := make(map[string]any, len(f.Fields))
+	for i, fl := range f.Fields {
+		var picked []string
+		if i < len(answers) {
+			for _, a := range answers[i] {
+				v := a
+				for _, o := range fl.Options {
+					if o.Label == a && o.Value != "" {
+						v = o.Value
+					}
+				}
+				picked = append(picked, v)
+			}
+		}
+		switch {
+		case fl.Type == "multiselect":
+			if picked == nil {
+				picked = []string{}
+			}
+			out[fl.Key] = picked
+		case len(picked) > 0:
+			out[fl.Key] = picked[0]
+		default:
+			out[fl.Key] = ""
+		}
+	}
+	return out
+}
+
+// RejectQuestion declines a pending question form outright.
+func (s *Service) RejectQuestion(ctx context.Context, id uint, requestID string) error {
+	st, err := database.GetStation(s.db, id)
+	if err != nil {
+		return err
+	}
+	return s.oc.RejectForm(ctx, st.OpencodeSessionID, requestID)
+}
+
+// SessionStatus reports whether st's session is running a turn right now
+// ("busy", "retry" or "idle"), straight from opencode — sent to every
+// freshly-connected station WebSocket so a client never has to guess.
 func (s *Service) SessionStatus(ctx context.Context, id uint) (sessionID, status string, err error) {
 	st, err := database.GetStation(s.db, id)
 	if err != nil {
 		return "", "", err
 	}
 	if st.OpencodeSessionID == "" {
-		return "", "", nil
+		return "", "idle", nil
 	}
-	all, err := s.oc.SessionStatus(ctx, st.Directory)
+	active, err := s.oc.Active(ctx)
 	if err != nil {
 		return "", "", err
 	}
-	status = all[st.OpencodeSessionID]
-	if status == "" {
-		status = "idle"
-	}
-	return st.OpencodeSessionID, status, nil
+	return st.OpencodeSessionID, runStatus(active[st.OpencodeSessionID]), nil
 }
 
-// PendingQuestions returns any question requests opencode is currently
-// blocked on for st's session, shaped as question.asked events — same
-// reconnect-strand fix as PendingPermissions, for the separate question
-// mechanism.
-func (s *Service) PendingQuestions(ctx context.Context, id uint) ([]opencode.Event, error) {
-	st, err := database.GetStation(s.db, id)
-	if err != nil {
-		return nil, err
+func runStatus(active string) string {
+	switch active {
+	case "":
+		return "idle"
+	case "retry", "retrying":
+		return "retry"
+	default:
+		return "busy"
 	}
-	if st.OpencodeSessionID == "" {
-		return nil, nil
-	}
-
-	raw, err := s.oc.ListQuestions(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	var all []struct {
-		ID        string          `json:"id"`
-		SessionID string          `json:"sessionID"`
-		Questions json.RawMessage `json:"questions"`
-		Tool      json.RawMessage `json:"tool"`
-	}
-	if err := json.Unmarshal(raw, &all); err != nil {
-		return nil, err
-	}
-
-	var out []opencode.Event
-	for _, q := range all {
-		if q.SessionID != st.OpencodeSessionID {
-			continue
-		}
-		props, err := json.Marshal(map[string]any{
-			"id":        q.ID,
-			"sessionID": q.SessionID,
-			"questions": q.Questions,
-			"tool":      q.Tool,
-		})
-		if err != nil {
-			continue
-		}
-		out = append(out, opencode.Event{Type: "question.asked", Properties: props})
-	}
-	return out, nil
 }
 
-// Compact folds st's session's older turns into a summary (see
-// opencode.Client.Compact) — the same thing the CLI's /compact command does,
-// exposed here so long-running stations don't have to be reset (losing
-// history) just to keep growing context under the model's window.
+// compactWait caps how long a manual compaction is waited on.
+const compactWait = 15 * time.Minute
+
+// Compact folds st's session's older turns into a summary and waits for it
+// to finish (or fail for good — the plugin redoes a failed summary once).
 func (s *Service) Compact(ctx context.Context, id uint) error {
 	st, err := database.GetStation(s.db, id)
 	if err != nil {
@@ -315,13 +319,56 @@ func (s *Service) Compact(ctx context.Context, id uint) error {
 	if st.OpencodeSessionID == "" {
 		return errors.New("station has no active session")
 	}
-	return s.oc.Compact(ctx, st.OpencodeSessionID, st.ProviderID, st.ModelID)
+	return s.compactAndWait(ctx, st.OpencodeSessionID)
 }
 
-// Abort cancels st's session's in-flight turn (see opencode.Client.AbortSession)
-// — the same thing the CLI's Escape/Ctrl-C does mid-response, exposed here so
-// a long-running or stuck reply can be stopped from the app instead of the
-// only options being waiting it out or Reset (which also wipes history).
+// compactAndWait requests a compaction of sessionID and waits for its
+// outcome.
+func (s *Service) compactAndWait(ctx context.Context, sessionID string) error {
+	events, unsubscribe := s.broker.Subscribe(sessionID)
+	defer unsubscribe()
+	if _, err := s.oc.Compact(ctx, sessionID); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, compactWait)
+	defer cancel()
+	return waitCompaction(ctx, events, healGrace)
+}
+
+// healGrace is how long a failed compaction is given to be redone (the
+// plugin compacts again at once with its own summary) before it counts.
+var healGrace = 3 * time.Minute
+
+// waitCompaction waits for a compaction on events to end: nil when one
+// ended, the error when one failed and nothing ended within grace after.
+func waitCompaction(ctx context.Context, events <-chan opencode.Event, grace time.Duration) error {
+	var failed error
+	var graceC <-chan time.Time
+	for {
+		select {
+		case <-ctx.Done():
+			if failed != nil {
+				return failed
+			}
+			return fmt.Errorf("compaction did not finish: %w", ctx.Err())
+		case <-graceC:
+			return failed
+		case e := <-events:
+			switch {
+			case e.Type == "compaction" && e.Phase == "ended":
+				return nil
+			case e.Type == "compaction" && e.Phase == "failed":
+				failed = fmt.Errorf("compaction failed: %s", e.Error)
+				if graceC == nil {
+					graceC = time.After(grace)
+				}
+			}
+		}
+	}
+}
+
+// Abort stops st's session's running turn and drops anything still queued,
+// so it isn't sent straight after.
 func (s *Service) Abort(ctx context.Context, id uint) error {
 	st, err := database.GetStation(s.db, id)
 	if err != nil {
@@ -330,26 +377,35 @@ func (s *Service) Abort(ctx context.Context, id uint) error {
 	if st.OpencodeSessionID == "" {
 		return errors.New("station has no active session")
 	}
-	// Stop drops anything still queued too, so it isn't sent into the
-	// session right after the abort.
 	if err := s.clearQueue(id); err != nil {
 		return err
 	}
-	return s.oc.AbortSession(ctx, st.OpencodeSessionID)
+	return s.oc.Interrupt(ctx, st.OpencodeSessionID)
 }
 
-// TokenUsage reports st's session's current token/cost accounting (see
-// opencode.Client.GetSessionUsage) — the same figures the CLI's status line
-// shows, refreshed by opencode after every completed turn.
-func (s *Service) TokenUsage(ctx context.Context, id uint) (opencode.TokenUsage, error) {
+// TokenUsage reports st's session's context usage: the last step's tokens
+// (what the context holds now), the session's total cost, and the context
+// window opencode compacts against.
+func (s *Service) TokenUsage(ctx context.Context, id uint) (opencode.Event, error) {
 	st, err := database.GetStation(s.db, id)
 	if err != nil {
-		return opencode.TokenUsage{}, err
+		return opencode.Event{}, err
 	}
+	model := opencode.ModelRef{ID: st.ModelID, ProviderID: st.ProviderID}
 	if st.OpencodeSessionID == "" {
-		return opencode.TokenUsage{}, nil
+		return opencode.Event{Type: "usage", ContextLimit: s.broker.ContextLimit(ctx, model)}, nil
 	}
-	return s.oc.GetSessionUsage(ctx, st.OpencodeSessionID)
+	u, err := s.broker.Usage(ctx, st.OpencodeSessionID)
+	if opencode.IsSessionNotFound(err) {
+		return opencode.Event{Type: "usage", ContextLimit: s.broker.ContextLimit(ctx, model)}, nil
+	}
+	if err != nil {
+		return opencode.Event{}, err
+	}
+	if u.ContextLimit == 0 {
+		u.ContextLimit = s.broker.ContextLimit(ctx, model)
+	}
+	return *u, nil
 }
 
 func (s *Service) Delete(ctx context.Context, id uint) error {
@@ -358,9 +414,9 @@ func (s *Service) Delete(ctx context.Context, id uint) error {
 		return err
 	}
 	if st.OpencodeSessionID != "" {
-		_ = s.oc.AbortSession(ctx, st.OpencodeSessionID)
+		_ = s.oc.Interrupt(ctx, st.OpencodeSessionID)
 		_ = s.oc.DeleteSession(ctx, st.OpencodeSessionID)
-		s.broker.ClearHistory(st.OpencodeSessionID)
+		s.broker.Forget(st.OpencodeSessionID)
 	}
 	if err := s.clearQueue(id); err != nil {
 		return err
@@ -368,12 +424,10 @@ func (s *Service) Delete(ctx context.Context, id uint) error {
 	return database.DeleteStation(s.db, id)
 }
 
-// HistoryPage returns one page of the cached transcript for st's *current*
-// session (see opencode.EventBroker.HistoryPage) — empty if the session has
-// none yet, and deliberately empty (not stale data) if the session was ever
-// reset, since history is cleared together with the old session in
-// activate().
-func (s *Service) HistoryPage(id uint, before string, limit int) (events []opencode.Event, cursor string, hasMore bool, err error) {
+// HistoryPage returns one page of st's current session's transcript (see
+// opencode.EventBroker.History). A session opencode no longer has yields an
+// empty page.
+func (s *Service) HistoryPage(ctx context.Context, id uint, before string, limit int) (events []opencode.Event, cursor string, hasMore bool, err error) {
 	st, err := database.GetStation(s.db, id)
 	if err != nil {
 		return nil, "", false, err
@@ -381,20 +435,16 @@ func (s *Service) HistoryPage(id uint, before string, limit int) (events []openc
 	if st.OpencodeSessionID == "" {
 		return []opencode.Event{}, "", false, nil
 	}
-	events, cursor, hasMore = s.broker.HistoryPage(st.OpencodeSessionID, before, limit)
-	return events, cursor, hasMore, nil
+	events, cursor, hasMore, err = s.broker.History(ctx, st.OpencodeSessionID, before, limit)
+	if opencode.IsSessionNotFound(err) {
+		return []opencode.Event{}, "", false, nil
+	}
+	return events, cursor, hasMore, err
 }
 
 // reachabilityTimeout bounds a single "is the model actually up" check so a
-// dead backend can't stall a station list/detail fetch — st.Status only
-// reflects whether a session was *successfully created*, never whether the
-// model behind it is still answering right now, which is exactly what a
-// user watching a stopped local model would otherwise be misled by. Kept
-// short: checks for different stations run in parallel (see ReachableAll),
-// but the whole list request still waits for the *slowest* one, so a dead
-// model must not be allowed to make the entire list feel like it hung —
-// confirmed live that 3s was clearly noticeable as "the list isn't loading."
-// A live local model normally answers in well under 100ms.
+// dead backend can't stall a station list/detail fetch. Checks run in
+// parallel (ReachableAll) but the list waits for the slowest one.
 const reachabilityTimeout = 800 * time.Millisecond
 
 type providerEndpoint struct {
@@ -403,28 +453,15 @@ type providerEndpoint struct {
 }
 
 // providerEndpoints fetches opencode's provider list once and returns each
-// provider's connection info keyed by ID, so checking N stations' liveness
-// costs one opencode round trip, not N.
+// provider's connection info keyed by ID.
 func (s *Service) providerEndpoints(ctx context.Context) (map[string]providerEndpoint, error) {
-	raw, err := s.oc.ListProviders(ctx)
+	providers, err := s.oc.Providers(ctx)
 	if err != nil {
 		return nil, err
 	}
-	var resp struct {
-		Providers []struct {
-			ID      string `json:"id"`
-			Options struct {
-				BaseURL string `json:"baseURL"`
-				APIKey  string `json:"apiKey"`
-			} `json:"options"`
-		} `json:"providers"`
-	}
-	if err := json.Unmarshal(raw, &resp); err != nil {
-		return nil, err
-	}
-	out := make(map[string]providerEndpoint, len(resp.Providers))
-	for _, p := range resp.Providers {
-		out[p.ID] = providerEndpoint{BaseURL: p.Options.BaseURL, APIKey: p.Options.APIKey}
+	out := make(map[string]providerEndpoint, len(providers))
+	for _, p := range providers {
+		out[p.ID] = providerEndpoint{BaseURL: p.Settings.BaseURL, APIKey: p.Settings.APIKey}
 	}
 	return out, nil
 }
@@ -442,10 +479,7 @@ func reachable(ctx context.Context, ep providerEndpoint, ok bool) bool {
 }
 
 // Reachable live-pings the model backend behind a single provider (via the
-// baseURL opencode itself reports for it) — this is never persisted to
-// st.Status; it's recomputed on every list/detail fetch so a model that's
-// been stopped shows as unreachable immediately, not whatever was true when
-// the session was created.
+// baseURL opencode reports for it); recomputed on every fetch, never stored.
 func (s *Service) Reachable(ctx context.Context, providerID string) bool {
 	endpoints, err := s.providerEndpoints(ctx)
 	if err != nil {
@@ -456,9 +490,7 @@ func (s *Service) Reachable(ctx context.Context, providerID string) bool {
 }
 
 // ReachableAll checks every given provider ID's liveness in parallel against
-// one shared provider list fetch — the list endpoint's equivalent of
-// Reachable, so an N-station list costs one opencode round trip plus N
-// concurrent pings, not N round trips.
+// one shared provider list fetch.
 func (s *Service) ReachableAll(ctx context.Context, providerIDs []string) map[string]bool {
 	out := make(map[string]bool, len(providerIDs))
 	endpoints, err := s.providerEndpoints(ctx)
@@ -472,7 +504,6 @@ func (s *Service) ReachableAll(ctx context.Context, providerIDs []string) map[st
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	for _, id := range providerIDs {
-		id := id
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -488,9 +519,24 @@ func (s *Service) ReachableAll(ctx context.Context, providerIDs []string) map[st
 }
 
 // TestConnection validates a base URL/API key pair directly against the
-// model endpoint, independent of opencode — e.g. to sanity-check a provider
-// already declared in opencode's config (GET /providers reports its
-// base URL) before pointing a Station at it.
+// model endpoint, independent of opencode.
 func TestConnection(ctx context.Context, baseURL, apiKey string) error {
 	return opencode.TestModelConnection(ctx, baseURL, apiKey)
+}
+
+// EnsureSession gives station id a session when it has none (opencode was
+// down when it was created, or the opencode 2 cutover cleared it).
+func (s *Service) EnsureSession(ctx context.Context, id uint) (database.Station, error) {
+	st, err := database.GetStation(s.db, id)
+	if err != nil || st.OpencodeSessionID != "" {
+		return st, err
+	}
+	l := s.queue.lock(id)
+	l.Lock()
+	defer l.Unlock()
+	if st, err = database.GetStation(s.db, id); err != nil || st.OpencodeSessionID != "" {
+		return st, err
+	}
+	err = s.activate(ctx, &st)
+	return st, err
 }

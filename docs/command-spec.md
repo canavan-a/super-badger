@@ -1,6 +1,6 @@
-# Super Badger command spec
+# Super Galleon command spec
 
-A metric source (a "Super Badger Station Standard API" endpoint) can offer
+A metric source (a "Super Galleon Station Standard API" endpoint) can offer
 **commands**: actions such as toggling a model on or off. Commands belong to the
 source as a whole, not to any station, and are served from their own endpoint.
 The metrics JSON is unchanged.

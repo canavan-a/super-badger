@@ -15,7 +15,7 @@ import (
 // There is deliberately no default server: until one is set the TUI shows a
 // welcome page rather than guessing a URL and failing.
 
-var ThemeNames = []string{"burrow", "dark", "slate", "ember", "light", "sepia"}
+var ThemeNames = []string{"harbor", "dark", "slate", "ember", "light", "sepia"}
 
 type Config struct {
 	ServerURL     string `json:"server_url"`
@@ -64,7 +64,7 @@ func (c *Config) Override(server, token string, noSplash bool) {
 func (c *Config) Touch(field string) { delete(c.overridden, field) }
 
 func Default() Config {
-	return Config{Theme: "burrow", Notifications: true, DesktopNotifications: true, Splash: true}
+	return Config{Theme: "harbor", Notifications: true, DesktopNotifications: true, Splash: true}
 }
 
 // DefaultPath is where the config lives unless a path is given explicitly.
@@ -109,8 +109,9 @@ func LoadFrom(p string) (*Config, error) {
 		c.Notice = "config was unreadable — kept as " + filepath.Base(bak)
 		return &c, nil
 	}
-	if c.Theme == "" {
-		c.Theme = "burrow"
+	// "burrow" was the house theme's name before the rename to Super Galleon.
+	if c.Theme == "" || c.Theme == "burrow" {
+		c.Theme = "harbor"
 	}
 	c.path = p
 	return &c, nil

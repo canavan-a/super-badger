@@ -115,8 +115,12 @@ func stationWS(svc *station.Service, broker *opencode.EventBroker) gin.HandlerFu
 			return
 		}
 		if st.OpencodeSessionID == "" {
-			c.JSON(http.StatusConflict, gin.H{"error": "station has no active session"})
-			return
+			// No session yet (opencode was down at create, or the opencode 2
+			// cutover cleared it): start one now.
+			if st, err = svc.EnsureSession(c.Request.Context(), id); err != nil {
+				c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+				return
+			}
 		}
 
 		conn, err := wsUpgrader.Upgrade(c.Writer, c.Request, nil)
@@ -174,15 +178,15 @@ func stationWS(svc *station.Service, broker *opencode.EventBroker) gin.HandlerFu
 						sendErr("queue_remove", err)
 					}
 				case msg.Type == "permission_reply" && msg.RequestID != "" && msg.Reply != "":
-					if err := svc.ReplyPermission(c.Request.Context(), msg.RequestID, msg.Reply); err != nil {
+					if err := svc.ReplyPermission(c.Request.Context(), id, msg.RequestID, msg.Reply); err != nil {
 						sendErr("permission_reply", err)
 					}
 				case msg.Type == "question_reply" && msg.RequestID != "":
-					if err := svc.ReplyQuestion(c.Request.Context(), msg.RequestID, msg.Answers); err != nil {
+					if err := svc.ReplyQuestion(c.Request.Context(), id, msg.RequestID, msg.Answers); err != nil {
 						sendErr("question_reply", err)
 					}
 				case msg.Type == "question_reject" && msg.RequestID != "":
-					if err := svc.RejectQuestion(c.Request.Context(), msg.RequestID); err != nil {
+					if err := svc.RejectQuestion(c.Request.Context(), id, msg.RequestID); err != nil {
 						sendErr("question_reject", err)
 					}
 				}
@@ -223,14 +227,19 @@ func stationWS(svc *station.Service, broker *opencode.EventBroker) gin.HandlerFu
 		// reducer handles it the same way as a live one.
 		if sid, status, err := svc.SessionStatus(c.Request.Context(), id); err == nil && sid != "" {
 			select {
-			case writes <- gin.H{
-				"type":       "session.status",
-				"properties": gin.H{"sessionID": sid, "status": gin.H{"type": status}},
-			}:
+			case writes <- opencode.Event{Type: "status", SessionID: sid, Status: status}:
 			default:
 			}
 		} else if err != nil {
 			log.Printf("[station %d] session status: %v", id, err)
+		}
+
+		// The context gauge, without waiting for the next step to finish.
+		if u, err := svc.TokenUsage(c.Request.Context(), id); err == nil {
+			select {
+			case writes <- u:
+			default:
+			}
 		}
 
 		// The queue as it stands right now; every change after this
@@ -258,12 +267,9 @@ func stationWS(svc *station.Service, broker *opencode.EventBroker) gin.HandlerFu
 					unsubscribe()
 					return
 				}
-			case evt, ok := <-events:
-				if !ok {
-					return
-				}
-				if evt.Type == "session.error" {
-					log.Printf("[station %d] opencode session.error: %s", id, string(evt.Properties))
+			case evt := <-events:
+				if evt.Type == "error" {
+					log.Printf("[station %d] opencode error (%s): %s", id, evt.Kind, evt.Error)
 				}
 				if err := wsWrite(conn, evt); err != nil {
 					unsubscribe()
@@ -346,13 +352,13 @@ func notificationsWS(svc *station.Service, broker *opencode.EventBroker, hub *no
 				if err := wsWrite(conn, msg); err != nil {
 					return
 				}
-			case evt, ok := <-events:
-				if !ok {
-					return
-				}
+			case evt := <-events:
 				var msg gin.H
 				switch evt.Type {
-				case "session.idle":
+				case "status":
+					if evt.Status != "idle" {
+						continue
+					}
 					msg = gin.H{"type": "agent_idle"}
 				case "permission.asked":
 					msg = gin.H{"type": "permission_requested"}
@@ -361,14 +367,14 @@ func notificationsWS(svc *station.Service, broker *opencode.EventBroker, hub *no
 				default:
 					continue
 				}
-				st, found := cache.lookup(c.Request.Context(), evt.SessionID())
+				st, found := cache.lookup(c.Request.Context(), evt.SessionID)
 				if !found {
 					continue // station deleted, or session belongs to nothing we track
 				}
 				// Mid auto-compaction the session idles between the failed
 				// turn, the summary and the continue prompt — not the agent
 				// finishing, and the "compacting" ping already went out.
-				if evt.Type == "session.idle" && svc.AutoCompacting(st.ID) {
+				if evt.Type == "status" && svc.AutoCompacting(st.ID) {
 					continue
 				}
 				msg["station_id"] = st.ID

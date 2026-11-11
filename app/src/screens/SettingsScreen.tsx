@@ -120,7 +120,7 @@ export function SettingsScreen(): React.JSX.Element {
       if (settings.authorizationStatus === AuthorizationStatus.DENIED) {
         Alert.alert(
           'Notifications denied',
-          'Android is blocking notifications for this app, so background alerts won\'t show even though monitoring is on. Enable them in system Settings → Apps → Super Badger → Notifications.',
+          'Android is blocking notifications for this app, so background alerts won\'t show even though monitoring is on. Enable them in system Settings → Apps → Super Galleon → Notifications.',
           [
             {text: 'Open settings', onPress: () => Linking.openSettings()},
             {text: 'OK', style: 'cancel'},
@@ -340,7 +340,7 @@ export function SettingsScreen(): React.JSX.Element {
               autoCorrect={false}
             />
             <Text style={styles.hint}>
-              Base URL for the superbadger API. Android emulators can't reach
+              Base URL for the Super Galleon API. Android emulators can't reach
               "localhost" on the host — use 10.0.2.2 there, or the host's LAN IP
               for a physical device.
             </Text>
@@ -461,7 +461,7 @@ export function SettingsScreen(): React.JSX.Element {
 
           <View style={styles.divider} />
 
-          <Text style={styles.title2}>Super Badger API sources</Text>
+          <Text style={styles.title2}>Super Galleon API sources</Text>
           <MetricSourcesSettings />
 
           <View style={styles.divider} />

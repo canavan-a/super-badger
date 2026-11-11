@@ -1,4 +1,4 @@
-import {EventMsg} from './chat';
+import {EventMsg, UsageInfo} from './chat';
 import {settingsStore} from './settings';
 
 export type StationStatus = 'idle' | 'active' | 'error';
@@ -46,15 +46,23 @@ export interface Station {
   updated_at: string;
 }
 
+export interface ModelLimit {
+  context: number;
+  output: number;
+}
+
 export interface OpencodeProviderModel {
   id?: string;
   name?: string;
+  // What opencode compacts against right now (see GET /limits for where
+  // it comes from).
+  limit?: ModelLimit;
 }
 
 export interface OpencodeProvider {
   id: string;
   name?: string;
-  options?: {baseURL?: string; apiKey?: string};
+  baseURL?: string;
   models: Record<string, OpencodeProviderModel>;
 }
 
@@ -224,19 +232,56 @@ export function abortStation(id: number): Promise<void> {
   return request<void>(`/stations/${id}/abort`, {method: 'POST'});
 }
 
-export interface TokenUsage {
-  input: number;
-  output: number;
-  reasoning: number;
-  cache_read: number;
-  cache_write: number;
-  cost: number;
+// The context gauge: tokens.ctx (what the context holds after the last
+// step) against contextLimit. Same shape as the station WebSocket's live
+// `usage` event, which keeps it current without polling.
+export type StationUsage = UsageInfo & {type?: 'usage'; sessionID?: string};
+
+export function getStationUsage(id: number): Promise<StationUsage> {
+  return request<StationUsage>(`/stations/${id}/usage`);
 }
 
-// Same token/cost figures the CLI's status line shows — updated by opencode
-// after every completed turn (no dedicated event for it, so this is polled).
-export function getStationUsage(id: number): Promise<TokenUsage> {
-  return request<TokenUsage>(`/stations/${id}/usage`);
+// "7.1k / 12k" — the context gauge label. Without a known limit, just the
+// used figure; null when there's nothing to show yet.
+export function formatContextUsage(usage: UsageInfo | null | undefined): string | null {
+  const ctx = usage?.tokens?.ctx ?? 0;
+  const limit = usage?.contextLimit ?? 0;
+  if (ctx <= 0) return null;
+  return limit > 0 ? `${formatTokens(ctx)} / ${formatTokens(limit)}` : formatTokens(ctx);
+}
+
+// Context limits are per provider/model — shared by every station on that
+// model — and applied by opencode live within ~10s (see server/api/limits.go).
+export interface ModelLimitInfo {
+  provider_id: string;
+  model_id: string;
+  name: string;
+  // Effective: what opencode compacts against right now.
+  context: number;
+  output: number;
+  // The engine's own n_ctx, 0 when it doesn't report one.
+  detected: number;
+  override: {context: number | null; output: number | null} | null;
+  source: 'override' | 'detected' | 'default';
+}
+
+export function getLimits(providerId?: string, modelId?: string): Promise<ModelLimitInfo[]> {
+  let q = '';
+  if (providerId) {
+    q = `?provider_id=${encodeURIComponent(providerId)}`;
+    if (modelId) q += `&model_id=${encodeURIComponent(modelId)}`;
+  }
+  return request<ModelLimitInfo[]>(`/limits${q}`);
+}
+
+// Stores an override for a model; both null clears it.
+export function setLimit(params: {
+  provider_id: string;
+  model_id: string;
+  context: number | null;
+  output: number | null;
+}): Promise<void> {
+  return request<void>('/limits', {method: 'PUT', body: JSON.stringify(params)});
 }
 
 // opencode's live run state for the station's session — "idle" whenever no
@@ -245,16 +290,16 @@ export function getStationRunStatus(id: number): Promise<{status: 'idle' | 'busy
   return request(`/stations/${id}/status`);
 }
 
-export function promptStation(id: number, text: string): Promise<unknown> {
-  return request<unknown>(`/stations/${id}/prompt`, {
+export function promptStation(id: number, text: string): Promise<{events: EventMsg[]}> {
+  return request<{events: EventMsg[]}>(`/stations/${id}/prompt`, {
     method: 'POST',
     body: JSON.stringify({text}),
   });
 }
 
-// The history endpoint returns raw opencode events verbatim (see
-// server/opencode/events.go's Event) — same shape as what streams over the
-// station WebSocket, so both feed chat.ts's applyEvent/seedFromHistory.
+// The history endpoint returns super-badger's own events (see
+// server/opencode/translate.go's Event) — same shape as what streams over
+// the station WebSocket, so both feed chat.ts's applyEvent/seedFromHistory.
 // Paged by message, newest first: pass a page's `cursor` back as `before`
 // to fetch the page older than it (see server/api/api.go stationHistory).
 export interface HistoryPage {
@@ -274,10 +319,6 @@ export function getStationHistory(id: number, before?: string, limit = 5): Promi
 
 export function listProviders(): Promise<OpencodeProvidersResponse> {
   return request<OpencodeProvidersResponse>('/providers');
-}
-
-export function listModels(): Promise<unknown> {
-  return request<unknown>('/models');
 }
 
 export function testProviderConnection(params: {
@@ -335,7 +376,7 @@ export function mullvadSetLan(allow: boolean): Promise<MullvadOutput> {
   });
 }
 
-// A Station's ad hoc data points (Super Badger Station Standard API), one
+// A Station's ad hoc data points (Super Galleon Station Standard API), one
 // per external metric key (e.g. "gpu_temp_c", "tokens_per_sec"), populated
 // by whatever MetricSource(s) the server is configured to poll.
 export interface StationDataPoint {
@@ -387,7 +428,8 @@ export function formatDataPointValue(value: number, decimals: number): string {
 // Shared with the station list's live token count badge (see StationCard) so
 // both read the same "482k" style formatting.
 export function formatTokens(n: number): string {
-  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+  // "12k", not "12.0k", for round figures like a context limit.
+  return n >= 1000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, '')}k` : String(n);
 }
 
 export type HistoryRange = '1h' | '3h' | '12h' | '1d' | '2d' | '1w' | '1m' | '3m' | '1y' | 'max';
@@ -425,7 +467,7 @@ export function updateStationDataPointSettings(
   });
 }
 
-// MetricSource: one external Super Badger Station Standard API endpoint the
+// MetricSource: one external Super Galleon Station Standard API endpoint the
 // server polls on its own schedule — server-wide config, not per-station.
 export interface MetricSource {
   id: number;

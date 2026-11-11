@@ -64,6 +64,20 @@ func TestOldPersistedNoSplashIsIgnored(t *testing.T) {
 	}
 }
 
+func TestOldBurrowThemeBecomesHarbor(t *testing.T) {
+	// The house theme was called "burrow" before the Super Galleon rename;
+	// configs saved then must keep the same look, not fall back to a default.
+	p := filepath.Join(t.TempDir(), "c.json")
+	os.WriteFile(p, []byte(`{"theme":"burrow"}`), 0o600)
+	c, err := LoadFrom(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Theme != "harbor" {
+		t.Fatalf("theme %q, want harbor", c.Theme)
+	}
+}
+
 func TestNoDefaultServer(t *testing.T) {
 	c, _ := LoadFrom(filepath.Join(t.TempDir(), "none.json"))
 	if c.ServerURL != "" {

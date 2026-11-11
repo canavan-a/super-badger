@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// The title art is drawn in the burrow palette. To follow the chosen theme it
+// The title art is drawn in the harbor palette. To follow the chosen theme it
 // is recolored by mapping the art's own tones onto the theme's tones, in order
 // from darkest to lightest:
 //
@@ -14,7 +14,7 @@ import (
 //
 // Colors between the art's tones (the antialiased edge, fur texture, the
 // wordmark's gradient) land the same fraction of the way between the theme's
-// tones, so the picture keeps its shading. "burrow" itself is left untouched.
+// tones, so the picture keeps its shading. "harbor" itself is left untouched.
 
 type vec [3]float64
 
@@ -116,7 +116,7 @@ func splashFor(t Theme) *splashSet {
 		return s
 	}
 	var s *splashSet
-	if t.Name == "burrow" {
+	if t.Name == "harbor" {
 		s = &splashSet{grid: splashGrid, rows: splashRows, to: "255;255;255"}
 	} else {
 		tr, accent := themeRamp(t), hexVec(t.Accent)

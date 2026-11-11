@@ -329,6 +329,8 @@ func chatOwns(msg tea.Msg, gen int) bool {
 		return m.gen == gen
 	case usageMsg:
 		return m.gen == gen
+	case runStatusMsg:
+		return m.gen == gen
 	case stationMsg:
 		return m.gen == gen
 	case chatErrMsg:
@@ -347,7 +349,7 @@ func (a *App) key(k tea.KeyMsg) tea.Cmd {
 		if !quit && time.Now().Before(a.splashUntil) {
 			return nil // too soon after launch to be a deliberate key press
 		}
-		a.splash = false // "press any key to burrow in"
+		a.splash = false // "press any key to set sail"
 		if !quit {
 			return nil
 		}
@@ -575,9 +577,9 @@ func (a *App) onNotification(raw json.RawMessage) tea.Cmd {
 	case "agent_idle":
 		what, title, body = "finished", n.StationName+" finished", "The agent is done and waiting for you."
 	case "permission_requested":
-		what, title, body = "needs permission", n.StationName+" needs permission", "Open superbadger to allow or reject."
+		what, title, body = "needs permission", n.StationName+" needs permission", "Open Super Galleon to allow or reject."
 	case "question_requested":
-		what, title, body = "has a question", n.StationName+" has a question", "Open superbadger to answer."
+		what, title, body = "has a question", n.StationName+" has a question", "Open Super Galleon to answer."
 	case "auto_compacting":
 		what, title, body = "is compacting", n.StationName+" is compacting", "It hit its context limit — compacting, then continuing."
 	case "datapoint_threshold":
@@ -664,7 +666,7 @@ func (a *App) View() string {
 func (a *App) frame(body, foot, hint string) string {
 	iw, ih := a.innerW(), a.contentHeight()+1 // +1: toast row
 	edge := a.st.Border
-	title := a.st.Primary.Bold(true).Render("superbadger")
+	title := a.st.Primary.Bold(true).Render("super galleon")
 	// ╭───────────── superbadger ─────────────╮   (the border simply continues)
 	fill := iw - 2 - lipgloss.Width(title) // the two spaces around the title
 	left := max(1, fill/2)
@@ -715,7 +717,7 @@ func (a *App) splashView() string {
 // no server configured, the server unreachable, or still connecting.
 func (a *App) welcome() string {
 	s := a.st
-	title := s.Primary.Bold(true).Render("welcome to superbadger")
+	title := s.Primary.Bold(true).Render("welcome to super galleon")
 	switch {
 	case !a.configured():
 		return "\n " + title + "\n\n" +

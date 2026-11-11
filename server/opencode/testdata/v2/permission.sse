@@ -1,0 +1,60 @@
+data: {"id":"evt_1c11b70190015ykOREbH8p0Y90","type":"server.connected","data":{}}
+
+: heartbeat
+
+data: {"id":"evt_1c11b714f001OXFPf5yPMWFpmn","created":1794241163599,"type":"session.created","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","slug":"sunny-lagoon","version":"2.2.5","projectID":"df896ba68f9d64b5db6211918f884c86b95bf2e4","location":{"directory":"/work/proj"},"subpath":"","agent":"build","permissions":[{"action":"subagent","resource":"*","effect":"deny"}],"model":{"id":"fake-model","providerID":"fake"}},"durable":{"aggregateID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","seq":0,"version":1}}
+
+data: {"id":"evt_1c11b715b002CQRPVlMYpwFWvj","created":1794241163611,"type":"session.inbox.enqueued","location":{"directory":"/work/proj"},"data":{"inboxID":"msg_1c11b715b001M7YdAB9gvFCOxC","sessionID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","item":{"type":"user","payload":{"text":"WRITE a file"},"delivery":"steer"}},"durable":{"aggregateID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","seq":1,"version":1}}
+
+data: {"id":"evt_1c11b715c001bkaHFjhWBqpFFK","created":1794241163612,"type":"session.execution.started","data":{"sessionID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3"},"durable":{"aggregateID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","seq":2,"version":1}}
+
+data: {"id":"evt_1c11b715e0014Ycn3c17wp65uL","created":1794241163614,"metadata":{"instructions":{"initial":true}},"type":"session.instructions.updated","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","delta":{"core/codemode":"1f1291478accf8b3e4d96a40c150bf844d60557dede4aae56c47ea0043bbdce2","core/skill-guidance":"4c871a2fb8fda40d9ec36cbf7de9f344001b0d2ca0b82f949ccb2e916a6799c1","core/date":"92b15ba69e41b58abd2e121f9dbae18f05891be3cf4e617a4d55342d2626508a","core/environment":"f6959a61e905a326eda693d2503c9ac58b59482e7df0de4c062dd447da7bc386"}},"durable":{"aggregateID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","seq":3,"version":2}}
+
+data: {"id":"evt_1c11b715f001cA1T94XWx7iEho","created":1794241163615,"type":"session.inbox.delivered","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","inboxID":"msg_1c11b715b001M7YdAB9gvFCOxC"},"durable":{"aggregateID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","seq":4,"version":1}}
+
+data: {"id":"evt_1c11b716a001s30bCdQhTv0xiN","created":1794241163626,"type":"session.step.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","agent":"build","model":{"id":"fake-model","providerID":"fake","variant":"default"},"assistantMessageID":"msg_1c11b71650011tLtSTlyb83I4Z","started":1794241163623},"durable":{"aggregateID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","seq":5,"version":1}}
+
+data: {"id":"evt_1c11b716b001uCxg3BHCbujaDI","created":1794241163627,"type":"session.tool.input.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","assistantMessageID":"msg_1c11b71650011tLtSTlyb83I4Z","id":"call_1794241163625631470","name":"write"},"durable":{"aggregateID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","seq":6,"version":1}}
+
+data: {"id":"evt_1c11b716c0015ko81t2Af0DQxv","created":1794241163628,"type":"session.tool.input.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","assistantMessageID":"msg_1c11b71650011tLtSTlyb83I4Z","id":"call_1794241163625631470","text":"{\"path\":\"hello.txt\",\"content\":\"hi\\n\"}"},"durable":{"aggregateID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","seq":7,"version":1}}
+
+data: {"id":"evt_1c11b716d001zIyLqCCEiS6bP3","created":1794241163629,"type":"session.tool.called","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","assistantMessageID":"msg_1c11b71650011tLtSTlyb83I4Z","id":"call_1794241163625631470","input":{"path":"hello.txt","content":"hi\n"},"executed":false},"durable":{"aggregateID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","seq":8,"version":1}}
+
+data: {"id":"evt_1c11b716d002imDMFFQEudWJws","created":1794241163629,"type":"session.step.streamed","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","assistantMessageID":"msg_1c11b71650011tLtSTlyb83I4Z"},"durable":{"aggregateID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","seq":9,"version":1}}
+
+data: {"id":"evt_1c11b7170001NyCc6ykk6UCUhM","created":1794241163632,"type":"permission.asked","location":{"directory":"/work/proj"},"data":{"id":"per_1c11b716f0015rvDZPq2Jkvotm","sessionID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","action":"edit","resources":["hello.txt"],"save":["*"],"metadata":{"files":[{"file":"hello.txt","patch":"Index: hello.txt\n===================================================================\n--- hello.txt\n+++ hello.txt\n@@ -0,0 +1,1 @@\n+hi\n","status":"added","additions":1,"deletions":0}]},"source":{"type":"tool","messageID":"msg_1c11b71650011tLtSTlyb83I4Z","id":"call_1794241163625631470"}}}
+
+data: {"id":"evt_1c11b7186001fOOzpgj6Aq4AbZ","created":1794241163654,"type":"session.usage.updated","data":{"sessionID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","cost":0,"tokens":{"input":486,"output":7,"reasoning":0,"cache":{"read":0,"write":0}}}}
+
+data: {"id":"evt_1c11b7186002D0AGL9Dp0iTou4","created":1794241163654,"type":"session.renamed","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","title":"ok (486 prompt tokens of 32768)"},"durable":{"aggregateID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","seq":11,"version":1}}
+
+data: {"id":"evt_1c11b7d34001cTgutTpW39Ezf0","created":1794241166644,"type":"permission.replied","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","requestID":"per_1c11b716f0015rvDZPq2Jkvotm","reply":"once"}}
+
+data: {"id":"evt_1c11b7d35001fQ4DcfL6SUv49P","created":1794241166645,"type":"session.tool.success","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","assistantMessageID":"msg_1c11b71650011tLtSTlyb83I4Z","id":"call_1794241163625631470","content":[{"type":"text","text":"Created file successfully: hello.txt"}],"metadata":{"truncated":false},"executed":false},"durable":{"aggregateID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","seq":12,"version":2}}
+
+data: {"id":"evt_1c11b7d360017yp1T5MNGya4Lh","created":1794241166646,"type":"session.step.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","assistantMessageID":"msg_1c11b71650011tLtSTlyb83I4Z","finish":"tool-calls","rawFinish":"tool_calls","tokens":{"input":5479,"output":20,"reasoning":0,"cache":{"read":0,"write":0}},"cost":0},"durable":{"aggregateID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","seq":13,"version":1}}
+
+data: {"id":"evt_1c11b7d37001CrBXX0Ek3euyKn","created":1794241166647,"type":"session.usage.updated","data":{"sessionID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","cost":0,"tokens":{"input":5965,"output":27,"reasoning":0,"cache":{"read":0,"write":0}}}}
+
+data: {"id":"evt_1c11b7d3f001WndouLKNHKD1zF","created":1794241166655,"type":"session.step.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","agent":"build","model":{"id":"fake-model","providerID":"fake","variant":"default"},"assistantMessageID":"msg_1c11b7d3b001x5kWq2K2oH3NWa","started":1794241166653},"durable":{"aggregateID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","seq":14,"version":1}}
+
+data: {"id":"evt_1c11b7d40001zsmvXrKSIX6opp","created":1794241166657,"type":"session.reasoning.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","assistantMessageID":"msg_1c11b7d3b001x5kWq2K2oH3NWa","ordinal":0,"native":{"reasoningField":"reasoning_content"}},"durable":{"aggregateID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","seq":15,"version":1}}
+
+data: {"id":"evt_1c11b7d42001bhWjaW69DiL8zu","created":1794241166658,"type":"session.reasoning.delta","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","assistantMessageID":"msg_1c11b7d3b001x5kWq2K2oH3NWa","ordinal":0,"delta":"thinking..."}}
+
+data: {"id":"evt_1c11b7d42002ax21vncH2jFDoT","created":1794241166658,"type":"session.text.started","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","assistantMessageID":"msg_1c11b7d3b001x5kWq2K2oH3NWa","ordinal":0},"durable":{"aggregateID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","seq":16,"version":1}}
+
+data: {"id":"evt_1c11b7d5e001AflaRtXYR4MnZI","created":1794241166686,"type":"session.reasoning.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","assistantMessageID":"msg_1c11b7d3b001x5kWq2K2oH3NWa","ordinal":0,"text":"thinking...","native":{"reasoningField":"reasoning_content"}},"durable":{"aggregateID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","seq":17,"version":1}}
+
+data: {"id":"evt_1c11b7d5f001vOneYn74h51Ldk","created":1794241166688,"type":"session.text.delta","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","assistantMessageID":"msg_1c11b7d3b001x5kWq2K2oH3NWa","ordinal":0,"delta":"ok (5531 prompt tokens of 32768)"}}
+
+data: {"id":"evt_1c11b7d60001wosbjr9KgHMPCz","created":1794241166688,"type":"session.text.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","assistantMessageID":"msg_1c11b7d3b001x5kWq2K2oH3NWa","ordinal":0,"text":"ok (5531 prompt tokens of 32768)"},"durable":{"aggregateID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","seq":18,"version":1}}
+
+data: {"id":"evt_1c11b7d61001YGmyKyUOWdjwYZ","created":1794241166689,"type":"session.step.streamed","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","assistantMessageID":"msg_1c11b7d3b001x5kWq2K2oH3NWa"},"durable":{"aggregateID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","seq":19,"version":1}}
+
+data: {"id":"evt_1c11b7d62001rfsr2k3jRTpmcC","created":1794241166690,"type":"session.step.ended","location":{"directory":"/work/proj"},"data":{"sessionID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","assistantMessageID":"msg_1c11b7d3b001x5kWq2K2oH3NWa","finish":"stop","rawFinish":"stop","tokens":{"input":5531,"output":8,"reasoning":0,"cache":{"read":0,"write":0}},"cost":0},"durable":{"aggregateID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","seq":20,"version":1}}
+
+data: {"id":"evt_1c11b7d630014m0s9sLdL1vv8Y","created":1794241166691,"type":"session.usage.updated","data":{"sessionID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","cost":0,"tokens":{"input":11496,"output":35,"reasoning":0,"cache":{"read":0,"write":0}}}}
+
+data: {"id":"evt_1c11b7d64001AHJRzflkdflIvd","created":1794241166692,"type":"session.execution.succeeded","data":{"sessionID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3"},"durable":{"aggregateID":"ses_e3ee48eb2ffe8zIHyIkJFpOqw3","seq":21,"version":1}}
+

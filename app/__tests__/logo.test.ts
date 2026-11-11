@@ -91,13 +91,13 @@ describe('logo data', () => {
     every(LOGO.badger.tones, LOGO.badger.rows, inside);
     every(LOGO.eye.tones, LOGO.badger.rows, inside);
     for (const s of LOGO.word.slices) every(s.tones, LOGO.word.rows, inside);
-    every(LOGO.iconS.tones, LOGO.iconS.h, (x, _y, len) => {
-      expect(x + len).toBeLessThanOrEqual(LOGO.iconS.w);
+    every(LOGO.icon.tones, LOGO.icon.h, (x, _y, len) => {
+      expect(x + len).toBeLessThanOrEqual(LOGO.icon.w);
     });
   });
 
-  it('cuts the wordmark into 11 contiguous slices, each holding only its own columns', () => {
-    expect(LOGO.word.slices).toHaveLength(11);
+  it('cuts the wordmark into 12 contiguous slices (one per letter of supergalleon), each holding only its own columns', () => {
+    expect(LOGO.word.slices).toHaveLength(12);
     LOGO.word.slices.forEach((s, i) => {
       expect(s.x1).toBeGreaterThan(s.x0);
       if (i > 0) expect(s.x0).toBe(LOGO.word.slices[i - 1].x1);
@@ -110,7 +110,7 @@ describe('logo data', () => {
     });
   });
 
-  it('has an eye inside the badger', () => {
+  it('has glinting trim (the eye tones) inside the galleon', () => {
     expect(LOGO.eye.tones.length).toBeGreaterThan(0);
     expect(LOGO.eye.cx).toBeGreaterThan(0);
     expect(LOGO.eye.cx).toBeLessThan(LOGO.width);
@@ -118,11 +118,12 @@ describe('logo data', () => {
     expect(LOGO.eye.cy).toBeLessThan(LOGO.badger.rows);
   });
 
-  it('is the 14x21 blackletter S', () => {
-    expect(LOGO.iconS.w).toBeGreaterThanOrEqual(12);
-    expect(LOGO.iconS.w).toBeLessThanOrEqual(16);
-    expect(LOGO.iconS.h).toBeGreaterThanOrEqual(19);
-    expect(LOGO.iconS.h).toBeLessThanOrEqual(23);
+  it('is the whole galleon, cropped to its ink', () => {
+    // the galleon fills the picture's rows, so the icon is as tall as the picture
+    expect(LOGO.icon.h).toBe(LOGO.badger.rows);
+    expect(LOGO.icon.w).toBeGreaterThanOrEqual(36);
+    expect(LOGO.icon.w).toBeLessThanOrEqual(80);
+    expect(LOGO.icon.tones.length).toBeGreaterThan(3);
   });
 });
 
