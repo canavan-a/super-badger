@@ -350,7 +350,8 @@ export function StationDetailScreen({
 
       {queue.length > 0 && (
         <Text style={styles.queueBanner}>
-          ⏳ {queue.length} message{queue.length > 1 ? 's' : ''} queued — sending…
+          ⏳ {queue.length} message{queue.length > 1 ? 's' : ''}{' '}
+          {queue.every(m => m.sent) ? 'waiting for the agent' : 'queued — sending…'}
         </Text>
       )}
 
@@ -729,15 +730,19 @@ function ChatList({
             <View style={styles.queueList}>
               {queue.map(m => (
                 // Tap removes it from the queue — for every app on this
-                // station, since the queue lives on the server.
+                // station, since the queue lives on the server. Sent ones
+                // are opencode's already and can't be taken back.
                 <Pressable
                   key={m.id}
                   style={styles.queuedItem}
+                  disabled={m.sent}
                   onPress={() => onRemoveQueued(m.id)}
-                  accessibilityLabel="Remove queued message">
+                  accessibilityLabel={m.sent ? 'Sent message waiting for the agent' : 'Remove queued message'}>
                   <View style={styles.queuedBadge}>
                     <Text style={styles.queuedBadgeText}>
-                      {m.local ? '⏳ Waiting for connection' : '⏳ Queued'} · tap to remove
+                      {m.sent
+                        ? '⏳ Sent · waiting for the agent'
+                        : `${m.local ? '⏳ Waiting for connection' : '⏳ Queued'} · tap to remove`}
                     </Text>
                   </View>
                   <View style={[styles.bubble, styles.bubbleYou, styles.bubbleQueued]}>

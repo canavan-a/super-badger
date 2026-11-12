@@ -32,6 +32,10 @@ import (
 //	question.asked   {id, questions: [{key, question, header, options[{label,description}], multiple, custom}]}
 //	question.replied / question.rejected {id}
 //	resync           {} the server's opencode stream reconnected: rebuild from history
+//	inbox            {items: [{id, text}]} snapshot of the user's prompts opencode has
+//	                   taken but not yet handed to the agent (it does at the next step,
+//	                   which in a long thinking stretch can take a while); clients show
+//	                   them stacked as sent-and-waiting until they land in the transcript
 //
 // The server also sends its own flat messages on the same socket: notice
 // {text, clear_error?}, error {error}, queue {items}, session_reset,
@@ -70,6 +74,15 @@ type Event struct {
 	Patterns   []string        `json:"patterns,omitempty"`
 	Metadata   json.RawMessage `json:"metadata,omitempty"`
 	Questions  []Question      `json:"questions,omitempty"`
+
+	Items []InboxItem `json:"items,omitempty"`
+}
+
+// InboxItem is one prompt opencode holds for a busy session until the agent
+// reaches its next step (see the inbox event).
+type InboxItem struct {
+	ID   string `json:"id"`
+	Text string `json:"text"`
 }
 
 // Tokens is one step's usage. Ctx is what the context window holds after
@@ -234,8 +247,9 @@ type Translator struct {
 }
 
 type sessionState struct {
-	inbox     map[string]inboxItem // inbox ID -> prompt, until delivered
-	tools     map[string]*Event    // call ID -> latest tool part
+	inbox      map[string]inboxItem // inbox ID -> prompt, until delivered
+	inboxOrder []string             // inbox IDs, oldest first
+	tools    map[string]*Event    // call ID -> latest tool part
 	streaming map[string]*Event    // part ID -> text/reasoning part still streaming
 	lastStep  *Tokens
 	cost      float64
@@ -255,6 +269,37 @@ func (t *Translator) state(sid string) *sessionState {
 
 // Forget drops a session's state (deleted or replaced).
 func (t *Translator) Forget(sid string) { delete(t.sessions, sid) }
+
+// Inbox returns sid's inbox snapshot: the user's prompts opencode has taken
+// but not yet handed to the agent.
+func (t *Translator) Inbox(sid string) Event {
+	if s := t.sessions[sid]; s != nil {
+		return s.inboxEvent(sid)
+	}
+	return Event{Type: "inbox", SessionID: sid, Items: []InboxItem{}}
+}
+
+func (s *sessionState) dropInbox(id string) {
+	delete(s.inbox, id)
+	for i, v := range s.inboxOrder {
+		if v == id {
+			s.inboxOrder = append(s.inboxOrder[:i:i], s.inboxOrder[i+1:]...)
+			break
+		}
+	}
+}
+
+// inboxEvent is the session's inbox snapshot. Synthetic prompts (opencode's
+// own) are left out: only what the user typed is shown waiting.
+func (s *sessionState) inboxEvent(sid string) Event {
+	items := []InboxItem{}
+	for _, id := range s.inboxOrder {
+		if it, ok := s.inbox[id]; ok && !it.synthetic {
+			items = append(items, InboxItem{ID: id, Text: it.text})
+		}
+	}
+	return Event{Type: "inbox", SessionID: sid, Items: items}
+}
 
 // Streaming returns copies of sid's text/reasoning parts still streaming,
 // with the text so far.
@@ -377,22 +422,37 @@ func (t *Translator) Translate(env Envelope) []Event {
 	switch env.Type {
 	case "session.inbox.enqueued":
 		if d.Item.Type == "user" || d.Item.Type == "synthetic" {
+			if _, seen := s.inbox[d.InboxID]; !seen {
+				s.inboxOrder = append(s.inboxOrder, d.InboxID)
+			}
 			s.inbox[d.InboxID] = inboxItem{text: d.Item.Payload.Text, description: d.Item.Payload.Description, synthetic: d.Item.Type == "synthetic"}
+			if d.Item.Type == "user" {
+				return []Event{s.inboxEvent(sid)}
+			}
 		}
 	case "session.inbox.delivered":
 		item, ok := s.inbox[d.InboxID]
 		if !ok {
 			return nil
 		}
-		delete(s.inbox, d.InboxID)
+		s.dropInbox(d.InboxID)
 		m := Message{ID: d.InboxID, Type: "user", Text: item.text, Description: item.description}
 		if item.synthetic {
 			m.Type = "synthetic"
 		}
 		m.Time.Created = env.Created
-		return FromMessages(sid, []Message{m})
+		out := FromMessages(sid, []Message{m})
+		if !item.synthetic {
+			out = append(out, s.inboxEvent(sid))
+		}
+		return out
 	case "session.inbox.removed", "session.inbox.cancelled":
-		delete(s.inbox, d.InboxID)
+		if item, ok := s.inbox[d.InboxID]; ok {
+			s.dropInbox(d.InboxID)
+			if !item.synthetic {
+				return []Event{s.inboxEvent(sid)}
+			}
+		}
 
 	case "session.execution.started":
 		return []Event{ev(Event{Type: "status", Status: "busy"})}

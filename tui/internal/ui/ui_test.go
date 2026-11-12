@@ -1876,6 +1876,42 @@ func TestLongBashCommandsStayInsideTheFrame(t *testing.T) {
 	}
 }
 
+// Messages sent while the agent is busy sit in opencode's inbox until its
+// next step: they must show stacked as waiting (not vanish), ahead of the
+// server's queue, and a click must not pretend to remove them.
+func TestInboxFrameShowsSentMessagesWaiting(t *testing.T) {
+	_, c := busyChat(t)
+	if !c.applyQueueFrame([]byte(`{"type":"inbox","items":[{"id":"msg_a","text":"sent while thinking"},{"id":"msg_b","text":"and another"}]}`)) {
+		t.Fatal("inbox frame not recognised")
+	}
+	c.applyQueueFrame([]byte(`{"type":"queue","items":[{"id":7,"text":"still queued"}]}`))
+	view := ansi.ReplaceAllString(c.View(), "")
+	a, b, q := strings.Index(view, "sent while thinking"), strings.Index(view, "and another"), strings.Index(view, "still queued")
+	if a < 0 || b < 0 || q < 0 || !(a < b && b < q) {
+		t.Fatalf("want both sent messages stacked before the queued one:\n%s", view)
+	}
+	if !strings.Contains(view, "waiting for the agent") {
+		t.Fatalf("sent messages not labelled as waiting:\n%s", view)
+	}
+
+	var row int
+	for i, l := range strings.Split(view, "\n") {
+		if strings.Contains(l, "sent while thinking") {
+			row = i
+		}
+	}
+	c.Update(tea.MouseMsg{X: 5, Y: row, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	if len(c.allQueued()) != 3 {
+		t.Fatalf("clicking a sent message removed something: %+v", c.allQueued())
+	}
+
+	// Delivered: the next snapshot is empty and they're gone from the stack.
+	c.applyQueueFrame([]byte(`{"type":"inbox"}`))
+	if all := c.allQueued(); len(all) != 1 || all[0].text != "still queued" {
+		t.Fatalf("after delivery, queue = %+v", all)
+	}
+}
+
 func TestServerQueueFrameIsShownAndClickRemovesIt(t *testing.T) {
 	_, c := busyChat(t)
 	if !c.applyQueueFrame([]byte(`{"type":"queue","items":[{"id":7,"text":"first follow-up"},{"id":9,"text":"second follow-up"}]}`)) {

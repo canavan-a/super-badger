@@ -86,6 +86,10 @@ type queued struct {
 	id    uint
 	text  string
 	local bool
+	// sent ones opencode already holds for the agent's next step (between
+	// tool calls): shown waiting until they land in the transcript, and not
+	// removable.
+	sent bool
 }
 
 // queueRow is where one queued block sits in the transcript, in transcript
@@ -107,6 +111,7 @@ type chatModel struct {
 	state   *chat.State
 	pending []chat.Event // buffered until the next flush
 
+	inbox     []queued // sent, waiting for the agent; replaced by every "inbox" frame
 	queue     []queued // the server's, replaced by every "queue" frame
 	unsent    []queued // typed while disconnected
 	queueRows []queueRow
@@ -304,11 +309,14 @@ func (m *chatModel) Update(msg tea.Msg) tea.Cmd {
 			if !m.applyQueueFrame(msg.m.Frame) {
 				if e, err := chat.ParseEvent(msg.m.Frame); err == nil {
 					if e.Type == "resync" {
+						// The server's inbox tracking restarted with its stream.
+						m.inbox = nil
 						// The server's upstream stream reconnected and may
 						// have dropped events: rebuild from history.
 						return tea.Batch(m.waitFrame(), m.resync())
 					}
 					if e.Type == "session_reset" {
+						m.inbox = nil
 						// The station moved to a new session. Applied now with
 						// whatever is buffered (not at the next flush), so it
 						// can't land after — and wipe — the new session's
@@ -451,8 +459,32 @@ func (m *chatModel) flush() tea.Cmd {
 }
 
 // applyQueueFrame takes a {"type":"queue","items":[...]} snapshot of the
-// server's queue, reporting false for any other frame.
+// server's queue, or an {"type":"inbox"} one of what opencode holds for the
+// agent's next step, reporting false for any other frame.
 func (m *chatModel) applyQueueFrame(frame []byte) bool {
+	// The type first: queue items have numeric ids, inbox items string ones.
+	var head struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(frame, &head) != nil {
+		return false
+	}
+	if head.Type == "inbox" {
+		var in struct {
+			Items []struct {
+				Text string `json:"text"`
+			} `json:"items"`
+		}
+		if json.Unmarshal(frame, &in) != nil {
+			return false
+		}
+		m.inbox = m.inbox[:0]
+		for _, it := range in.Items {
+			m.inbox = append(m.inbox, queued{text: it.Text, sent: true})
+		}
+		m.dirty = true
+		return true
+	}
 	var f struct {
 		Type  string `json:"type"`
 		Items []struct {
@@ -460,7 +492,7 @@ func (m *chatModel) applyQueueFrame(frame []byte) bool {
 			Text string `json:"text"`
 		} `json:"items"`
 	}
-	if json.Unmarshal(frame, &f) != nil || f.Type != "queue" {
+	if head.Type != "queue" || json.Unmarshal(frame, &f) != nil {
 		return false
 	}
 	m.queue = m.queue[:0]
@@ -496,13 +528,19 @@ func (m *chatModel) sendUnsent() {
 
 // allQueued is everything shown as queued, in display order.
 func (m *chatModel) allQueued() []queued {
-	return append(append([]queued(nil), m.queue...), m.unsent...)
+	return append(append(append([]queued(nil), m.inbox...), m.queue...), m.unsent...)
 }
 
 // removeQueued drops allQueued()[i] — from the server's queue for every
 // client on this station, or from the local unsent list. Hidden right away;
 // the server's next snapshot confirms it (one already sent stays sent).
 func (m *chatModel) removeQueued(i int) {
+	if i < len(m.inbox) {
+		m.state.Notice = "already sent: the agent picks it up at its next step"
+		m.dirty = true
+		return
+	}
+	i -= len(m.inbox)
 	if i < len(m.queue) {
 		q := m.queue[i]
 		m.queue = append(m.queue[:i:i], m.queue[i+1:]...)
@@ -754,7 +792,7 @@ type resetDoneMsg struct {
 func (m *chatModel) afterReset(s api.Station) {
 	m.station = s
 	m.state = chat.New()
-	m.pending, m.queue, m.unsent = nil, nil, nil
+	m.pending, m.inbox, m.queue, m.unsent = nil, nil, nil, nil
 	m.histCursor, m.histMore, m.anchor = "", false, false
 	// An older page still in flight belongs to the old session.
 	m.histSeq++
@@ -1044,6 +1082,8 @@ func (m *chatModel) transcript() string {
 		label := "❯ you · queued · click to remove"
 		if q.local {
 			label = "❯ you · waiting for connection · click to remove"
+		} else if q.sent {
+			label = "❯ you · sent · waiting for the agent"
 		}
 		block := m.userBlockLabeled(label, q.text, wrap)
 		start := strings.Count(b.String(), "\n")

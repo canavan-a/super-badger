@@ -57,6 +57,10 @@ export interface QueuedMessage {
   id: string;
   text: string;
   local?: boolean;
+  // Already sent: opencode holds it for the agent's next step (between
+  // tool calls), which during a long thinking stretch can take a while.
+  // Shown waiting until it lands in the transcript; it can't be taken back.
+  sent?: boolean;
 }
 
 export function useStationChat(stationId: number) {
@@ -75,6 +79,9 @@ export function useStationChat(stationId: number) {
   // The server's queue, replaced wholesale by every {"type":"queue"}
   // snapshot it pushes.
   const [serverQueue, setServerQueue] = useState<QueuedMessage[]>([]);
+  // What opencode holds for the agent's next step, replaced by every
+  // {"type":"inbox"} snapshot.
+  const [inbox, setInbox] = useState<QueuedMessage[]>([]);
   // Typed while disconnected — in a ref too so the socket's onopen can hand
   // them over without depending on render timing.
   const unsentRef = useRef<QueuedMessage[]>([]);
@@ -266,6 +273,8 @@ export function useStationChat(stationId: number) {
         }
         lastEventAt.current = Date.now();
         if (msg.type === 'resync') {
+          // The server's inbox tracking restarted with its stream.
+          setInbox([]);
           // The server's own opencode stream reconnected, so this socket may
           // have missed events: the same rebuild a reconnect does, plus the
           // run state and gauge (their events may be among the missed).
@@ -275,6 +284,7 @@ export function useStationChat(stationId: number) {
           return;
         }
         if (msg.type === 'session_reset') {
+          setInbox([]);
           // The station moved to a new session. Applied now with whatever is
           // buffered (not at the next flush), so it can't land after — and
           // wipe — the new session's history fetched below. That history has
@@ -288,6 +298,12 @@ export function useStationChat(stationId: number) {
           resync(true);
           refreshRunStatus();
           refreshUsage();
+          return;
+        }
+        if (msg.type === 'inbox') {
+          setInbox(
+            (msg.items ?? []).map((m: {id: string; text: string}) => ({id: `inbox-${m.id}`, text: m.text, sent: true})),
+          );
           return;
         }
         if (msg.type === 'queue') {
@@ -372,6 +388,8 @@ export function useStationChat(stationId: number) {
   // queue is the server's. Removed from view right away; the server's next
   // snapshot confirms it (a message that was already sent just stays sent).
   const removeQueued = useCallback((id: string) => {
+    // Sent ones are opencode's already: the agent picks them up at its next step.
+    if (id.startsWith('inbox-')) return;
     if (unsentRef.current.some(m => m.id === id)) {
       setUnsentBoth(unsentRef.current.filter(m => m.id !== id));
       return;
@@ -430,6 +448,7 @@ export function useStationChat(stationId: number) {
     setHasMoreHistory(false);
     setUnsentBoth([]);
     setServerQueue([]);
+    setInbox([]);
     setState(emptyChatState);
   }, []);
 
@@ -441,7 +460,8 @@ export function useStationChat(stationId: number) {
     reconnectNowRef.current();
   }, []);
 
-  const queue = [...serverQueue, ...unsent];
+  // Oldest first: sent and waiting, then the server's queue, then unsent.
+  const queue = [...inbox, ...serverQueue, ...unsent];
 
   return {
     state,

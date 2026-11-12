@@ -183,6 +183,47 @@ func TestTranslateSteer(t *testing.T) {
 	}
 }
 
+// A prompt steered into a busy session shows as waiting (an inbox snapshot
+// holding it) from enqueue until delivery, and the inbox is empty after.
+func TestTranslateSteerInbox(t *testing.T) {
+	var snaps [][]string
+	for _, e := range ofType(replay(t, "steer"), "inbox") {
+		var texts []string
+		for _, it := range e.Items {
+			texts = append(texts, it.Text)
+		}
+		snaps = append(snaps, texts)
+	}
+	want := [][]string{{"SLOW SHELL first"}, nil, {"also this"}, nil}
+	if len(snaps) != len(want) {
+		t.Fatalf("inbox snapshots = %q", snaps)
+	}
+	for i := range want {
+		if strings.Join(snaps[i], "|") != strings.Join(want[i], "|") {
+			t.Fatalf("inbox snapshots = %q, want %q", snaps, want)
+		}
+	}
+}
+
+func TestTranslateInboxCancelled(t *testing.T) {
+	tr := NewTranslator()
+	send := func(typ, data string) []Event {
+		return tr.Translate(Envelope{Type: typ, Data: json.RawMessage(data)})
+	}
+	send("session.inbox.enqueued", `{"sessionID":"s","inboxID":"a","item":{"type":"user","payload":{"text":"one"}}}`)
+	send("session.inbox.enqueued", `{"sessionID":"s","inboxID":"b","item":{"type":"user","payload":{"text":"two"}}}`)
+	if evs := send("session.inbox.enqueued", `{"sessionID":"s","inboxID":"c","item":{"type":"synthetic","payload":{"text":"sys"}}}`); len(evs) != 0 {
+		t.Fatalf("synthetic prompt surfaced: %+v", evs)
+	}
+	evs := send("session.inbox.cancelled", `{"sessionID":"s","inboxID":"a"}`)
+	if len(evs) != 1 || len(evs[0].Items) != 1 || evs[0].Items[0].Text != "two" {
+		t.Fatalf("after cancel = %+v", evs)
+	}
+	if got := tr.Inbox("s"); len(got.Items) != 1 || got.Items[0].ID != "b" {
+		t.Fatalf("Inbox = %+v", got)
+	}
+}
+
 func TestTranslateAutoCompact(t *testing.T) {
 	evs := replay(t, "autocompact")
 	c := ofType(evs, "compaction")

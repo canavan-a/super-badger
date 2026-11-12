@@ -94,6 +94,13 @@ func (b *EventBroker) History(ctx context.Context, sessionID, cursor string, lim
 	return events, page.Next, hasMore, nil
 }
 
+// Inbox is sessionID's inbox snapshot (see the inbox event).
+func (b *EventBroker) Inbox(sessionID string) Event {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.tr.Inbox(sessionID)
+}
+
 // Usage is sessionID's current context usage: from the live stream when a
 // step has finished since super-badger started, else from stored messages.
 func (b *EventBroker) Usage(ctx context.Context, sessionID string) (*Event, error) {

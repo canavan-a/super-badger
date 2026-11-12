@@ -250,6 +250,12 @@ func stationWS(svc *station.Service, broker *opencode.EventBroker) gin.HandlerFu
 			default:
 			}
 		}
+		// And what opencode holds for the agent's next step: sent while it
+		// was busy, not in the transcript yet. Changes arrive as inbox events.
+		select {
+		case writes <- broker.Inbox(sessionID):
+		default:
+		}
 
 		for {
 			select {
