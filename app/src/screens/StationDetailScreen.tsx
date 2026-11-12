@@ -1153,6 +1153,21 @@ function MarkdownText({text, styles, theme}: {text: string; styles: Styles; them
 // truncation above, which this mirrors).
 const CODE_BLOCK_COLLAPSED_LINES = 12;
 
+// Spread onto the content *inside* a horizontal ScrollView that sits in the
+// assistant bubble. The bubble is a Pressable (long-press to select), so a
+// touch on the scroller's content otherwise bubbles up and makes the bubble
+// the JS responder — and on Android the JS responder's native view
+// intercepts every MOVE for its subtree (JSResponderHandler), cancelling the
+// child ScrollView. The swipe only worked when it beat the async responder
+// grant, i.e. barely. Claiming the responder here, below the ScrollView,
+// leaves the ScrollView free to intercept the horizontal drag (it's an
+// ancestor of this view, so it gets first pick), and the chat list above
+// still takes vertical drags the same way.
+const CLAIM_TOUCH = {
+  onStartShouldSetResponder: () => true,
+  onResponderTerminationRequest: () => true,
+} as const;
+
 const CodeBlockView = React.memo(function CodeBlockView({
   seg,
   styles,
@@ -1204,13 +1219,15 @@ const CodeBlockView = React.memo(function CodeBlockView({
           // by scrolling — use the copy button for the rest.
           nestedScrollEnabled
           directionalLockEnabled>
-          <Text style={styles.codeText}>
-            {seg.tokens.map((tok, j) => (
-              <Text key={j} style={codeTokenStyles[tok.type]}>
-                {tok.text}
-              </Text>
-            ))}
-          </Text>
+          <View {...CLAIM_TOUCH}>
+            <Text style={styles.codeText}>
+              {seg.tokens.map((tok, j) => (
+                <Text key={j} style={codeTokenStyles[tok.type]}>
+                  {tok.text}
+                </Text>
+              ))}
+            </Text>
+          </View>
         </ScrollView>
       </View>
       {showToggle && (
@@ -1252,12 +1269,11 @@ const TableView = React.memo(function TableView({
     <ScrollView
       horizontal
       showsHorizontalScrollIndicator={false}
-      // Same reasons as CodeBlockView's: without these Android hands the
-      // swipe to the chat's vertical FlatList instead.
       nestedScrollEnabled
       directionalLockEnabled
       style={styles.tableScroll}>
-      <View style={styles.table}>
+      {/* CLAIM_TOUCH is what actually lets this scroll — see its comment. */}
+      <View style={styles.table} {...CLAIM_TOUCH}>
         {renderRow(seg.header, true, 'h', seg.rows.length === 0)}
         {seg.rows.map((row, r) => renderRow(row, false, r, r === seg.rows.length - 1))}
       </View>
