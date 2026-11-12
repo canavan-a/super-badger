@@ -1205,10 +1205,22 @@ func (m *chatModel) renderText(text string, wrap lipgloss.Style) string {
 		}
 	}
 	tw := max(10, m.w-6)
-	for _, line := range strings.Split(text, "\n") {
+	lines := strings.Split(text, "\n")
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
 		if strings.HasPrefix(strings.TrimSpace(line), "```") {
 			flush()
 			inCode = !inCode
+			continue
+		}
+		// A table mid-stream stays plain text until its |---| separator
+		// line arrives, then becomes a grid (see table.go).
+		if !inCode && i+1 < len(lines) && isTableStart(line, lines[i+1]) {
+			flush()
+			var grid string
+			grid, i = m.parseTable(lines, i, tw)
+			out = append(out, grid)
+			i--
 			continue
 		}
 		if inCode {

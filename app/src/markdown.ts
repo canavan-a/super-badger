@@ -1,13 +1,20 @@
 // Markdown rendering for the chat transcript: fenced code blocks (with basic
-// syntax highlighting), inline code spans, bold/italic, headings, and simple
-// lists. Not a spec-complete markdown parser (no tables/blockquotes/nested
-// lists/links) — just enough that a typical LLM reply renders as an actual
-// document instead of raw markdown source or an undifferentiated wall of
-// text.
+// syntax highlighting), inline code spans, bold/italic, headings, simple
+// lists and GFM pipe tables. Not a spec-complete markdown parser (no
+// blockquotes/nested lists/links) — just enough that a typical LLM reply
+// renders as an actual document instead of raw markdown source or an
+// undifferentiated wall of text.
 //
-// Table detection (see table.ts, git history) was tried and pulled back out
-// — between the rendering bugs it caused and the extra per-line scanning
-// cost on every streaming re-parse, it wasn't worth what it added.
+// Tables: opencode passes the model's markdown through untouched, and every
+// table in real transcripts is the GFM pipe form —
+//   | Key | Range | Meaning |
+//   |---|---|---|            (sometimes |:-:| for alignment)
+//   | `x` | `[-1, 1]` | ... |
+// with outer pipes on every line. Detection is kept cheap because this runs
+// over the whole reply on every streaming flush: a line is only considered
+// as a table header if its first non-space char is '|', and only then is the
+// next line checked against the separator regex. A table mid-stream shows as
+// a plain paragraph until its separator line arrives, then flips to a grid.
 
 export interface CodeToken {
   type: 'plain' | 'keyword' | 'string' | 'comment' | 'number';
@@ -45,7 +52,18 @@ export interface ParagraphSegment {
   runs: InlineRun[];
 }
 
-export type MarkdownSegment = CodeBlockSegment | HeadingSegment | ListItemSegment | ParagraphSegment;
+export type TableAlign = 'left' | 'center' | 'right';
+
+export interface TableSegment {
+  kind: 'table';
+  align: TableAlign[];
+  header: InlineRun[][];
+  // Every row is padded/truncated to the header's column count, so the
+  // renderer can rely on rows[r].length === header.length.
+  rows: InlineRun[][][];
+}
+
+export type MarkdownSegment = CodeBlockSegment | HeadingSegment | ListItemSegment | ParagraphSegment | TableSegment;
 
 // Deliberately generic rather than per-language: this covers the common
 // keywords across JS/TS/Python/Go/Rust/Java/C-family well enough to make
@@ -122,6 +140,71 @@ function parseInline(text: string): InlineRun[] {
   return runs;
 }
 
+// Splits one table line into raw cell strings. Pipes inside `code spans`
+// and backslash-escaped \| don't split — LLMs routinely put things like
+// `a | b` in a code cell without escaping it.
+export function splitTableRow(line: string): string[] {
+  let s = line.trim();
+  if (s.startsWith('|')) s = s.slice(1);
+  if (s.endsWith('|') && !s.endsWith('\\|')) s = s.slice(0, -1);
+  const cells: string[] = [];
+  let cur = '';
+  let inCode = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === '\\' && s[i + 1] === '|') {
+      cur += '|';
+      i++;
+    } else if (ch === '`') {
+      inCode = !inCode;
+      cur += ch;
+    } else if (ch === '|' && !inCode) {
+      cells.push(cur.trim());
+      cur = '';
+    } else {
+      cur += ch;
+    }
+  }
+  cells.push(cur.trim());
+  return cells;
+}
+
+const TABLE_SEP_RE = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+
+function isTableStart(line: string, next: string | undefined): boolean {
+  // Cheap gate first: the only per-line cost for non-table text.
+  if (next === undefined || line.trimStart()[0] !== '|') return false;
+  return next.includes('|') && TABLE_SEP_RE.test(next);
+}
+
+function parseAlign(cell: string): TableAlign {
+  const l = cell.startsWith(':');
+  const r = cell.endsWith(':');
+  return l && r ? 'center' : r ? 'right' : 'left';
+}
+
+// Rough rendered width of a cell, in "average characters" — code is
+// monospace and a bit wider than the proportional body font.
+function runChars(runs: InlineRun[]): number {
+  let n = 0;
+  for (const run of runs) n += run.code ? run.value.length * 1.15 : run.value.length;
+  return n;
+}
+
+// Pixel width for each column, shared by every row so the grid lines up
+// like a spreadsheet. Sized to the column's widest cell, clamped so a very
+// long cell wraps inside a capped column instead of making one giant row.
+export function tableColumnWidths(
+  seg: TableSegment,
+  {charWidth = 7, padding = 16, min = 48, max = 240} = {},
+): number[] {
+  return seg.header.map((h, c) => {
+    let chars = runChars(h) * 1.08; // header is bold
+    for (const row of seg.rows) chars = Math.max(chars, runChars(row[c]));
+    return Math.round(Math.min(max, Math.max(min, chars * charWidth + padding)));
+  });
+}
+
 const FENCE_OPEN_RE = /^```(\S*)\s*$/;
 const FENCE_CLOSE_RE = /^```\s*$/;
 const HEADING_RE = /^(#{1,6})\s+(.*)$/;
@@ -156,6 +239,26 @@ export function parseMarkdown(text: string): MarkdownSegment[] {
       i++; // skip closing fence (or EOF if the block was never closed)
       const code = codeLines.join('\n');
       segments.push({kind: 'code-block', lang, code, tokens: highlightCode(code, lang)});
+      continue;
+    }
+
+    if (isTableStart(line, lines[i + 1])) {
+      flushPara();
+      const headerCells = splitTableRow(line);
+      const cols = headerCells.length;
+      const sepCells = splitTableRow(lines[i + 1]);
+      const align: TableAlign[] = [];
+      for (let c = 0; c < cols; c++) align.push(parseAlign(sepCells[c] ?? ''));
+      const rows: InlineRun[][][] = [];
+      i += 2;
+      while (i < lines.length && lines[i].trimStart()[0] === '|') {
+        const cells = splitTableRow(lines[i]);
+        const row: InlineRun[][] = [];
+        for (let c = 0; c < cols; c++) row.push(parseInline(cells[c] ?? ''));
+        rows.push(row);
+        i++;
+      }
+      segments.push({kind: 'table', align, header: headerCells.map(parseInline), rows});
       continue;
     }
 

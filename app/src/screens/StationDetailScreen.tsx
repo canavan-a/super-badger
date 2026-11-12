@@ -30,7 +30,7 @@ import {allTurns, ChatState, Part, PendingPermission, PendingQuestion, Turn, tur
 import {SailingSpinner} from '../components/SailingSpinner';
 import {Icon} from '../components/Icon';
 import {PixelField} from '../components/PixelField';
-import {CodeBlockSegment, parseMarkdown} from '../markdown';
+import {CodeBlockSegment, parseMarkdown, TableSegment, tableColumnWidths} from '../markdown';
 import {platformConfirm} from '../platformConfirm';
 import {Route} from '../routes';
 import {Theme, useTheme} from '../theme';
@@ -1117,6 +1117,8 @@ function MarkdownText({text, styles, theme}: {text: string; styles: Styles; them
         switch (seg.kind) {
           case 'code-block':
             return <CodeBlockView key={i} seg={seg} styles={styles} theme={theme} codeTokenStyles={codeTokenStyles} />;
+          case 'table':
+            return <TableView key={i} seg={seg} styles={styles} />;
           case 'heading':
             return (
               <Text key={i} style={[styles.assistantText, styles.heading, HEADING_STYLES[seg.level] ?? null]}>
@@ -1220,6 +1222,48 @@ const CodeBlockView = React.memo(function CodeBlockView({
   );
 });
 
+// A markdown table as a spreadsheet-style grid: bold header row on a tinted
+// band, hairline gridlines, and every column one fixed width shared by all
+// rows (see tableColumnWidths) so the cells line up. Long cells wrap inside
+// their capped column, and a table wider than the bubble scrolls sideways
+// the same way a code block does.
+const TableView = React.memo(function TableView({
+  seg,
+  styles,
+}: {
+  seg: TableSegment;
+  styles: Styles;
+}): React.JSX.Element {
+  const widths = useMemo(() => tableColumnWidths(seg), [seg]);
+  const renderRow = (cells: TableSegment['header'], header: boolean, key: number | string, last: boolean) => (
+    <View key={key} style={[styles.tableRow, header && styles.tableHeaderRow, last && styles.tableRowLast]}>
+      {cells.map((runs, c) => (
+        <View
+          key={c}
+          style={[styles.tableCell, {width: widths[c]}, c === cells.length - 1 && styles.tableCellLast]}>
+          <Text style={[styles.tableText, header && styles.boldText, {textAlign: seg.align[c]}]}>
+            <InlineRuns runs={runs} styles={styles} />
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      // Same reasons as CodeBlockView's: without these Android hands the
+      // swipe to the chat's vertical FlatList instead.
+      nestedScrollEnabled
+      directionalLockEnabled
+      style={styles.tableScroll}>
+      <View style={styles.table}>
+        {renderRow(seg.header, true, 'h', seg.rows.length === 0)}
+        {seg.rows.map((row, r) => renderRow(row, false, r, r === seg.rows.length - 1))}
+      </View>
+    </ScrollView>
+  );
+});
 
 function codeTokenStyleMap(theme: Theme): Record<string, object> {
   return {
@@ -1712,6 +1756,42 @@ function makeStyles(theme: Theme) {
     codeScrollExpanded: {
       maxHeight: 16 * 40,
       overflow: 'hidden',
+    },
+    tableScroll: {
+      flexGrow: 0,
+      marginVertical: 2,
+    },
+    table: {
+      borderWidth: 1,
+      borderColor: theme.codeBorder,
+      borderRadius: 6,
+      overflow: 'hidden',
+    },
+    tableRow: {
+      flexDirection: 'row',
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: theme.codeBorder,
+    },
+    tableRowLast: {
+      borderBottomWidth: 0,
+    },
+    tableHeaderRow: {
+      backgroundColor: theme.codeBg,
+      borderBottomWidth: 1,
+    },
+    tableCell: {
+      paddingHorizontal: 8,
+      paddingVertical: 5,
+      borderRightWidth: StyleSheet.hairlineWidth,
+      borderRightColor: theme.codeBorder,
+      justifyContent: 'center',
+    },
+    tableCellLast: {
+      borderRightWidth: 0,
+    },
+    tableText: {
+      fontSize: 13,
+      color: theme.bubbleAssistantText,
     },
     reasoningBox: {
       borderLeftWidth: 2,
