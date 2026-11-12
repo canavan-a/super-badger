@@ -442,7 +442,7 @@ func TestGalleonTrimIsFoundAndOnlyItGlints(t *testing.T) {
 			}
 		}
 	}
-	if eye < 3 || eye > 40 {
+	if eye < 3 || eye > 120 { // the gold rails and stern band; far below the ~900 picture cells
 		t.Fatalf("expected a small cluster of trim cells, found %d", eye)
 	}
 	if y0 < 0 || y1 >= splashGap {
@@ -1358,6 +1358,27 @@ func TestHomeAndEndStillScrollTheTranscriptOnAnEmptyBox(t *testing.T) {
 	a.key(tea.KeyMsg{Type: tea.KeyEnd})
 	if !c.vp.AtTop() {
 		t.Fatal("end with text in the box must not scroll the transcript")
+	}
+}
+
+func TestSplashPicksTheFullArtWhenItFitsAndTheCompactOneOtherwise(t *testing.T) {
+	if compactSplash.w > 80 || compactSplash.h > 24 {
+		t.Fatalf("compact art is %dx%d; it must fit 80x24", compactSplash.w, compactSplash.h)
+	}
+	if fullSplash.h <= compactSplash.h {
+		t.Fatalf("full art (%d rows) should be taller than the compact one (%d)", fullSplash.h, compactSplash.h)
+	}
+	a := testApp(80, 24)
+	if a.splashArt() != compactSplash {
+		t.Fatal("80x24 should get the compact art")
+	}
+	a = testApp(120, fullSplash.h+2)
+	if a.splashArt() != fullSplash {
+		t.Fatal("a tall terminal should get the full art")
+	}
+	a = testApp(40, 10)
+	if a.splashArt() != nil {
+		t.Fatal("a tiny terminal fits neither art")
 	}
 }
 

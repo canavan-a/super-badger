@@ -199,8 +199,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.splash && a.splashUntil.IsZero() {
 			a.splashUntil = time.Now().Add(splashGrace)
 		}
-		if a.splash && (a.w < splashW || a.h < splashH) {
-			a.splash = false // the art doesn't fit; don't gate on it
+		if a.splash && a.splashArt() == nil {
+			a.splash = false // neither art fits; don't gate on it
 		}
 		if a.chat != nil {
 			a.chat.resize(a.innerW(), a.contentHeight())
@@ -439,7 +439,7 @@ func (a *App) navigate(to string) tea.Cmd {
 		return tea.Quit
 	case "splash":
 		// Replay the title screen (handy for previewing a theme).
-		if a.w < splashW || a.h < splashH {
+		if a.splashArt() == nil {
 			a.toast, a.toastAt = "terminal too small for the title screen", time.Now()
 			return nil
 		}
@@ -700,14 +700,29 @@ func (a *App) frame(body, foot, hint string) string {
 // splashView centers the logo on the page background — no window around it —
 // and any key dismisses it. It doesn't depend on the server: it's shown first
 // even when the server is unconfigured or down.
+// splashArt picks the title art for the window: the full one when it fits,
+// else the compact one, else nil (too small for either).
+func (a *App) splashArt() *splashArtT {
+	for _, s := range []*splashArtT{fullSplash, compactSplash} {
+		if a.w >= s.w && a.h >= s.h {
+			return s
+		}
+	}
+	return nil
+}
+
 func (a *App) splashView() string {
-	pad := strings.Repeat(" ", max(0, (a.w-splashW)/2))
-	top := max(0, (a.h-splashH)/2)
+	art := a.splashArt()
+	if art == nil {
+		art = compactSplash
+	}
+	pad := strings.Repeat(" ", max(0, (a.w-art.w)/2))
+	top := max(0, (a.h-art.h)/2)
 	lines := make([]string, 0, a.h)
 	for i := 0; i < top; i++ {
 		lines = append(lines, "")
 	}
-	for _, l := range splashFor(a.st.T).frame(a.splashN) {
+	for _, l := range art.forTheme(a.st.T).frame(a.splashN) {
 		lines = append(lines, pad+l)
 	}
 	return a.st.Paint(strings.Join(lines, "\n"), a.w, a.h)

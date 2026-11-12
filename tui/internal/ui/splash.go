@@ -18,6 +18,12 @@ import (
 //go:embed splash.ans
 var splashArt string
 
+// splashCompactArt is the same title screen with a smaller galleon, for
+// terminals too short for the full one (it fits 80x24).
+//
+//go:embed splash_compact.ans
+var splashCompactArt string
+
 // One rendered cell: any number of SGR escapes followed by one rune.
 var (
 	splashCell = regexp.MustCompile(`((?:\x1b\[[0-9;]*m)*)(.)`)
@@ -26,19 +32,63 @@ var (
 
 const splashBG = "16;20;34" // the art's own page color (#101422)
 
+// splashArtT is one parsed variant of the title art.
+type splashArtT struct {
+	grid [][]splashCellT // parsed cells, frame removed, blank margins trimmed
+	rows []string        // the same, as static ANSI rows
+	w, h int             // size in cells
+	gap  int             // the blank row between the galleon and the wordmark
+	sets map[string]*splashSet
+}
+
+func newSplashArt(src string) *splashArtT {
+	a := &splashArtT{sets: map[string]*splashSet{}}
+	a.grid, a.w = buildSplash(src)
+	a.h = len(a.grid)
+	for _, row := range a.grid {
+		a.rows = append(a.rows, joinCells(row))
+	}
+	// The picture is laid out top to bottom as: the galleon, one blank gap
+	// row, the wordmark, and the "_" prompt row last. (Layout, not glyph type,
+	// tells them apart: both use the same sextant glyphs.)
+	a.gap = a.h
+	for y, row := range a.grid {
+		blank := true
+		for _, c := range row {
+			if !c.blankish {
+				blank = false
+				break
+			}
+		}
+		if blank {
+			a.gap = y
+			break
+		}
+	}
+	return a
+}
+
+// wordRow reports whether row y is part of the wordmark.
+func (a *splashArtT) wordRow(y int) bool { return y > a.gap && y < len(a.grid)-1 }
+
+// fullSplash is drawn wherever it fits; compactSplash is the fallback for
+// short terminals.
+var fullSplash, compactSplash *splashArtT
+
+// The full art's parts, under the names the rest of the package (and its
+// tests) use.
 var (
-	splashGrid [][]splashCellT // parsed cells, frame removed, blank margins trimmed
-	splashRows []string        // the same, as static ANSI rows
-	splashW    int             // width of each row in cells
+	splashGrid [][]splashCellT
+	splashRows []string
+	splashW    int
 	splashH    int
+	splashGap  int
 )
 
 func init() {
-	splashGrid, splashW = buildSplash(splashArt)
-	splashH = len(splashGrid)
-	for _, row := range splashGrid {
-		splashRows = append(splashRows, joinCells(row))
-	}
+	fullSplash, compactSplash = newSplashArt(splashArt), newSplashArt(splashCompactArt)
+	splashGrid, splashRows = fullSplash.grid, fullSplash.rows
+	splashW, splashH, splashGap = fullSplash.w, fullSplash.h, fullSplash.gap
 }
 
 type splashCellT struct {
@@ -200,45 +250,22 @@ func rowHasEye(row []splashCellT) bool {
 	return false
 }
 
-// The picture is laid out top to bottom as: the badger, one blank gap row,
-// the wordmark, and the "_" prompt row last. splashGap is that blank row.
-// (Layout, not glyph type, tells them apart: the badger now uses the same
-// sextant glyphs as the wordmark.)
-var splashGap int
+// splashWordRow reports whether row y of the full art is part of the wordmark.
+func splashWordRow(y int) bool { return fullSplash.wordRow(y) }
 
-func init() {
-	splashGap = len(splashGrid)
-	for y, row := range splashGrid {
-		blank := true
-		for _, c := range row {
-			if !c.blankish {
-				blank = false
-				break
-			}
-		}
-		if blank {
-			splashGap = y
-			break
-		}
-	}
-}
-
-// splashWordRow reports whether row y is part of the wordmark.
-func splashWordRow(y int) bool { return y > splashGap && y < len(splashGrid)-1 }
-
-// splashFrameRows renders frame n of the original (harbor) colors.
+// splashFrameRows renders frame n of the full art in the original (harbor) colors.
 func splashFrameRows(n int) []string { return splashFor(themes["harbor"]).frame(n) }
 
 // frame renders animation frame n: the wordmark with a diagonal glimmer
-// sweeping left to right, the eye's glint, and the "_" blinking.
+// sweeping left to right, the trim's glint, and the "_" blinking.
 func (set *splashSet) frame(n int) []string {
 	splashGrid, splashRows := set.grid, set.rows
-	pos := float64((n * glimmerStep) % (splashW + glimmerGap))
+	pos := float64((n * glimmerStep) % (set.art.w + glimmerGap))
 	on := (n/blinkFrames)%2 == 0
 	out := make([]string, len(splashGrid))
 	for y, row := range splashGrid {
 		last := y == len(splashGrid)-1
-		word := splashWordRow(y)
+		word := set.art.wordRow(y)
 		if !last && !word {
 			if rowHasEye(row) {
 				out[y] = eyeRow(row, y, pos, set.to)
