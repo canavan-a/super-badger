@@ -36,6 +36,10 @@ let
   # Merged by opencode over the opencode user's own config (OPENCODE_CONFIG_CONTENT).
   opencodeConfig = {
     compaction.keep.tokens = cfg.opencode.compaction.keepTokens;
+    # Nothing goes to opencode.ai: no session sharing, and no self-update
+    # (the module pins the opencode version).
+    share = "disabled";
+    update = "disable";
   } // lib.optionalAttrs cfg.opencode.plugin.enable {
     plugins = [{
       package = plugin;
@@ -355,6 +359,12 @@ in
       after = [ "network.target" ];
       path = agentPath;
       environment.OPENCODE_CONFIG_CONTENT = builtins.toJSON opencodeConfig;
+      # No update checks, no models.opencode.ai model list (declare providers
+      # and models in the opencode config instead), and no opencode-hosted
+      # free models.
+      environment.OPENCODE_DISABLE_AUTOUPDATE = "1";
+      environment.OPENCODE_DISABLE_MODELS_FETCH = "1";
+      environment.OPENCODE_DISABLE_FREE_MODELS = "1";
       environment.PATH = lib.mkIf cfg.opencode.inheritSystemPath (lib.mkForce (lib.concatStringsSep ":" [
         (lib.makeBinPath agentPath)
         "/run/wrappers/bin"
