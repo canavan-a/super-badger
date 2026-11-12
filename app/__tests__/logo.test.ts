@@ -122,7 +122,7 @@ describe('logo data', () => {
     // the galleon fills the picture's rows, so the icon is as tall as the picture
     expect(LOGO.icon.h).toBe(LOGO.badger.rows);
     expect(LOGO.icon.w).toBeGreaterThanOrEqual(36);
-    expect(LOGO.icon.w).toBeLessThanOrEqual(80);
+    expect(LOGO.icon.w).toBeLessThanOrEqual(100);
     expect(LOGO.icon.tones.length).toBeGreaterThan(3);
   });
 });

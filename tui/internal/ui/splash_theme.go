@@ -101,23 +101,26 @@ func remapColor(c vec, tr []vec, accent vec) vec {
 	return vec{baseTh[0] + w*acc[0], baseTh[1] + w*acc[1], baseTh[2] + w*acc[2]}
 }
 
-// splashSet is the title art recolored for one theme.
+// splashSet is one title art recolored for one theme.
 type splashSet struct {
+	art  *splashArtT
 	grid [][]splashCellT
 	rows []string // static ANSI rows of grid
 	to   string   // "r;g;b" the glimmer moves toward
 }
 
-var splashSets = map[string]*splashSet{}
+// splashFor returns (and caches) the full art for a theme.
+func splashFor(t Theme) *splashSet { return fullSplash.forTheme(t) }
 
-// splashFor returns (and caches) the art for a theme.
-func splashFor(t Theme) *splashSet {
-	if s, ok := splashSets[t.Name]; ok {
+// forTheme returns (and caches) this art recolored for a theme.
+func (a *splashArtT) forTheme(t Theme) *splashSet {
+	if s, ok := a.sets[t.Name]; ok {
 		return s
 	}
+	splashGrid := a.grid
 	var s *splashSet
 	if t.Name == "harbor" {
-		s = &splashSet{grid: splashGrid, rows: splashRows, to: "255;255;255"}
+		s = &splashSet{art: a, grid: a.grid, rows: a.rows, to: "255;255;255"}
 	} else {
 		tr, accent := themeRamp(t), hexVec(t.Accent)
 		remap := func(rgb string) string {
@@ -126,7 +129,7 @@ func splashFor(t Theme) *splashSet {
 			}
 			return rgb
 		}
-		s = &splashSet{to: "255;255;255"}
+		s = &splashSet{art: a, to: "255;255;255"}
 		if themeLight(t) {
 			s.to = "0;0;0" // strokes are dark on a light page: darken to make them pop
 		}
@@ -143,6 +146,6 @@ func splashFor(t Theme) *splashSet {
 			s.rows = append(s.rows, joinCells(out))
 		}
 	}
-	splashSets[t.Name] = s
+	a.sets[t.Name] = s
 	return s
 }

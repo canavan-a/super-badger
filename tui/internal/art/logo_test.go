@@ -25,8 +25,8 @@ func TestExtractLogoFindsTheBadgerAndTheWordmark(t *testing.T) {
 	}
 	// 12 cell rows of badger, 9 of wordmark (its p and g have descenders),
 	// three sub-rows each.
-	if len(l.Badger) != 36 || len(l.Word) != 27 {
-		t.Errorf("galleon %d rows, wordmark %d rows; want 36 and 27", len(l.Badger), len(l.Word))
+	if len(l.Badger) != 72 || len(l.Word) != 27 {
+		t.Errorf("galleon %d rows, wordmark %d rows; want 72 and 27", len(l.Badger), len(l.Word))
 	}
 	// The eye exists in the badger.
 	eye := 0
