@@ -4,7 +4,7 @@
 //
 //	go run ./tools/appart            # from tui/: writes into ../app
 //	go run ./tools/appart -preview /tmp/out   # also renders PNG previews
-//	go run ./tools/appart -image ../docs/supergalleon.png   # the README picture
+//	go run ./tools/appart -image ../docs/supergalleon-hero.png   # the README picture
 //
 // It writes:
 //

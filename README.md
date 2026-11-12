@@ -1,7 +1,7 @@
 # Super Galleon
 
 <p align="center">
-  <img src="docs/supergalleon.png" alt="Super Galleon: a pixel-art galleon above a blackletter wordmark" width="720">
+  <img src="docs/supergalleon-hero.png" alt="Super Galleon: a pixel-art galleon above a blackletter wordmark" width="720">
 </p>
 
 A self-hosted control plane for coding agents running on **your own models**.
