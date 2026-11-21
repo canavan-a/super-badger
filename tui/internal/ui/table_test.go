@@ -145,3 +145,21 @@ func TestNarrowTableBecomesRecords(t *testing.T) {
 		t.Log("\n" + wide)
 	}
 }
+
+func TestHeadingText(t *testing.T) {
+	for in, want := range map[string]string{
+		"## Title":         "Title",
+		"# **Bold** one #": "Bold one",
+		"###### six":       "six",
+		"#":                "",
+	} {
+		if got, ok := headingText(in); !ok || got != want {
+			t.Errorf("headingText(%q) = %q, %v; want %q", in, got, ok, want)
+		}
+	}
+	for _, in := range []string{"#tag", "####### seven", "plain", "a ## b"} {
+		if _, ok := headingText(in); ok {
+			t.Errorf("headingText(%q) matched", in)
+		}
+	}
+}

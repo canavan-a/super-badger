@@ -1,5 +1,5 @@
 {
-  description = "super-badger — opencode management server, dev shell + NixOS module";
+  description = "super-galleon (formerly super-badger) — opencode management server, dev shell + NixOS module";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-26.05";
@@ -111,7 +111,7 @@
           '';
 
           printHelp = ''
-            echo "super-badger dev shell"
+            echo "super-galleon (formerly super-badger) dev shell"
             echo "  run-opencode     # foreground: opencode serve on :${opencodePort}"
             echo "  run-superbadger  # foreground: superbadger with hot reload (air), pointed at opencode on :${opencodePort}"
             echo "  dev-up           # start opencode + superbadger together (headless, logs to file)"
@@ -192,11 +192,24 @@
             exec ${pkgs.go}/bin/go run ./cmd/superbadger "$@"
           '';
 
+          supergalleon-tui = pkgs.symlinkJoin {
+            name = "super-galleon";
+            paths = [ superbadger-tui ];
+            postBuild = "ln -s superbadger $out/bin/supergalleon";
+          };
+
           dev-help = pkgs.writeShellScriptBin "dev-help" printHelp;
         in
         {
-          packages.default = superbadger-tui;
+          # super-galleon is the project's new name. It provides the same
+          # terminal client under a `supergalleon` command as well as the
+          # original `superbadger` one. The super-badger names are kept as
+          # aliases so existing installs and flake references keep working.
+          packages.default = supergalleon-tui;
+          packages.super-galleon = supergalleon-tui;
+          packages.supergalleon = supergalleon-tui;
           packages.superbadger = superbadger-tui;
+          packages.super-badger = superbadger-tui;
           # The opencode super-badger is built and tested against; the NixOS
           # module's default services.superbadger.opencode.package.
           packages.opencode = opencode;
@@ -235,7 +248,15 @@
       # would justify carrying it (same tradeoff as horus-33's horus-server).
       # The NixOS module below builds superbadger from source in an
       # activation script instead.
-      nixosModules.default = import ./module.nix { inherit self; };
+      # Same module under the new and old names. Its options still live
+      # under services.superbadger for now.
+      nixosModules = rec {
+        default = import ./module.nix { inherit self; };
+        super-galleon = default;
+        supergalleon = default;
+        superbadger = default;
+        super-badger = default;
+      };
     in
     perSystem // { inherit nixosModules; };
 }

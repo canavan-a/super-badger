@@ -73,6 +73,16 @@ let
   '';
 in
 {
+  # The project is now super-galleon. services.supergalleon and
+  # services.super-galleon are full aliases of services.superbadger. Setting
+  # options under any of these names configures the same single service, so
+  # existing configs keep working unchanged.
+  imports = [
+    (lib.mkAliasOptionModule [ "services" "supergalleon" ] [ "services" "superbadger" ])
+    (lib.mkAliasOptionModule [ "services" "super-galleon" ] [ "services" "superbadger" ])
+    (lib.mkAliasOptionModule [ "services" "super-badger" ] [ "services" "superbadger" ])
+  ];
+
   options.services.superbadger = {
     enable = lib.mkEnableOption "superbadger opencode management server";
 

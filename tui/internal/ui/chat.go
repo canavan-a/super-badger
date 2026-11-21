@@ -1234,7 +1234,8 @@ func (m *chatModel) renderPart(p *chat.Part, wrap lipgloss.Style) string {
 }
 
 // renderText does just enough markdown for a terminal: fenced code blocks
-// get the theme's code background; everything else is wrapped plain text.
+// get the theme's code background, headings lose their #s and go bold in
+// the accent colour; everything else is wrapped plain text.
 func (m *chatModel) renderText(text string, wrap lipgloss.Style) string {
 	var out, plain []string
 	inCode := false
@@ -1263,6 +1264,13 @@ func (m *chatModel) renderText(text string, wrap lipgloss.Style) string {
 			i--
 			continue
 		}
+		if !inCode {
+			if h, ok := headingText(line); ok {
+				flush()
+				out = append(out, wrap.Render(m.st.Sel.Render(h)))
+				continue
+			}
+		}
 		if inCode {
 			l := truncate(" "+line, tw)
 			out = append(out, m.st.Code.Render(l+strings.Repeat(" ", max(0, tw-lipgloss.Width(l)))))
@@ -1272,6 +1280,21 @@ func (m *chatModel) renderText(text string, wrap lipgloss.Style) string {
 	}
 	flush()
 	return strings.Join(out, "\n")
+}
+
+// headingText returns an ATX heading's text ("## Title" -> "Title"), with
+// any closing #s and **bold** markers dropped. "#tag" (no space) isn't one.
+func headingText(line string) (string, bool) {
+	t := strings.TrimSpace(line)
+	n := 0
+	for n < len(t) && t[n] == '#' {
+		n++
+	}
+	if n == 0 || n > 6 || (n < len(t) && t[n] != ' ' && t[n] != '\t') {
+		return "", false
+	}
+	h := strings.TrimSpace(strings.TrimRight(strings.TrimSpace(t[n:]), "#"))
+	return cellText(h), true
 }
 
 func (m *chatModel) bottom() string {
