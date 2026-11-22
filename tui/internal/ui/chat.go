@@ -1235,7 +1235,8 @@ func (m *chatModel) renderPart(p *chat.Part, wrap lipgloss.Style) string {
 
 // renderText does just enough markdown for a terminal: fenced code blocks
 // get the theme's code background, headings lose their #s and go bold in
-// the accent colour; everything else is wrapped plain text.
+// the accent colour; everything else is wrapped text with its inline
+// `code`, **bold**, *italic* and ~~strike~~ styled (see inline.go).
 func (m *chatModel) renderText(text string, wrap lipgloss.Style) string {
 	var out, plain []string
 	inCode := false
@@ -1275,7 +1276,7 @@ func (m *chatModel) renderText(text string, wrap lipgloss.Style) string {
 			l := truncate(" "+line, tw)
 			out = append(out, m.st.Code.Render(l+strings.Repeat(" ", max(0, tw-lipgloss.Width(l)))))
 		} else {
-			plain = append(plain, line)
+			plain = append(plain, m.renderInline(line))
 		}
 	}
 	flush()
