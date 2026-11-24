@@ -1,4 +1,4 @@
-import {parseMarkdown, splitTableRow, tableColumnWidths, TableSegment} from '../src/markdown';
+import {parseMarkdown, splitTableRow, tableColumnWidths, TableSegment, ParagraphSegment} from '../src/markdown';
 
 const text = (runs: {value: string}[]) => runs.map(r => r.value).join('');
 
@@ -48,5 +48,30 @@ describe('markdown tables', () => {
     expect(w).toHaveLength(3);
     expect(w[1]).toBeGreaterThanOrEqual(48);
     expect(w[2]).toBe(240); // the long Meaning cell wraps in a capped column
+  });
+});
+
+describe('markdown links', () => {
+  const runsOf = (s: string) => (parseMarkdown(s)[0] as ParagraphSegment).runs;
+  const para = (s: string) => text(runsOf(s));
+  const hrefs = (s: string) => runsOf(s).filter(r => r.href).map(r => r.href);
+
+  it('shows [text](url) as "text (url)" with the URL tappable', () => {
+    expect(para('See [the docs](https://example.com/a_b_c) now.')).toBe('See the docs (https://example.com/a_b_c) now.');
+    expect(hrefs('See [the docs](https://example.com/a_b_c) now.')).toEqual(['https://example.com/a_b_c']);
+    expect(para('![logo](https://x.io/i.png "Logo")')).toBe('logo (https://x.io/i.png)');
+    expect(para('[wiki](https://en.wikipedia.org/wiki/Foo_(bar))')).toBe('wiki (https://en.wikipedia.org/wiki/Foo_(bar))');
+  });
+
+  it('shows just the URL when the label is empty or the URL itself', () => {
+    expect(para('[](https://x.io)')).toBe('https://x.io');
+    expect(para('[https://x.io](https://x.io)')).toBe('https://x.io');
+  });
+
+  it('makes bare URLs tappable and keeps emphasis markers inside them literal', () => {
+    const runs = runsOf('go to https://x.io/_a_/*b*. then');
+    expect(runs.some(r => r.italic)).toBe(false);
+    expect(text(runs)).toBe('go to https://x.io/_a_/*b*. then');
+    expect(hrefs('go to https://x.io/_a_/*b*. then')).toEqual(['https://x.io/_a_/*b*']);
   });
 });

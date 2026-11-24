@@ -1,7 +1,7 @@
 // Markdown rendering for the chat transcript: fenced code blocks (with basic
 // syntax highlighting), inline code spans, bold/italic, headings, simple
 // lists and GFM pipe tables. Not a spec-complete markdown parser (no
-// blockquotes/nested lists/links) — just enough that a typical LLM reply
+// blockquotes/nested lists; links show as "text (url)") — just enough that a typical LLM reply
 // renders as an actual document instead of raw markdown source or an
 // undifferentiated wall of text.
 //
@@ -33,6 +33,8 @@ export interface InlineRun {
   bold: boolean;
   italic: boolean;
   value: string;
+  // Set on URL runs; the renderer makes them tappable.
+  href?: string;
 }
 
 export interface HeadingSegment {
@@ -114,7 +116,14 @@ export function highlightCode(code: string, _lang: string): CodeToken[] {
   return tokens;
 }
 
-const INLINE_RE = /`([^`\n]+)`|\*\*([^*]+)\*\*|__([^_]+)__|\*([^*]+)\*|_([^_]+)_/g;
+// Links ([text](url), and ![alt](url) images) render as "text (url)" with
+// the URL as a tappable run: on a phone the full address is worth seeing,
+// and it stops the raw [..](..) source leaking into the transcript. Bare
+// URLs are matched too (tappable, and underscores/asterisks inside them
+// aren't read as emphasis). The URL group allows one level of balanced
+// parens (Wikipedia).
+const INLINE_RE =
+  /!?\[([^\]\n]*)\]\(((?:[^()\s]|\([^()\s]*\))+)(?:\s+"[^"\n]*")?\)|(https?:\/\/[^\s<>()[\]`]*[^\s<>()[\]`.,;:!?'"])|`([^`\n]+)`|\*\*([^*]+)\*\*|__([^_]+)__|\*([^*]+)\*|_([^_]+)_/g;
 
 function parseInline(text: string): InlineRun[] {
   const runs: InlineRun[] = [];
@@ -125,12 +134,24 @@ function parseInline(text: string): InlineRun[] {
     if (m.index > last) {
       runs.push({code: false, bold: false, italic: false, value: text.slice(last, m.index)});
     }
-    if (m[1] !== undefined) {
-      runs.push({code: true, bold: false, italic: false, value: m[1]});
-    } else if (m[2] !== undefined || m[3] !== undefined) {
-      runs.push({code: false, bold: true, italic: false, value: (m[2] ?? m[3])!});
+    if (m[2] !== undefined) {
+      const label = m[1].trim();
+      const url = m[2];
+      const link = {code: false, bold: false, italic: false, value: url, href: url};
+      if (label && label !== url) {
+        runs.push({code: false, bold: false, italic: false, value: `${label} (`}, link);
+        runs.push({code: false, bold: false, italic: false, value: ')'});
+      } else {
+        runs.push(link);
+      }
+    } else if (m[3] !== undefined) {
+      runs.push({code: false, bold: false, italic: false, value: m[3], href: m[3]});
+    } else if (m[4] !== undefined) {
+      runs.push({code: true, bold: false, italic: false, value: m[4]});
+    } else if (m[5] !== undefined || m[6] !== undefined) {
+      runs.push({code: false, bold: true, italic: false, value: (m[5] ?? m[6])!});
     } else {
-      runs.push({code: false, bold: false, italic: true, value: (m[4] ?? m[5])!});
+      runs.push({code: false, bold: false, italic: true, value: (m[7] ?? m[8])!});
     }
     last = m.index + m[0].length;
   }

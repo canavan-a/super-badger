@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Clipboard,
   FlatList,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -1088,16 +1089,28 @@ const InlineRuns = React.memo(function InlineRuns({
   runs,
   styles,
 }: {
-  runs: {code: boolean; bold: boolean; italic: boolean; value: string}[];
+  runs: {code: boolean; bold: boolean; italic: boolean; value: string; href?: string}[];
   styles: Styles;
 }): React.JSX.Element {
   return (
     <>
-      {runs.map((run, j) => (
-        <Text key={j} style={runStyle(run, styles)}>
-          {run.value}
-        </Text>
-      ))}
+      {runs.map((run, j) =>
+        run.href ? (
+          <Text
+            key={j}
+            style={[runStyle(run, styles), styles.linkText]}
+            accessibilityRole="link"
+            onPress={() => {
+              Linking.openURL(run.href!).catch(() => {});
+            }}>
+            {run.value}
+          </Text>
+        ) : (
+          <Text key={j} style={runStyle(run, styles)}>
+            {run.value}
+          </Text>
+        ),
+      )}
     </>
   );
 });
@@ -1707,6 +1720,10 @@ function makeStyles(theme: Theme) {
     },
     italicText: {
       fontStyle: 'italic',
+    },
+    linkText: {
+      color: theme.primary,
+      textDecorationLine: 'underline',
     },
     heading: {
       marginTop: 2,
